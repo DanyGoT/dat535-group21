@@ -137,9 +137,11 @@ python $GITHUB_WORKSPACE/run_pipeline.py all
 
 ## Checklist
 
-- [ ] dev GitHub Environment created (no protection rules)
-- [ ] prod GitHub Environment created (with required reviewer)
-- [ ] Workflow files exist at .github/workflows/dat535-dev.yml and dat535-prod.yml
+- [x] dev GitHub Environment created (no protection rules)
+- [x] prod GitHub Environment created (with required reviewer)
+  - Completed, but without protection rules (would require a public repository
+    because of account limitations)
+- [x] Workflow files exist at .github/workflows/dat535-dev.yml and dat535-prod.yml
 - [ ] Pushed to dev branch — pipeline succeeded
 - [ ] Opened PR, merged to main — prod pipeline ran with approval
 - [ ] Downloaded and opened artifacts in VSCode
