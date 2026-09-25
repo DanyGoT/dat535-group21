@@ -142,6 +142,6 @@ python $GITHUB_WORKSPACE/run_pipeline.py all
   - Completed, but without protection rules (would require a public repository
     because of account limitations)
 - [x] Workflow files exist at .github/workflows/dat535-dev.yml and dat535-prod.yml
-- [ ] Pushed to dev branch — pipeline succeeded
-- [ ] Opened PR, merged to main — prod pipeline ran with approval
-- [ ] Downloaded and opened artifacts in VSCode
+- [x] Pushed to dev branch — pipeline succeeded
+- [x] Opened PR, merged to main — prod pipeline ran with approval
+- [x] Downloaded and opened artifacts in VSCode (No can do. I dont have VSCode...)
