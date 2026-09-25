@@ -49,7 +49,7 @@ def run_lab3():
     logger.info("=" * 60)
     
     from lab3_pipeline import Lab3Pipeline
-    pipeline = Lab3Pipeline(base_dir=f"{OUTPUT_DIR}/lab2", shared_dir=f"{OUTPUT_DIR}/shared")
+    pipeline = Lab3Pipeline(base_dir=f"{OUTPUT_DIR}/lab3", shared_dir=f"{OUTPUT_DIR}/shared")
     return pipeline.run()
 
 
