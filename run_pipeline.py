@@ -16,6 +16,7 @@ import sys
 import argparse
 import logging
 import time
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+OUTPUT_DIR = os.environ.get("DAT535_OUTPUT_DIR", os.path.expanduser("~/spark-lab-data"))
 
 def run_lab2():
     """Run Lab 2: Spark Fundamentals & the Medallion Architecture."""
@@ -32,7 +34,7 @@ def run_lab2():
     logger.info("=" * 60)
     
     from lab2_pipeline import Lab2Pipeline
-    pipeline = Lab2Pipeline()
+    pipeline = Lab2Pipeline(base_dir=f"{OUTPUT_DIR}/lab2", shared_dir=f"{OUTPUT_DIR}/shared")
     return pipeline.run()
 
 
@@ -47,7 +49,7 @@ def run_lab3():
     logger.info("=" * 60)
     
     from lab3_pipeline import Lab3Pipeline
-    pipeline = Lab3Pipeline()
+    pipeline = Lab3Pipeline(base_dir=f"{OUTPUT_DIR}/lab2", shared_dir=f"{OUTPUT_DIR}/shared")
     return pipeline.run()
 
 
