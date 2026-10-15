@@ -22,11 +22,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Resolve output directory
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         id: output-dir
         # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
         run: echo "dir=$HOME/spark-lab-data/dev" >> "$GITHUB_OUTPUT"
 
       - name: Run Lab 2 & Lab 3 Pipelines
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         env:
           DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
         run: |
@@ -37,6 +39,7 @@ jobs:
           python $GITHUB_WORKSPACE/run_pipeline.py all
 
       - name: Upload Dev artifacts
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         uses: actions/upload-artifact@v7
         with:
           name: dev-outputs-${{ github.run_number }}

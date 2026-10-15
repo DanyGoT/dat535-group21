@@ -13,6 +13,7 @@ on:
 
 jobs:
   run-pipeline:
+    if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
     name: Run PySpark Pipeline
     runs-on: self-hosted
     

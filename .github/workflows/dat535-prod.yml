@@ -27,11 +27,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Resolve output directory
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         id: output-dir
         # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
         run: echo "dir=$HOME/spark-lab-data/prod" >> "$GITHUB_OUTPUT"
 
       - name: Run Production Pipeline
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         env:
           DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
         run: |
@@ -43,6 +45,7 @@ jobs:
           python $GITHUB_WORKSPACE/run_pipeline.py $LAB_TO_RUN
 
       - name: Upload Production artifacts
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         uses: actions/upload-artifact@v7
         with:
           name: prod-outputs-${{ github.run_number }}
@@ -51,6 +54,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Write pipeline summary
+        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         run: |
           echo "## Production Pipeline Run" >> $GITHUB_STEP_SUMMARY
           echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
