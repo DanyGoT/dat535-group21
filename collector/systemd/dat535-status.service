@@ -1,0 +1,11 @@
+[Unit]
+Description=DAT535 status page (read-only, status directory only)
+
+[Service]
+EnvironmentFile=%h/.config/dat535/collector.env
+ExecStart=/usr/bin/python3 %h/dat535-collector/serve_status.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=DAT535 Entur SIRI receiver
+After=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=10
+
+[Service]
+EnvironmentFile=%h/.config/dat535/collector.env
+Environment=RECEIVER_STATE_FILE=%t/dat535/receiver.json
+RuntimeDirectory=dat535
+ExecStart=/usr/bin/python3 %h/dat535-collector/receiver.py
+Restart=always
+# Each start subscribes to Entur; don't restart faster than this.
+RestartSec=60
+
+[Install]
+WantedBy=default.target
