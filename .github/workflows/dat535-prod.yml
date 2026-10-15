@@ -26,6 +26,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Test collector
+        run: python3 -m unittest discover -s collector/tests
+
+      - name: Deploy collector
+        # Copies collector/ to ~/dat535-collector and (re)starts the systemd user units.
+        # The receiver only restarts when its code changed.
+        run: collector/deploy.sh
+
       - name: Resolve output directory
         if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
         id: output-dir
