@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# Local runs of the collector with default paths
+/landing/
+/status/
+/run/
