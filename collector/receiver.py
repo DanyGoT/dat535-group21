@@ -4,7 +4,7 @@
 Holds SIRI 2.0 subscriptions (ET, SX) with Entur and appends every push, unchanged,
 as one JSON line to the hourly landing file:
 
-    <landing>/siri-<feed>/date=YYYY-MM-DD/hour=HH.jsonl.part  (renamed to .jsonl when the hour ends)
+    <landing>/siri-<feed>/date=YYYY-MM-DD/hour=HH.jsonl.part  (gzipped to .jsonl.gz when the hour ends)
 
 Dates and hours are UTC. Heartbeats are pushes too and are stored like everything else.
 No parsing, no filtering. Standard library only.
@@ -21,10 +21,13 @@ Environment:
     ENTUR_SUBSCRIBE_URL     default: https://api.entur.io/realtime/v1/subscribe
 """
 
+import gzip
 import json
 import logging
 import os
+import queue
 import re
+import shutil
 import signal
 import sys
 import threading
@@ -59,13 +62,20 @@ def iso(dt):
 
 
 class HourlyWriter:
-    """Appends lines to <root>/siri-<feed>/date=.../hour=HH.jsonl.part; renames on hour change."""
+    """Appends lines to <root>/siri-<feed>/date=.../hour=HH.jsonl.part.
+
+    When the hour ends the .part is closed and handed to a background thread, which
+    gzips it to hour=HH.jsonl.gz (via .gz.tmp, then an atomic rename) and removes the
+    .part. Compression never blocks incoming pushes.
+    """
 
     def __init__(self, root, feed):
         self.dir = Path(root) / f"siri-{feed}"
         self.lock = threading.Lock()
         self.key = None
         self.fh = None
+        self.pending = queue.Queue()
+        threading.Thread(target=self._compressor, daemon=True).start()
         self.finalize_stale(utcnow())
 
     def _part(self, key):
@@ -83,25 +93,25 @@ class HourlyWriter:
         os.fsync(self.fh.fileno())
         self.fh.close()
         self.fh = None
-        self._finalize(self._part(self.key))
+        self.pending.put(self._part(self.key))
         self.key = None
 
-    @staticmethod
-    def _finalize(part):
-        final = part.with_name(part.name[: -len(".part")])
-        if final.exists():
-            # Never overwrite a closed file; leave the .part for a human to look at.
-            log.error("not finalizing %s: %s already exists", part, final.name)
-            return
-        os.rename(part, final)
-        log.info("closed %s", final)
+    def _compressor(self):
+        while True:
+            part = self.pending.get()
+            try:
+                finalize(part)
+            except Exception:
+                log.exception("finalizing %s failed; .part left in place", part)
+            finally:
+                self.pending.task_done()
 
     def finalize_stale(self, now):
-        """Close .part files from earlier hours, e.g. left behind by a crash."""
+        """Queue .part files from earlier hours, e.g. left behind by a restart or crash."""
         current = self._part(self._key(now))
         for part in sorted(self.dir.glob("date=*/hour=*.jsonl.part")):
             if part != current:
-                self._finalize(part)
+                self.pending.put(part)
 
     def rotate(self, now):
         with self.lock:
@@ -129,6 +139,44 @@ class HourlyWriter:
                 self.fh.close()
                 self.fh = None
                 self.key = None
+
+
+def same_content(part, gz):
+    with open(part, "rb") as a, gzip.open(gz, "rb") as b:
+        while True:
+            x, y = a.read(1 << 20), b.read(1 << 20)
+            if x != y:
+                return False
+            if not x:
+                return True
+
+
+def finalize(part):
+    """hour=HH.jsonl.part -> hour=HH.jsonl.gz. Never overwrites a closed file."""
+    base = part.with_name(part.name[: -len(".part")])
+    final = base.with_name(base.name + ".gz")
+    if base.exists():
+        # Closed uncompressed by an older version; leave the .part for a human to look at.
+        log.error("not finalizing %s: %s already exists", part, base.name)
+        return
+    if final.exists():
+        # Crash between rename and unlink: the .part is redundant only if identical.
+        if same_content(part, final):
+            part.unlink()
+            log.info("removed leftover %s (already in %s)", part, final.name)
+        else:
+            log.error("not finalizing %s: %s already exists", part, final.name)
+        return
+    tmp = final.with_name(final.name + ".tmp")
+    with open(part, "rb") as src, open(tmp, "wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
+            shutil.copyfileobj(src, gz, 1 << 20)
+        raw.flush()
+        os.fsync(raw.fileno())
+    os.rename(tmp, final)
+    size = part.stat().st_size
+    part.unlink()
+    log.info("closed %s (%d -> %d bytes)", final, size, final.stat().st_size)
 
 
 class Subscriptions:

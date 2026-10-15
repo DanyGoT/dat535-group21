@@ -3,6 +3,7 @@
 Run from the repo root:  python3 -m unittest discover -s collector/tests -v
 """
 
+import gzip
 import http.client
 import json
 import os
@@ -72,24 +73,43 @@ class WriterTest(unittest.TestCase):
             base = Path(d) / "siri-et" / "date=2026-10-15"
             self.assertTrue((base / "hour=10.jsonl.part").exists())
             w.rotate(at(11, 0))
-            self.assertEqual((base / "hour=10.jsonl").read_text(), "a\nb\n")
+            w.pending.join()
+            self.assertEqual(gzip.decompress((base / "hour=10.jsonl.gz").read_bytes()), b"a\nb\n")
             self.assertFalse((base / "hour=10.jsonl.part").exists())
+            self.assertEqual(sorted(p.name for p in base.iterdir()), ["hour=10.jsonl.gz"])
             w.append("c\n", at(11, 1))
             w.close()  # shutdown keeps .part
             self.assertTrue((base / "hour=11.jsonl.part").exists())
-            # Restart later: stale .part from an earlier hour gets closed
-            receiver.HourlyWriter.finalize_stale(receiver.HourlyWriter(d, "et"), at(12, 0))
-            self.assertEqual((base / "hour=11.jsonl").read_text(), "c\n")
+            # Restart later: stale .part from an earlier hour gets compressed
+            w2 = receiver.HourlyWriter(d, "et")
+            w2.finalize_stale(at(12, 0))
+            w2.pending.join()
+            self.assertEqual(gzip.decompress((base / "hour=11.jsonl.gz").read_bytes()), b"c\n")
+            self.assertFalse((base / "hour=11.jsonl.part").exists())
 
     def test_never_overwrites_closed_file(self):
         with tempfile.TemporaryDirectory() as d:
             base = Path(d) / "siri-et" / "date=2026-10-15"
             base.mkdir(parents=True)
-            (base / "hour=09.jsonl").write_text("old\n")
+            (base / "hour=08.jsonl").write_text("old\n")          # closed by an older version
+            (base / "hour=08.jsonl.part").write_text("new\n")
+            (base / "hour=09.jsonl.gz").write_bytes(gzip.compress(b"old\n"))
             (base / "hour=09.jsonl.part").write_text("new\n")
-            receiver.HourlyWriter(d, "et")
-            self.assertEqual((base / "hour=09.jsonl").read_text(), "old\n")
+            receiver.HourlyWriter(d, "et").pending.join()
+            self.assertEqual((base / "hour=08.jsonl").read_text(), "old\n")
+            self.assertTrue((base / "hour=08.jsonl.part").exists())
+            self.assertEqual(gzip.decompress((base / "hour=09.jsonl.gz").read_bytes()), b"old\n")
             self.assertTrue((base / "hour=09.jsonl.part").exists())
+
+    def test_leftover_part_after_crash(self):
+        # Crash after the .gz was renamed into place but before the .part was removed.
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d) / "siri-et" / "date=2026-10-15"
+            base.mkdir(parents=True)
+            (base / "hour=09.jsonl.gz").write_bytes(gzip.compress(b"same\n"))
+            (base / "hour=09.jsonl.part").write_text("same\n")
+            receiver.HourlyWriter(d, "et").pending.join()
+            self.assertEqual(sorted(p.name for p in base.iterdir()), ["hour=09.jsonl.gz"])
 
 
 class ReceiverHttpTest(unittest.TestCase):
