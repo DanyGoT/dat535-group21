@@ -221,7 +221,8 @@ class MonitorTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("has not grown", r.stdout)
         self.assertEqual(len(Recorder.requests), 1)
-        self.assertIn("FAIL", Recorder.requests[0][1]["Title"])
+        self.assertEqual(Recorder.requests[0][1]["Title"], "Collector FAIL")
+        self.assertEqual(Recorder.requests[0][2], "et: no new data since last check")
 
         self.state.unlink()  # receiver gone too: still FAIL, no second notification
         r = self.run_monitor()
@@ -235,7 +236,8 @@ class MonitorTest(unittest.TestCase):
         r = self.run_monitor()
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertEqual(len(Recorder.requests), 2)
-        self.assertIn("OK", Recorder.requests[1][1]["Title"])
+        self.assertEqual(Recorder.requests[1][1]["Title"], "Collector OK")
+        self.assertTrue(Recorder.requests[1][2].startswith("recovered after "))
 
         page = (self.tmp / "status" / "index.html").read_text()
         self.assertIn("DAT535 COLLECTOR", page)

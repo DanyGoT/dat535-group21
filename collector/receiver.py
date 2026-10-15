@@ -12,7 +12,7 @@ No parsing, no filtering. Standard library only.
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
     RECEIVER_BIND           listen address (default: 127.0.0.1)
-    RECEIVER_PORT           listen port (default: 8080)
+    RECEIVER_PORT           listen port (default: 8750)
     RECEIVER_PUBLIC_URL     base URL Entur can reach, e.g. https://collector.example.org
                             unset = receive only, never subscribe (local testing)
     RECEIVER_STATE_FILE     small JSON status file for the monitor (default: ./run/receiver.json)
@@ -341,7 +341,7 @@ def main():
                         format="%(asctime)s %(levelname)s %(message)s")
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
     bind = os.environ.get("RECEIVER_BIND", "127.0.0.1")
-    port = int(os.environ.get("RECEIVER_PORT", "8080"))
+    port = int(os.environ.get("RECEIVER_PORT", "8750"))
     feeds = [f.strip() for f in os.environ.get("RECEIVER_FEEDS", "et,sx").split(",") if f.strip()]
     state_file = Path(os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"))
     client_name = os.environ.get("ET_CLIENT_NAME", "uis-dat535group21-collector")

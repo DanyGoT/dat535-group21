@@ -6,7 +6,7 @@ GET/HEAD only (anything else gets 501), no directory listings, no dotfiles.
 Environment:
     MONITOR_STATUS_DIR   directory to serve (default: ./status)
     STATUS_BIND          default: 127.0.0.1
-    STATUS_PORT          default: 8081
+    STATUS_PORT          default: 8751
 """
 
 import os
@@ -44,7 +44,7 @@ def main():
     directory = Path(os.environ.get("MONITOR_STATUS_DIR", "status")).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     bind = os.environ.get("STATUS_BIND", "127.0.0.1")
-    port = int(os.environ.get("STATUS_PORT", "8081"))
+    port = int(os.environ.get("STATUS_PORT", "8751"))
     server = ThreadingHTTPServer((bind, port), partial(StatusHandler, directory=str(directory)))
     print(f"serving {directory} on {bind}:{port}", flush=True)
     server.serve_forever()

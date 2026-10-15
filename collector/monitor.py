@@ -14,6 +14,7 @@ Environment:
     MONITOR_DISK_MAX_PCT    landing volume usage limit in percent (default: 90)
     NTFY_TOPIC              ntfy topic; unset = no notifications. Long and random: it is the secret.
     NTFY_SERVER             default: https://ntfy.sh
+    STATUS_PUBLIC_URL       optional public address of the status page; tapping a notification opens it
 """
 
 import html
@@ -50,12 +51,15 @@ def check_receiver(state_file):
     try:
         state = json.loads(Path(state_file).read_text())
     except FileNotFoundError:
-        return {"ok": False, "reason": "receiver not running (no state file)"}, None
+        return {"ok": False, "reason": "receiver not running (no state file)",
+                "short": "receiver not running"}, None
     except (OSError, ValueError) as e:
-        return {"ok": False, "reason": f"receiver state unreadable: {e}"}, None
+        return {"ok": False, "reason": f"receiver state unreadable: {e}",
+                "short": "receiver state unreadable"}, None
     if not pid_alive(int(state.get("pid", 0))):
-        return {"ok": False, "reason": f"receiver pid {state.get('pid')} not alive"}, state
-    return {"ok": True, "reason": None}, state
+        return {"ok": False, "reason": f"receiver pid {state.get('pid')} not alive",
+                "short": "receiver not running"}, state
+    return {"ok": True, "reason": None, "short": None}, state
 
 
 def current_part(landing, feed):
@@ -66,24 +70,28 @@ def current_part(landing, feed):
 def check_feed(landing, feed, prev, now, max_age_min):
     part = current_part(landing, feed)
     if part is None:
-        return {"ok": False, "reason": f"{feed}: no .part file", "file": None, "size": None, "age_s": None}
+        return {"ok": False, "reason": f"{feed}: no .part file", "short": f"{feed}: no data yet",
+                "file": None, "size": None, "age_s": None}
     st = part.stat()
     rel = f"{part.parent.name}/{part.name}"
     age = now.timestamp() - st.st_mtime
-    res = {"ok": True, "reason": None, "file": rel, "size": st.st_size, "age_s": round(age)}
+    res = {"ok": True, "reason": None, "short": None, "file": rel, "size": st.st_size, "age_s": round(age)}
     if age > max_age_min * 60:
-        res.update(ok=False, reason=f"{feed}: {rel} not modified for {fmt_age(age)}")
+        res.update(ok=False, reason=f"{feed}: {rel} not modified for {fmt_age(age)}",
+                   short=f"{feed}: no new data for {fmt_age(age)}")
     elif prev and prev.get("file") == rel and prev.get("size") is not None and st.st_size <= prev["size"]:
-        res.update(ok=False, reason=f"{feed}: {rel} has not grown since last check")
+        res.update(ok=False, reason=f"{feed}: {rel} has not grown since last check",
+                   short=f"{feed}: no new data since last check")
     return res
 
 
 def check_disk(landing, max_pct):
     u = shutil.disk_usage(landing)
     pct = 100 * u.used / u.total
-    res = {"ok": pct < max_pct, "reason": None, "used_pct": round(pct, 1), "free_bytes": u.free}
+    res = {"ok": pct < max_pct, "reason": None, "short": None, "used_pct": round(pct, 1), "free_bytes": u.free}
     if not res["ok"]:
         res["reason"] = f"disk {pct:.1f}% used (limit {max_pct}%)"
+        res["short"] = f"disk {pct:.0f}% full"
     return res
 
 
@@ -111,13 +119,14 @@ def parse_iso(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def notify(server, topic, ok, reason, host):
-    title = f"{TITLE} {'OK' if ok else 'FAIL'} · {host}"
-    body = "all checks passing" if ok else reason
-    req = urllib.request.Request(
-        f"{server.rstrip('/')}/{topic}", data=body.encode("utf-8"), method="POST",
-        headers={"Title": title, "Priority": "default" if ok else "high",
-                 "Tags": "white_check_mark" if ok else "rotating_light"})
+def notify(server, topic, ok, body, click_url):
+    headers = {"Title": f"Collector {'OK' if ok else 'FAIL'}",
+               "Priority": "default" if ok else "high",
+               "Tags": "white_check_mark" if ok else "rotating_light"}
+    if click_url:
+        headers["Click"] = click_url
+    req = urllib.request.Request(f"{server.rstrip('/')}/{topic}", data=body.encode("utf-8"),
+                                 method="POST", headers=headers)
     with urllib.request.urlopen(req, timeout=15) as resp:
         resp.read()
 
@@ -311,6 +320,7 @@ def main():
     disk_max = float(os.environ.get("MONITOR_DISK_MAX_PCT", "90"))
     topic = os.environ.get("NTFY_TOPIC")
     server = os.environ.get("NTFY_SERVER", "https://ntfy.sh")
+    click_url = os.environ.get("STATUS_PUBLIC_URL")
     host = socket.gethostname()
 
     status_dir.mkdir(parents=True, exist_ok=True)
@@ -338,7 +348,12 @@ def main():
     notified = prev.get("notified_ok", True)
     if topic and ok != notified:
         try:
-            notify(server, topic, ok, reason, host)
+            if ok:
+                start = parse_iso(prev.get("since")) if prev.get("ok") is False else None
+                body = f"recovered after {fmt_age((now - start).total_seconds())}" if start else "recovered"
+            else:
+                body = "\n".join(c["short"] for c in checks.values() if not c["ok"])
+            notify(server, topic, ok, body, click_url)
             notified = ok
         except (urllib.error.URLError, OSError) as e:
             print(f"notify failed: {e}", file=sys.stderr)
