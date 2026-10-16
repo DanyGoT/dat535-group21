@@ -95,7 +95,8 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
 
     Returns {"rows": n, "bad_rows": {status: n}}.
     """
-    from pyspark.sql.functions import col, input_file_name, lit, regexp_extract, sha2, when
+    from pyspark.sql.functions import (col, input_file_name, lit, octet_length, regexp_extract,
+                                       sha2, when)
     from pyspark.sql.types import StringType, StructField, StructType
 
     # Explicit schema: the line format is ours (written by the receiver), so no inference.
@@ -122,12 +123,13 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .withColumn("hour", regexp_extract(col("_source_file"), r"hour=(\d{2})\.jsonl", 1)) \
         .withColumn("feed", lit(feed)) \
         .withColumn("_payload_sha256", sha2(col("payload"), 256)) \
+        .withColumn("_payload_bytes", octet_length(col("payload"))) \
         .withColumn("_status", status) \
         .withColumn("_ingested_at", lit(ingested_at)) \
         .withColumn("_run_id", lit(rid)) \
         .withColumn("date", lit(str(day))) \
         .select("received_at", "endpoint", "payload", "feed", "hour", "_payload_sha256",
-                "_status", "_raw_line", "_source_file", "_ingested_at", "_run_id", "date")
+                "_payload_bytes", "_status", "_raw_line", "_source_file", "_ingested_at", "_run_id", "date")
 
     # No cache and no coalesce: a day of ET is ~200 GB of raw lines. Gzip is not splittable,
     # so Spark reads one task per hour file and writes about one Parquet file per hour.

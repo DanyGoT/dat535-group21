@@ -118,6 +118,7 @@ class IngestTest(LandingCase):
         self.assertTrue(all(r["payload"] == ET_XML for r in ok))   # payload unchanged
         self.assertEqual(sorted({r["hour"] for r in rows}), ["04", "05"])
         self.assertEqual(len({r["_payload_sha256"] for r in ok}), 1)
+        self.assertTrue(all(r["_payload_bytes"] == len(ET_XML.encode("utf-8")) for r in ok))
         corrupt = [r for r in rows if r["_status"] == "corrupt"]
         self.assertEqual(corrupt[0]["_raw_line"], "{not json")
         self.assertTrue(all(r["_source_file"].endswith((".jsonl", ".jsonl.gz")) for r in rows))
