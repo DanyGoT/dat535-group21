@@ -9,8 +9,14 @@ as one JSON line to the hourly landing file:
 Dates and hours are UTC. Heartbeats are pushes too and are stored like everything else.
 No parsing, no filtering. Standard library only.
 
+Push bodies are streamed to an anonymous spool file (never held in memory whole), checked
+to be complete UTF-8, and only then appended to the .part. The spool lives outside the
+landing tree so nothing but finished lines ever appears there.
+
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
+    RECEIVER_SPOOL_DIR      spool for pushes being received; same filesystem as the landing
+                            root, outside it (default: <landing>/../receiver-spool)
     RECEIVER_BIND           listen address (default: 127.0.0.1)
     RECEIVER_PORT           listen port (default: 8750)
     RECEIVER_PUBLIC_URL     base URL Entur can reach, e.g. https://collector.example.org
@@ -21,6 +27,7 @@ Environment:
     ENTUR_SUBSCRIBE_URL     default: https://api.entur.io/realtime/v1/subscribe
 """
 
+import codecs
 import gzip
 import json
 import logging
@@ -30,6 +37,7 @@ import re
 import shutil
 import signal
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -43,6 +51,9 @@ log = logging.getLogger("receiver")
 
 FEED_PATHS = {"/siri/et": "et", "/siri/sx": "sx"}
 MAX_BODY = 256 * 1024 * 1024        # refuse absurd bodies on a public endpoint
+BODY_CHUNK = 1 << 20                # pushes are streamed through memory this much at a time
+MAX_LINE = 8192                     # chunk-size and trailer lines
+SPOOL_PREFIX = "push-"
 ROTATE_CHECK_S = 10
 
 HEARTBEAT = timedelta(seconds=60)   # Entur clamps to 30-60 s
@@ -118,17 +129,30 @@ class HourlyWriter:
             if self.key is not None and self.key != self._key(now):
                 self._close()
 
+    def _file(self, now):
+        key = self._key(now)
+        if self.key != key:
+            self._close()
+            part = self._part(key)
+            part.parent.mkdir(parents=True, exist_ok=True)
+            self.fh = open(part, "ab")
+            self.key = key
+        return self.fh
+
     def append(self, line, now):
         with self.lock:
-            key = self._key(now)
-            if self.key != key:
-                self._close()
-                part = self._part(key)
-                part.parent.mkdir(parents=True, exist_ok=True)
-                self.fh = open(part, "a", encoding="utf-8")
-                self.key = key
-            self.fh.write(line)
-            self.fh.flush()
+            fh = self._file(now)
+            fh.write(line.encode("utf-8"))
+            fh.flush()
+
+    def append_spooled(self, head, spool, tail, now):
+        """Append head + the bytes of `spool` + tail as one line, streamed in chunks."""
+        with self.lock:
+            fh = self._file(now)
+            fh.write(head.encode("utf-8"))
+            shutil.copyfileobj(spool, fh, BODY_CHUNK)
+            fh.write(tail.encode("utf-8"))
+            fh.flush()
 
     def close(self):
         """Shutdown: flush and close, but keep .part (the hour may not be over)."""
@@ -313,12 +337,17 @@ def terminate_request(sub_id, client_name, now):
         "</TerminateSubscriptionRequest></Siri>")
 
 
+class Aborted(Exception):
+    """The client closed the connection before the whole body arrived."""
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "receiver"
     sys_version = ""
     protocol_version = "HTTP/1.1"
     writers = {}
     subs: "Subscriptions | None" = None
+    spool_dir = None                    # None = system temp dir (tests); main() sets it
 
     def log_message(self, format, *args):
         log.debug("%s %s", self.address_string(), format % args)
@@ -330,24 +359,64 @@ class Handler(BaseHTTPRequestHandler):
         if body and self.command != "HEAD":
             self.wfile.write(body)
 
-    def _read_body(self):
+    def _line(self, what, got):
+        line = self.rfile.readline(MAX_LINE)
+        if not line:
+            raise Aborted(f"connection closed before {what} ({got} body bytes received)")
+        if not line.endswith(b"\n"):
+            raise ValueError(f"{what} line too long")
+        return line
+
+    def _spool_body(self, spool):
+        """Stream the body (Content-Length or chunked) into `spool`, already escaped as the
+        inside of a JSON string, so the append is a plain copy.
+
+        Raises Aborted on EOF mid-body, ValueError (incl. UnicodeDecodeError) on a body
+        we refuse. Returns the body size in bytes.
+        """
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        got = 0
+
+        def take(n):
+            nonlocal got
+            while n:
+                data = self.rfile.read(min(n, BODY_CHUNK))
+                if not data:
+                    raise Aborted(f"connection closed mid-body ({got} body bytes received)")
+                got += len(data)
+                n -= len(data)
+                # json.dumps escapes per character, so escaping piecewise gives the same
+                # bytes as escaping the whole payload; the decoder holds back split sequences.
+                spool.write(json.dumps(decoder.decode(data), ensure_ascii=False)[1:-1]
+                            .encode("utf-8"))
+
         if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
-            parts, total = [], 0
             while True:
-                size = int(self.rfile.readline().split(b";")[0].strip(), 16)
+                line = self._line("chunk size", got)
+                size = line.split(b";")[0].strip()
+                if not re.fullmatch(rb"[0-9A-Fa-f]+", size):
+                    raise ValueError(f"bad chunk size line {line[:40]!r}")
+                size = int(size, 16)
                 if size == 0:
-                    while self.rfile.readline() not in (b"\r\n", b"\n", b""):
-                        pass  # trailers
-                    return b"".join(parts)
-                total += size
-                if total > MAX_BODY:
+                    break
+                if got + size > MAX_BODY:
                     raise ValueError("body too large")
-                parts.append(self.rfile.read(size))
-                self.rfile.readline()
-        length = int(self.headers.get("Content-Length", "0"))
-        if length > MAX_BODY:
-            raise ValueError("body too large")
-        return self.rfile.read(length)
+                take(size)
+                if self._line("end of chunk", got) not in (b"\r\n", b"\n"):
+                    raise ValueError("chunk data not followed by CRLF")
+            # Trailers up to the blank line. The body is complete already, so a client
+            # that closes here instead of sending the final CRLF still counts.
+            while self.rfile.readline(MAX_LINE) not in (b"\r\n", b"\n", b""):
+                pass
+        else:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 0:
+                raise ValueError("negative Content-Length")
+            if length > MAX_BODY:
+                raise ValueError("body too large")
+            take(length)
+        decoder.decode(b"", final=True)   # truncated UTF-8 sequence at the end
+        return got
 
     def do_HEAD(self):
         # Entur probes the address with HEAD before re-accepting a failed subscription.
@@ -361,16 +430,26 @@ class Handler(BaseHTTPRequestHandler):
         if feed is None or feed not in self.writers:
             self.close_connection = True
             return self._reply(404)
-        try:
-            payload = self._read_body().decode("utf-8")
-        except (ValueError, UnicodeDecodeError) as e:
-            log.error("bad push on %s: %s", self.path, e)
-            self.close_connection = True
-            return self._reply(400)
-        now = utcnow()
-        line = json.dumps({"received_at": iso(now), "endpoint": feed, "payload": payload},
-                          ensure_ascii=False) + "\n"
-        self.writers[feed].append(line, now)
+        with tempfile.TemporaryFile(dir=self.spool_dir, prefix=SPOOL_PREFIX) as spool:
+            try:
+                self._spool_body(spool)
+            except Aborted as e:
+                log.warning("aborted push on %s from %s (Transfer-Encoding=%s, "
+                            "Content-Length=%s): %s", self.path, self.client_address[0],
+                            self.headers.get("Transfer-Encoding"),
+                            self.headers.get("Content-Length"), e)
+                self.close_connection = True
+                return
+            except ValueError as e:
+                log.error("bad push on %s: %s", self.path, e)
+                self.close_connection = True
+                return self._reply(400)
+            now = utcnow()
+            # Same bytes as json.dumps({..., "payload": payload}, ensure_ascii=False) + "\n".
+            head = json.dumps({"received_at": iso(now), "endpoint": feed, "payload": ""},
+                              ensure_ascii=False)[:-2]
+            spool.seek(0)
+            self.writers[feed].append_spooled(head, spool, '"}\n', now)
         if self.subs:
             self.subs.touch(feed, now)
         self._reply(200)
@@ -388,6 +467,8 @@ def main():
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(message)s")
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
+    spool_dir = Path(os.environ.get("RECEIVER_SPOOL_DIR",
+                                    landing.absolute().parent / "receiver-spool"))
     bind = os.environ.get("RECEIVER_BIND", "127.0.0.1")
     port = int(os.environ.get("RECEIVER_PORT", "8750"))
     feeds = [f.strip() for f in os.environ.get("RECEIVER_FEEDS", "et,sx").split(",") if f.strip()]
@@ -398,6 +479,12 @@ def main():
         if f not in FEED_PATHS.values():
             sys.exit(f"unknown feed: {f}")
     state_file.parent.mkdir(parents=True, exist_ok=True)
+    spool_dir.mkdir(parents=True, exist_ok=True)
+    # Spool files are anonymous (O_TMPFILE) on Linux; named ones only exist where that is
+    # unsupported, and are left behind only by a crash.
+    for leftover in spool_dir.glob(SPOOL_PREFIX + "*"):
+        leftover.unlink()
+        log.info("removed leftover spool file %s", leftover)
 
     started_at = utcnow()
     Handler.writers = {f: HourlyWriter(landing, f) for f in feeds}
@@ -405,6 +492,7 @@ def main():
                          os.environ.get("ENTUR_SUBSCRIBE_URL",
                                         "https://api.entur.io/realtime/v1/subscribe"))
     Handler.subs = subs
+    Handler.spool_dir = spool_dir
     server = ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
     stop = threading.Event()
