@@ -77,8 +77,11 @@ def scan_day(landing, feed, day):
 
 def create_spark(app_name="DAT535-Bronze"):
     from pyspark.sql import SparkSession
+    # Local mode runs everything in the driver JVM; the 1g default is too small for
+    # payloads of up to ~15 MB per line across several parallel tasks.
     spark = SparkSession.builder \
         .appName(app_name) \
+        .config("spark.driver.memory", os.environ.get("SPARK_DRIVER_MEMORY", "4g")) \
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
         .config("spark.sql.parquet.compression.codec", "snappy") \
         .config("spark.sql.session.timeZone", "UTC") \
@@ -126,18 +129,17 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .select("received_at", "endpoint", "payload", "feed", "hour", "_payload_sha256",
                 "_status", "_raw_line", "_source_file", "_ingested_at", "_run_id", "date")
 
-    # Cache: the counts below and the write would otherwise each re-read and re-parse
-    # the gzip files (and Spark refuses queries on a raw JSON scan's corrupt column alone).
-    bronze = bronze.cache()
-    try:
-        counts = {r["_status"]: r["count"] for r in bronze.groupBy("_status").count().collect()}
-        # One file per day: the files are small and Silver reads whole days.
-        bronze.coalesce(1).write \
-            .mode("overwrite") \
-            .partitionBy("date") \
-            .parquet(str(Path(out_root) / f"siri-{feed}"))
-    finally:
-        bronze.unpersist()
+    # No cache and no coalesce: a day of ET is ~200 GB of raw lines. Gzip is not splittable,
+    # so Spark reads one task per hour file and writes about one Parquet file per hour.
+    target = Path(out_root) / f"siri-{feed}"
+    bronze.write \
+        .mode("overwrite") \
+        .partitionBy("date") \
+        .parquet(str(target))
+
+    # Count from the written Parquet: reads only the _status column instead of re-parsing.
+    written = spark.read.parquet(str(target / f"date={day}"))
+    counts = {r["_status"]: r["count"] for r in written.groupBy("_status").count().collect()}
     return {"rows": sum(counts.values()),
             "bad_rows": {k: v for k, v in counts.items() if k != "ok"}}
 

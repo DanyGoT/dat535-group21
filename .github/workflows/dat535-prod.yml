@@ -59,10 +59,13 @@ jobs:
 
       - name: Resolve directories
         id: dirs
-        # Landing is the collector's (read-only for Bronze); output is prod's own.
+        # Landing comes from the collector's env file, so both always agree (read-only for
+        # Bronze). Output goes next to it on the data volume, separate per environment.
         run: |
-          echo "landing=$HOME/dat535-data/landing" >> "$GITHUB_OUTPUT"
-          echo "output=$HOME/dat535-data/prod" >> "$GITHUB_OUTPUT"
+          landing=$(sed -n 's/^DAT535_LANDING_DIR=//p' ~/.config/dat535/collector.env)
+          if [ -z "$landing" ]; then echo "DAT535_LANDING_DIR not set in collector.env"; exit 1; fi
+          echo "landing=$landing" >> "$GITHUB_OUTPUT"
+          echo "output=$(dirname "$landing")/prod" >> "$GITHUB_OUTPUT"
 
       - name: Run Bronze
         env:
