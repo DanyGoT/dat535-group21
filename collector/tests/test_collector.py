@@ -272,5 +272,139 @@ class MonitorTest(unittest.TestCase):
         self.assertIn("not modified for", r.stdout)
 
 
+class ExporterTest(unittest.TestCase):
+    def test_metrics(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            et = d / "landing" / "siri-et"
+            (et / "date=2026-10-14").mkdir(parents=True)
+            (et / "date=2026-10-15").mkdir()
+            (et / "date=2026-10-14" / "hour=23.jsonl").write_bytes(b"x" * 10)        # closed before gzip
+            (et / "date=2026-10-15" / "hour=00.jsonl.gz").write_bytes(b"x" * 100)
+            (et / "date=2026-10-15" / "hour=01.jsonl.gz").write_bytes(b"x" * 200)
+            (et / "date=2026-10-15" / "hour=02.jsonl.gz.tmp").write_bytes(b"x" * 999)  # compressing
+            (et / "date=2026-10-15" / "hour=02.jsonl.part").write_bytes(b"x" * 999)
+            (et / "date=2026-10-15" / "hour=03.jsonl.part").write_bytes(b"x" * 50)
+            sx = d / "landing" / "siri-sx" / "date=2026-10-15"
+            sx.mkdir(parents=True)
+            (sx / "hour=01.jsonl.gz").write_bytes(b"x" * 7)
+            state = d / "receiver.json"
+            state.write_text(json.dumps({
+                "pid": os.getpid(), "started_at": "2026-10-15T00:00:00Z", "subscribing": True,
+                "feeds": {"et": {"last_push": "2026-10-15T03:00:00Z", "expires_at": "2026-10-22T00:00:00Z",
+                                 "last_error": None},
+                          "sx": {"last_push": None, "last_error": "rejected"}}}))
+            (d / "status").mkdir()
+            (d / "status" / "status.json").write_text(json.dumps({
+                "ok": False, "checked_at": "2026-10-15T03:00:00Z",
+                "checks": {"receiver": {"ok": True}, "disk": {"ok": False}}}))
+
+            import exporter
+            text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx"], str(d / "status")).collect()
+
+        m = {}
+        for line in text.splitlines():
+            if line and not line.startswith("#"):
+                key, value = line.rsplit(" ", 1)
+                m[key] = float(value)
+        self.assertEqual(m['dat535_landing_closed_bytes{feed="et"}'], 310)
+        self.assertEqual(m['dat535_landing_closed_files{feed="et"}'], 3)
+        self.assertEqual(m['dat535_landing_closed_bytes{feed="sx"}'], 7)
+        self.assertEqual(m['dat535_landing_open_bytes{feed="et"}'], 50)
+        self.assertEqual(m['dat535_landing_pending_parts{feed="et"}'], 1)
+        self.assertNotIn('dat535_landing_open_bytes{feed="sx"}', m)
+        self.assertEqual(m['dat535_landing_day_bytes{feed="et",date="2026-10-15"}'], 300)
+        self.assertEqual(m['dat535_landing_day_hours{feed="et",date="2026-10-15"}'], 2)
+        self.assertEqual(m['dat535_landing_day_hours{feed="et",date="2026-10-14"}'], 1)
+        self.assertEqual(m['dat535_landing_first_hour_timestamp_seconds{feed="et"}'],
+                         datetime(2026, 10, 14, 23, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(m["dat535_receiver_up"], 1)
+        self.assertEqual(m['dat535_subscription_last_push_timestamp_seconds{feed="et"}'],
+                         at(3, 0).timestamp())
+        self.assertNotIn('dat535_subscription_last_push_timestamp_seconds{feed="sx"}', m)
+        self.assertEqual(m['dat535_subscription_error{feed="sx"}'], 1)
+        self.assertEqual(m["dat535_monitor_ok"], 0)
+        self.assertEqual(m['dat535_monitor_check_ok{check="disk"}'], 0)
+        self.assertIn('dat535_filesystem_free_bytes{volume="landing"}', m)
+
+
+class FakeGrafana(BaseHTTPRequestHandler):
+    """Echoes method, path, body and a few headers back as JSON."""
+
+    def log_message(self, format, *args):
+        pass
+
+    def reply(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        out = json.dumps({"method": self.command, "path": self.path, "body": body.decode(),
+                          "host": self.headers["Host"], "xff": self.headers["X-Forwarded-For"],
+                          "connection": self.headers["Connection"]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(out)
+
+    do_GET = do_POST = do_HEAD = reply
+
+
+class StatusServerTest(unittest.TestCase):
+    def setUp(self):
+        import serve_status
+        from functools import partial
+        self.tmp = tempfile.TemporaryDirectory()
+        Path(self.tmp.name, "index.html").write_text("<p>main</p>")
+        Path(self.tmp.name, ".secret").write_text("no")
+        self.grafana = serve(FakeGrafana)
+        serve_status.StatusHandler.upstream = serve_status.urllib.parse.urlsplit(
+            f"http://127.0.0.1:{self.grafana.server_address[1]}")
+        self.srv = serve(partial(serve_status.StatusHandler, directory=self.tmp.name))
+        self.port = self.srv.server_address[1]
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.grafana.shutdown()
+        self.tmp.cleanup()
+
+    def request(self, method, path, body=None):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request(method, path, body=body)
+        r = c.getresponse()
+        data = r.read()
+        c.close()
+        return r, data
+
+    def test_static_page(self):
+        r, data = self.request("GET", "/")
+        self.assertEqual(r.status, 200)
+        self.assertEqual(data, b"<p>main</p>")
+        self.assertIn("frame-src 'self'", r.getheader("Content-Security-Policy"))
+        self.assertEqual(self.request("GET", "/.secret")[0].status, 404)
+        self.assertEqual(self.request("POST", "/", "x")[0].status, 501)
+        self.assertEqual(self.request("GET", "/grafanax")[0].status, 404)  # not proxied
+
+    def test_proxy(self):
+        r, data = self.request("GET", "/grafana/d/abc?orgId=1")
+        self.assertEqual(r.status, 200)
+        echo = json.loads(data)
+        self.assertEqual(echo["method"], "GET")
+        self.assertEqual(echo["path"], "/grafana/d/abc?orgId=1")
+        self.assertEqual(echo["host"], f"127.0.0.1:{self.port}")  # browser's Host, for Grafana's CSRF check
+        self.assertEqual(echo["xff"], "127.0.0.1")
+        self.assertIsNone(r.getheader("Content-Security-Policy"))  # Grafana's headers, not ours
+
+        r, data = self.request("POST", "/grafana/api/ds/query", '{"queries": []}')
+        self.assertEqual(json.loads(data)["body"], '{"queries": []}')
+
+        r, data = self.request("HEAD", "/grafana/")
+        self.assertEqual((r.status, data), (200, b""))
+
+    def test_grafana_down(self):
+        self.grafana.shutdown()
+        self.grafana.server_close()
+        self.assertEqual(self.request("GET", "/grafana/")[0].status, 502)
+
+
 if __name__ == "__main__":
     unittest.main()

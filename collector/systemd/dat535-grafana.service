@@ -1,0 +1,21 @@
+[Unit]
+Description=DAT535 Grafana (read-only dashboards, served at /grafana/ by the status page)
+After=dat535-prometheus.service
+
+[Service]
+StateDirectory=dat535/grafana
+Environment=GF_PATHS_DATA=%S/dat535/grafana
+Environment=GF_PATHS_LOGS=%S/dat535/grafana/log
+Environment=GF_PATHS_PLUGINS=%S/dat535/grafana/plugins
+Environment=GF_PATHS_PROVISIONING=%h/dat535-collector/observability/grafana/provisioning
+Environment=GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=%h/dat535-collector/observability/grafana/dashboards/collector.json
+Environment=DAT535_GRAFANA_DASHBOARDS=%h/dat535-collector/observability/grafana/dashboards
+WorkingDirectory=%h/dat535-tools/grafana
+ExecStart=%h/dat535-tools/grafana/bin/grafana server \
+    --homepath=%h/dat535-tools/grafana \
+    --config=%h/dat535-collector/observability/grafana/grafana.ini
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

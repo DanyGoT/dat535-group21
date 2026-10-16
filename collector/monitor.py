@@ -36,6 +36,13 @@ except Exception:
 
 TITLE = "DAT535 COLLECTOR"
 
+# Grafana panels embedded on the main page: (panel id in dashboards/collector.json, title, height px).
+# serve_status.py proxies /grafana/ to Grafana.
+DASHBOARD = "/grafana/d/dat535-collector/dat535-collector"
+PANELS = [(8, "ingest rate", 240), (9, "stored on disk", 240), (10, "per day", 300)]
+PANEL_URL = ("/grafana/d-solo/dat535-collector/dat535-collector?orgId=1&panelId={}"
+             "&from=now-24h&to=now&refresh=1m&hideLogo=true")
+
 
 def pid_alive(pid):
     try:
@@ -136,7 +143,7 @@ CSS_AND_HEAD = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Switchboard</title>
+<title>DAT535 Collector</title>
 <style>
 :root {
   --bg: #f2f1ec; --fg: #1b1b1a; --mute: #7a776f; --line: #d6d3ca;
@@ -197,6 +204,7 @@ pre { margin: 24px 0 0; font-size: 12px; line-height: 1.45; white-space: pre-wra
 .error { color: var(--fail); }
 .zoom { margin-left: auto; white-space: nowrap; }
 .zoom button { padding: 6px 10px; }
+.panel { display: block; width: 100%; border: 0; margin: 0 0 12px; background: transparent; }
 </style>
 <script>
 // Per-device page zoom; CSS zoom reflows the layout instead of panning.
@@ -209,7 +217,8 @@ function setZoom(v) {
   try { localStorage.setItem("zoom", z); } catch (e) {}
   document.getElementById("zl").textContent = Math.round(z * 100) + "%";
 }
-setTimeout(() => location.replace("/"), 15000);
+// Every monitor run (2 min); the embedded panels refresh themselves every minute.
+setTimeout(() => location.replace("/"), 120000);
 </script>
 </head><body><main>
 """
@@ -275,6 +284,15 @@ def render(status, host):
             if not c["ok"]:
                 out.append(f'    <span class="error">error</span><span>{e(c["reason"])}</span>\n')
         out.append("  </div>\n")
+
+    out.append(f'  <h2>LAST 24H · <a href="{DASHBOARD}">DASHBOARD</a></h2>\n')
+    for panel_id, title, height in PANELS:
+        out.append(f'  <iframe class="panel" title="{e(title)}" loading="lazy" style="height:{height}px"'
+                   f' data-src="{e(PANEL_URL.format(panel_id))}"></iframe>\n')
+    # Grafana's own theme follows the device, like the page colors.
+    out.append('  <script>var t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";\n'
+               '  document.querySelectorAll("iframe[data-src]").forEach(f => f.src = f.dataset.src + "&theme=" + t);'
+               '</script>\n')
 
     out.append('  <h2>SUBSCRIPTIONS</h2>\n  <div class="kv">\n')
     if not rs:

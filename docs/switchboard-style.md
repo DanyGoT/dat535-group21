@@ -8,9 +8,12 @@ Copy the CSS verbatim and follow the structure.
 
 ### Principles
 
-- Plain server-rendered HTML. No framework, no JS build, no external assets.
+- Plain server-rendered HTML. No framework, no JS build, no external assets (same-origin
+  Grafana panels in iframes are the one exception on the collector's main page).
 - Read-only. The only control is the client-side zoom.
-- The page refreshes itself (`setTimeout(() => location.replace("/"), 15000)`).
+- The page refreshes itself (`setTimeout(() => location.replace("/"), 15000)`). The
+  collector's main page uses 120000 (one monitor run) because it embeds Grafana panels,
+  which refresh themselves.
 - All monospace. Uppercase letter-spaced words for titles, section headings,
   state words and buttons. Everything else is lowercase/plain.
 - Color carries meaning only: green = ok/running, red = failed/destructive,

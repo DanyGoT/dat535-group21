@@ -1,0 +1,14 @@
+# Metrics history for the collector (dat535-prometheus.service). Listens on 127.0.0.1:8754
+# only; Grafana reads from it. The OTLP receiver is on (/api/v1/otlp/v1/metrics), so
+# OpenTelemetry or Spark jobs can push metrics later without another backend.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: dat535-collector
+    static_configs:
+      - targets: ["127.0.0.1:8752"]   # exporter.py (EXPORTER_PORT)
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:8754"]

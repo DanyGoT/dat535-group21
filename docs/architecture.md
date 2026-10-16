@@ -8,7 +8,8 @@ them into Medallion layers.
 Entur SIRI ET/SX ──push──▶ receiver ──append──▶ landing/ (raw, hourly JSONL)
 Entur NeTEx + NSR ─daily download──────────────▶ landing/ (raw zips)
                                                     │
-                     monitor (read-only) ◀──────────┤──▶ switchboard page + push notifications
+                     monitor (read-only) ◀──────────┤──▶ main page + push notifications
+                     exporter (read-only) ◀─────────┤──▶ Prometheus ──▶ Grafana (/grafana/)
                                                     ▼
                       Spark batch (GitHub Actions, scheduled): Bronze → Silver → Gold
 ```
@@ -43,14 +44,24 @@ Checks:
 
 Any failure → non-zero exit plus a one-line reason.
 
-### Switchboard
+### Main page and dashboards
 
-- The monitor writes a small status page (static HTML/JSON) to its own directory.
-  It is served read-only and can be viewed from a phone.
+- The monitor writes the main page (static HTML/JSON) to its own directory: the checks,
+  problems, a few embedded Grafana panels and subscription details. Viewable from a phone.
 - Push notifications are sent on **state change** only (OK→FAIL, FAIL→OK), not on every run.
-- Look and structure: `switchboard-style.md`.
-- May be exposed publicly via tunnel. It must expose only the status directory, never the
-  landing data, and have no controls.
+- Look and structure of the main page: `switchboard-style.md`.
+- The **exporter** turns the landing zone (file names and sizes only), the receiver state,
+  the monitor result and disk usage into Prometheus metrics. **Prometheus** scrapes it every
+  30 s and keeps a year of history. **Grafana** shows one dashboard (`DAT535 Collector`):
+  stored volume, ingest rate, freshness, per-day size and hour coverage, checks and disk.
+- Prometheus has its OTLP receiver on (`/api/v1/otlp/v1/metrics`, localhost only), so
+  OpenTelemetry instrumentation or the Spark layers can push metrics later into the same
+  store; add panels or dashboards next to `collector.json`.
+- Grafana is read-only: anonymous viewers, no login form, no admin user. The datasource and
+  dashboards are provisioned from the repo, so changes go through git.
+- One front server (`serve_status.py`) serves the main page at `/` and proxies `/grafana/`.
+  This is what a tunnel may expose: never the landing data, Prometheus or the exporter, and
+  no controls.
 
 ### Batch pipeline (Spark)
 
@@ -97,11 +108,18 @@ landing/
 
 - `receiver.py`: receiver + subscription keeper. Unset `RECEIVER_PUBLIC_URL` = receive only.
 - `monitor.py`: the four checks; writes `status/index.html` + `status.json`; ntfy on change.
-- `serve_status.py`: GET/HEAD-only server for the status directory; the tunnel points here.
+- `serve_status.py`: front server. GET/HEAD-only for the status directory; proxies `/grafana/`
+  to Grafana (GET/HEAD/POST, no websockets). The tunnel points here.
+- `exporter.py`: read-only `/metrics` for Prometheus.
+- `observability/`: Prometheus config, Grafana config, provisioning and dashboard JSON.
+- Ports, all bound to 127.0.0.1: receiver 8750, front server 8751, exporter 8752,
+  Grafana 8753, Prometheus 8754.
 - Tests: `python3 -m unittest discover -s collector/tests` (localhost only, never Entur).
 - Deploy: the prod workflow tests, then runs `collector/deploy.sh`, which copies the code to
-  `~/dat535-collector` on the VM and (re)starts systemd **user** units. The receiver restarts
-  only when its code changed. No repo clone on the VM; one-time setup in `collector/README.md`.
+  `~/dat535-collector` on the VM, installs pinned, checksum-verified Prometheus and Grafana
+  releases into `~/dat535-tools`, and (re)starts systemd **user** units. Each service restarts
+  only when its own files changed. Prometheus and Grafana data live in `~/.local/state/dat535/`.
+  No repo clone on the VM; one-time setup in `collector/README.md`.
 
 ## Decisions
 

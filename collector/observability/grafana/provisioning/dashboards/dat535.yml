@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: dat535
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      # Set by dat535-grafana.service.
+      path: ${DAT535_GRAFANA_DASHBOARDS}

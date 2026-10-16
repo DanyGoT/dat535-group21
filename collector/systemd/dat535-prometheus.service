@@ -1,0 +1,17 @@
+[Unit]
+Description=DAT535 Prometheus (metrics history, localhost only)
+
+[Service]
+StateDirectory=dat535/prometheus
+ExecStart=%h/dat535-tools/prometheus/prometheus \
+    --config.file=%h/dat535-collector/observability/prometheus.yml \
+    --storage.tsdb.path=%S/dat535/prometheus \
+    --storage.tsdb.retention.time=365d \
+    --storage.tsdb.retention.size=5GB \
+    --web.listen-address=127.0.0.1:8754 \
+    --web.enable-otlp-receiver
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
