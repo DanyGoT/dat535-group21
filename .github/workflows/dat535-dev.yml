@@ -24,28 +24,33 @@ jobs:
       - name: Test collector
         run: python3 -m unittest discover -s collector/tests
 
-      - name: Resolve output directory
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
-        id: output-dir
-        # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
-        run: echo "dir=$HOME/spark-lab-data/dev" >> "$GITHUB_OUTPUT"
+      - name: Test pipeline
+        run: |
+          source ~/spark-env/bin/activate
+          python -m unittest discover -s pipeline/tests -v
 
-      - name: Run Lab 2 & Lab 3 Pipelines
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
+      - name: Resolve directories
+        id: dirs
+        # Landing is the collector's (read-only for Bronze). Output is persistent and
+        # separate per environment, outside /tmp so it survives runner reboots.
+        run: |
+          echo "landing=$HOME/dat535-data/landing" >> "$GITHUB_OUTPUT"
+          echo "output=$HOME/dat535-data/dev" >> "$GITHUB_OUTPUT"
+
+      - name: Run Bronze (yesterday, UTC)
         env:
-          DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
         run: |
           source ~/spark-env/bin/activate
           mkdir -p "$DAT535_OUTPUT_DIR"
-          
-          echo "=== Running Dev Pipeline ==="
-          python $GITHUB_WORKSPACE/run_pipeline.py all
+          python pipeline/bronze.py
 
-      - name: Upload Dev artifacts
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
+      - name: Upload Bronze run records
+        # Only the small run records; the Parquet data stays on the VM.
         uses: actions/upload-artifact@v7
         with:
-          name: dev-outputs-${{ github.run_number }}
-          path: ${{ steps.output-dir.outputs.dir }}/
+          name: dev-bronze-runs-${{ github.run_number }}
+          path: ${{ steps.dirs.outputs.output }}/bronze/_runs/
           retention-days: 7
           if-no-files-found: ignore

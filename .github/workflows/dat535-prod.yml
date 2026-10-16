@@ -3,24 +3,28 @@ name: DAT535 — Production Pipeline
 on:
   push:
     branches: [main]
+  schedule:
+    # The morning after each UTC day: hour 23 closes at 00:00 and is gzipped right after.
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
-      lab:
-        description: Lab to run
-        required: true
-        default: all
-        type: choice
-        options: [all, lab2, lab3]
+      bronze_date:
+        description: UTC day to (re)run Bronze for, YYYY-MM-DD (empty = yesterday)
+        required: false
+        default: ''
+
+env:
+  DAT535_ENV: prod
+  SPARK_HOME: /opt/spark
+  JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
 
 jobs:
   deploy-prod:
     name: Deploy to Production
+    # Code changes only: needs manual approval through the `main` environment.
+    if: github.event_name == 'push'
     runs-on: self-hosted
     environment: main
-    env:
-      DAT535_ENV: prod
-      SPARK_HOME: /opt/spark
-      JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
 
     steps:
       - name: Checkout code
@@ -29,45 +33,67 @@ jobs:
       - name: Test collector
         run: python3 -m unittest discover -s collector/tests
 
+      - name: Test pipeline
+        run: |
+          source ~/spark-env/bin/activate
+          python -m unittest discover -s pipeline/tests -v
+
       - name: Deploy collector
         # Copies collector/ to ~/dat535-collector and (re)starts the systemd user units.
         # The receiver only restarts when its code changed.
         run: collector/deploy.sh
 
-      - name: Resolve output directory
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
-        id: output-dir
-        # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
-        run: echo "dir=$HOME/spark-lab-data/prod" >> "$GITHUB_OUTPUT"
+  bronze:
+    name: Bronze
+    # Daily schedule or manual rerun of one day. No approval: it runs code already on main
+    # and only writes its own output directory.
+    if: github.event_name != 'push'
+    runs-on: self-hosted
+    concurrency:
+      group: dat535-prod-bronze
+      cancel-in-progress: false
 
-      - name: Run Production Pipeline
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Resolve directories
+        id: dirs
+        # Landing is the collector's (read-only for Bronze); output is prod's own.
+        run: |
+          echo "landing=$HOME/dat535-data/landing" >> "$GITHUB_OUTPUT"
+          echo "output=$HOME/dat535-data/prod" >> "$GITHUB_OUTPUT"
+
+      - name: Run Bronze
         env:
-          DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+          BRONZE_DATE: ${{ github.event.inputs.bronze_date }}
         run: |
           source ~/spark-env/bin/activate
           mkdir -p "$DAT535_OUTPUT_DIR"
-          
-          LAB_TO_RUN="${{ github.event.inputs.lab || 'all' }}"
-          echo "=== Running Production Pipeline ($LAB_TO_RUN) ==="
-          python $GITHUB_WORKSPACE/run_pipeline.py $LAB_TO_RUN
+          python pipeline/bronze.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
 
-      - name: Upload Production artifacts
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
+      - name: Upload Bronze run records
+        # Only the small run records; the Parquet data stays on the VM.
         uses: actions/upload-artifact@v7
         with:
-          name: prod-outputs-${{ github.run_number }}
-          path: ${{ steps.output-dir.outputs.dir }}/
+          name: prod-bronze-runs-${{ github.run_number }}
+          path: ${{ steps.dirs.outputs.output }}/bronze/_runs/
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Write pipeline summary
-        if: false  # disabled until the Spark pipeline is rebuilt (run_pipeline.py moved to labs/)
+      - name: Write summary
+        if: always()
+        env:
+          OUT: ${{ steps.dirs.outputs.output }}
         run: |
-          echo "## Production Pipeline Run" >> $GITHUB_STEP_SUMMARY
-          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Run # | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Lab | ${{ github.event.inputs.lab || 'all' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "## Bronze run" >> "$GITHUB_STEP_SUMMARY"
+          latest=$(ls -t "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-*.json 2>/dev/null | head -1)
+          if [ -n "$latest" ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$latest" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No run record written." >> "$GITHUB_STEP_SUMMARY"
+          fi
