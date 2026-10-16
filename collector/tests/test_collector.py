@@ -87,6 +87,20 @@ class WriterTest(unittest.TestCase):
             self.assertEqual(gzip.decompress((base / "hour=11.jsonl.gz").read_bytes()), b"c\n")
             self.assertFalse((base / "hour=11.jsonl.part").exists())
 
+    def test_restart_within_hour_without_pushes(self):
+        # Restart mid-hour, then silence: the adopted .part must still close at hour end.
+        with tempfile.TemporaryDirectory() as d:
+            w = receiver.HourlyWriter(d, "et")
+            w.append("a\n", at(12, 10))
+            w.close()
+            base = Path(d) / "siri-et" / "date=2026-10-15"
+            w2 = receiver.HourlyWriter(d, "et")
+            w2.adopt_current(at(12, 37))
+            w2.rotate(at(13, 0))
+            w2.pending.join()
+            self.assertEqual(sorted(p.name for p in base.iterdir()), ["hour=12.jsonl.gz"])
+            self.assertEqual(gzip.decompress((base / "hour=12.jsonl.gz").read_bytes()), b"a\n")
+
     def test_never_overwrites_closed_file(self):
         with tempfile.TemporaryDirectory() as d:
             base = Path(d) / "siri-et" / "date=2026-10-15"

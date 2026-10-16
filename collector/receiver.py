@@ -87,7 +87,9 @@ class HourlyWriter:
         self.fh = None
         self.pending = queue.Queue()
         threading.Thread(target=self._compressor, daemon=True).start()
-        self.finalize_stale(utcnow())
+        now = utcnow()
+        self.finalize_stale(now)
+        self.adopt_current(now)
 
     def _part(self, key):
         date, hour = key
@@ -123,6 +125,13 @@ class HourlyWriter:
         for part in sorted(self.dir.glob("date=*/hour=*.jsonl.part")):
             if part != current:
                 self.pending.put(part)
+
+    def adopt_current(self, now):
+        """Take over this hour's .part left by a restart, so rotate() closes it when the hour
+        ends even if no push arrives before then."""
+        with self.lock:
+            if self._part(self._key(now)).exists():
+                self._file(now)
 
     def rotate(self, now):
         with self.lock:
