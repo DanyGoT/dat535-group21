@@ -1,0 +1,15 @@
+[Unit]
+Description=DAT535 Entur vehicle positions collector (experiment)
+After=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=10
+
+[Service]
+EnvironmentFile=%h/.config/dat535/collector.env
+ExecStart=/usr/bin/python3 %h/dat535-collector/vehicles.py
+Restart=always
+# Each start opens a new subscription and receives a full snapshot again.
+RestartSec=60
+
+[Install]
+WantedBy=default.target
