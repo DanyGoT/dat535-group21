@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print a few real messages from the landing zone, formatted for reading. Read-only.
+"""Real messages from the landing zone, parsed and formatted for reading. Read-only.
 
 Skips heartbeats and other protocol messages and shows the data itself:
 
@@ -14,6 +14,9 @@ shows different messages. A closed hour (.jsonl.gz) can only be read from the st
     python3 ~/dat535-collector/peek.py et
     python3 ~/dat535-collector/peek.py vehicles -n 3
     python3 ~/dat535-collector/peek.py sx --file /data/dat535/landing/siri-sx/date=2026-10-17/hour=12.jsonl.gz
+
+Also a library for notebooks/peek.ipynb: sample() returns parsed messages, flatten() turns an
+XML element into a dict for pandas.
 
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
@@ -33,52 +36,97 @@ from monitor import current_part, fmt_bytes
 SIRI_NS = "http://www.siri.org.uk/siri"
 # Per SIRI feed: the element that carries one unit of data.
 SIRI_ITEM = {"et": "EstimatedVehicleJourney", "sx": "PtSituationElement"}
-VEHICLES_PER_MESSAGE = 2
-MAX_TRIES = 200             # random reads before giving up (a feed of nothing but heartbeats)
+FEEDS = ["et", "sx", "vehicles"]
+VEHICLES_SHOWN = 2          # vehicles printed per message (a message holds up to 20)
+MAX_TRIES = 200             # random reads before falling back to reading from the start
 
 ET.register_namespace("", SIRI_NS)
 
 
-def format_siri(feed, payload):
-    """One data element of a SIRI push as indented XML plus a count, or None for a heartbeat."""
-    if "HeartbeatNotification" in payload[:2000]:
-        return None
-    items = list(ET.fromstring(payload).iter(f"{{{SIRI_NS}}}{SIRI_ITEM[feed]}"))
-    if not items:
-        return None
-    item = random.choice(items)
-    ET.indent(item)
-    text = ET.tostring(item, encoding="unicode").replace(f' xmlns="{SIRI_NS}"', "", 1)
-    return f"{SIRI_ITEM[feed]} 1 of {len(items)} in this push", text
+def parse_line(feed, line):
+    """One landing line as {"received_at", "payload_bytes", "items"}, or None if it holds no data.
 
-
-def format_vehicles(payload):
-    """A few vehicles of a subscription message as indented JSON, or None for anything else."""
-    msg = json.loads(payload)
-    vehicles = ((msg.get("payload") or {}).get("data") or {}).get("vehicles") or []
-    if msg.get("type") != "next" or not vehicles:
-        return None
-    shown = random.sample(vehicles, min(VEHICLES_PER_MESSAGE, len(vehicles)))
-    return (f"{len(shown)} of {len(vehicles)} vehicles in this message",
-            json.dumps(shown, indent=2, ensure_ascii=False))
-
-
-def format_line(feed, line):
-    """(header, body) for one landing line, or None if it is not data."""
+    items: the message's EstimatedVehicleJourney / PtSituationElement elements (et, sx) or
+    vehicle dicts (vehicles). Heartbeats, protocol messages and half-written lines give None.
+    """
     try:
         rec = json.loads(line)
         payload = rec["payload"]
-        formatted = format_vehicles(payload) if feed == "vehicles" else format_siri(feed, payload)
+        if feed == "vehicles":
+            msg = json.loads(payload)
+            items = ((msg.get("payload") or {}).get("data") or {}).get("vehicles") or []
+            if msg.get("type") != "next":
+                items = []
+        elif "HeartbeatNotification" in payload[:2000]:
+            items = []
+        else:
+            items = list(ET.fromstring(payload).iter(f"{{{SIRI_NS}}}{SIRI_ITEM[feed]}"))
     except (ValueError, KeyError, ET.ParseError):
         return None     # a line still being written at the end of a .part, or unparseable
-    if formatted is None:
+    if not items:
         return None
-    what, body = formatted
-    return f"{feed} · received {rec.get('received_at')} · {fmt_bytes(len(payload))} payload · {what}", body
+    return {"received_at": rec.get("received_at"), "payload_bytes": len(payload.encode("utf-8")),
+            "items": items}
 
 
-def sample_part(path, feed, n):
-    """Random lines of an uncompressed file: seek, skip to the next full line, keep data.
+def to_text(item):
+    """An item as readable text: indented XML without the namespace, or indented JSON."""
+    if isinstance(item, dict) or isinstance(item, list):
+        return json.dumps(item, indent=2, ensure_ascii=False)
+    item = ET.fromstring(ET.tostring(item))     # a copy, so indenting leaves the original alone
+    ET.indent(item)
+    return ET.tostring(item, encoding="unicode").replace(f' xmlns="{SIRI_NS}"', "", 1)
+
+
+def format_message(feed, msg):
+    """(header, body) for printing: one random SIRI item, or a few random vehicles."""
+    items = msg["items"]
+    if feed == "vehicles":
+        shown = random.sample(items, min(VEHICLES_SHOWN, len(items)))
+        what, body = f"{len(shown)} of {len(items)} vehicles in this message", to_text(shown)
+    else:
+        what, body = f"{SIRI_ITEM[feed]} 1 of {len(items)} in this push", to_text(random.choice(items))
+    return f"{feed} · received {msg['received_at']} · {fmt_bytes(msg['payload_bytes'])} payload · {what}", body
+
+
+def local(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def flatten(elem):
+    """An XML element's leaf values as a flat dict, keys as paths without the namespace
+    (e.g. "FramedVehicleJourneyRef/DatedVehicleJourneyRef"). Repeated children (calls) are
+    skipped; flatten each of them separately. Handy for pandas.DataFrame([...])."""
+    out = {}
+
+    def walk(e, prefix):
+        counts = {}
+        for c in e:
+            counts[c.tag] = counts.get(c.tag, 0) + 1
+        for c in e:
+            if counts[c.tag] > 1 and len(c):
+                continue
+            key = prefix + local(c.tag)
+            if len(c):
+                walk(c, key + "/")
+            elif key not in out:
+                out[key] = (c.text or "").strip()
+
+    walk(elem, "")
+    return out
+
+
+def calls(journey):
+    """The RecordedCall and EstimatedCall elements of an ET journey as flat dicts, in order."""
+    rows = []
+    for kind in ("RecordedCall", "EstimatedCall"):
+        for c in journey.iter(f"{{{SIRI_NS}}}{kind}"):
+            rows.append({"kind": kind, **flatten(c)})
+    return rows
+
+
+def _read_part(path, n, pick):
+    """Random lines of an uncompressed file: seek, skip to the next full line, keep picks.
     Falls back to reading from the start when data is rare (SX is mostly heartbeats)."""
     size = path.stat().st_size
     found, seen = [], set()
@@ -92,7 +140,7 @@ def sample_part(path, feed, n):
             line = fh.readline()
             if start not in seen and line.endswith(b"\n"):
                 seen.add(start)
-                out = format_line(feed, line.decode("utf-8"))
+                out = pick(line.decode("utf-8"))
                 if out:
                     found.append(out)
         fh.seek(0)
@@ -102,17 +150,17 @@ def sample_part(path, feed, n):
             if not line.endswith(b"\n"):
                 break
             if start not in seen:
-                out = format_line(feed, line.decode("utf-8"))
+                out = pick(line.decode("utf-8"))
                 if out:
                     found.append(out)
     return found
 
 
-def first_in_gz(path, feed, n):
+def _read_gz(path, n, pick):
     found = []
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         for line in fh:
-            out = format_line(feed, line)
+            out = pick(line)
             if out:
                 found.append(out)
                 if len(found) == n:
@@ -120,19 +168,38 @@ def first_in_gz(path, feed, n):
     return found
 
 
+def source(feed, path=None, landing=None):
+    """The file to read: `path`, else the feed's newest .part under `landing`."""
+    if path is not None:
+        return Path(path)
+    part = current_part(landing or os.environ.get("DAT535_LANDING_DIR", "landing"), feed)
+    if part is None:
+        raise FileNotFoundError(f"no open hour for {feed}; pass a file")
+    return part
+
+
+def sample(feed, n=2, path=None, landing=None):
+    """Up to n parsed data messages (see parse_line) from `path` or the hour being written."""
+    path = source(feed, path, landing)
+    read = _read_gz if path.name.endswith(".gz") else _read_part
+    return read(path, n, lambda line: parse_line(feed, line))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Print a few real messages from the landing zone.")
-    ap.add_argument("feed", choices=["et", "sx", "vehicles"])
+    ap.add_argument("feed", choices=FEEDS)
     ap.add_argument("-n", type=int, default=2, help="messages to show (default: 2)")
     ap.add_argument("--file", type=Path, help="landing file to read (default: the newest .part)")
     args = ap.parse_args()
 
-    path = args.file or current_part(os.environ.get("DAT535_LANDING_DIR", "landing"), args.feed)
-    if path is None:
-        sys.exit(f"no open hour for {args.feed}; pass --file")
-    found = (first_in_gz if path.name.endswith(".gz") else sample_part)(path, args.feed, args.n)
+    try:
+        path = source(args.feed, args.file)
+    except FileNotFoundError as e:
+        sys.exit(str(e))
+    found = sample(args.feed, args.n, path)
     print(f"# {path}\n")
-    for header, body in found:
+    for msg in found:
+        header, body = format_message(args.feed, msg)
         print(f"── {header}\n{body}\n")
     if len(found) < args.n:
         print(f"# only {len(found)} data message(s) found", file=sys.stderr)
