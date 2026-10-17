@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Read-only collection monitor.
 
-Checks the receiver and the landing zone, writes a static status page
+Checks the receiver and the landing zone (SIRI feeds and vehicle positions), writes a static status page
 (index.html + status.json) and sends an ntfy push on state change only (OK<->FAIL).
 Never writes to the landing zone. Exit code 1 plus a one-line reason on failure.
 
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
     RECEIVER_STATE_FILE     written by the receiver (default: ./run/receiver.json)
-    RECEIVER_FEEDS          feeds to check (default: et,sx)
+    MONITOR_FEEDS           feeds to check (default: the receiver's RECEIVER_FEEDS plus vehicles)
+    RECEIVER_FEEDS          the receiver's SIRI feeds (default: et,sx)
     MONITOR_STATUS_DIR      output directory, the only thing ever served (default: ./status)
     MONITOR_MAX_PART_AGE_MIN  .part must be modified within this many minutes (default: 5)
     MONITOR_DISK_MAX_PCT    landing volume usage limit in percent (default: 90)
@@ -69,8 +70,22 @@ def check_receiver(state_file):
     return {"ok": True, "reason": None, "short": None}, state
 
 
+VEHICLES = "vehicles"
+
+
+def feeds_from_env():
+    """Feeds to check or report: MONITOR_FEEDS, else the receiver's SIRI feeds plus vehicles."""
+    raw = os.environ.get("MONITOR_FEEDS") or os.environ.get("RECEIVER_FEEDS", "et,sx") + "," + VEHICLES
+    return [f.strip() for f in raw.split(",") if f.strip()]
+
+
+def landing_dir(feed):
+    """Landing directory of a feed: siri-<feed> from receiver.py, vehicles from vehicles.py."""
+    return VEHICLES if feed == VEHICLES else f"siri-{feed}"
+
+
 def current_part(landing, feed):
-    parts = sorted((Path(landing) / f"siri-{feed}").glob("date=*/hour=*.jsonl.part"))
+    parts = sorted((Path(landing) / landing_dir(feed)).glob("date=*/hour=*.jsonl.part"))
     return parts[-1] if parts else None
 
 
@@ -269,7 +284,7 @@ def render(status, host):
             continue
         feed = key[5:]
         nums = (f"{fmt_bytes(c['size'])} · {fmt_age(c['age_s'])} ago" if c["file"] else "")
-        out.append(row("RUNNING" if c["ok"] else "FAILED", c["ok"], f"siri-{feed}", nums,
+        out.append(row("RUNNING" if c["ok"] else "FAILED", c["ok"], landing_dir(feed), nums,
                        c["reason"] or c["file"]))
 
     d = checks["disk"]
@@ -332,7 +347,7 @@ def write_atomic(path, text):
 def main():
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
     state_file = os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json")
-    feeds = [f.strip() for f in os.environ.get("RECEIVER_FEEDS", "et,sx").split(",") if f.strip()]
+    feeds = feeds_from_env()
     status_dir = Path(os.environ.get("MONITOR_STATUS_DIR", "status"))
     max_age = float(os.environ.get("MONITOR_MAX_PART_AGE_MIN", "5"))
     disk_max = float(os.environ.get("MONITOR_DISK_MAX_PCT", "90"))

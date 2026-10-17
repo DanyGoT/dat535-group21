@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -231,6 +232,7 @@ class MonitorTest(unittest.TestCase):
         Recorder.requests = []
         Recorder.reply = b"{}"
         self.ntfy = serve(Recorder)
+        self.feeds = "et"
 
     def tearDown(self):
         self.ntfy.shutdown()
@@ -238,7 +240,7 @@ class MonitorTest(unittest.TestCase):
 
     def run_monitor(self):
         env = dict(os.environ, DAT535_LANDING_DIR=str(self.landing), RECEIVER_STATE_FILE=str(self.state),
-                   RECEIVER_FEEDS="et", MONITOR_STATUS_DIR=str(self.tmp / "status"),
+                   MONITOR_FEEDS=self.feeds, MONITOR_STATUS_DIR=str(self.tmp / "status"),
                    MONITOR_DISK_MAX_PCT="100", NTFY_TOPIC="topic",
                    NTFY_SERVER=f"http://127.0.0.1:{self.ntfy.server_address[1]}")
         return subprocess.run([sys.executable, str(COLLECTOR / "monitor.py")], env=env,
@@ -278,6 +280,30 @@ class MonitorTest(unittest.TestCase):
         self.assertNotIn("<form", page.lower())
         self.assertEqual(landing_before, sorted(p.relative_to(self.landing) for p in self.landing.rglob("*")))
 
+    def test_vehicles_feed(self):
+        now = datetime.now(timezone.utc)
+        part = self.landing / "vehicles" / f"date={now:%Y-%m-%d}" / f"hour={now:%H}.jsonl.part"
+        self.feeds = "et,vehicles"
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("vehicles: no .part file", r.stdout)
+        part.parent.mkdir(parents=True)
+        part.write_text("x\n")
+        self.part.write_text("x\ny\n")
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        status = json.loads((self.tmp / "status" / "status.json").read_text())
+        self.assertTrue(status["checks"]["feed:vehicles"]["ok"])
+        self.assertIn('<span class="name">vehicles</span>', (self.tmp / "status" / "index.html").read_text())
+
+    def test_default_feeds(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("MONITOR_FEEDS", "RECEIVER_FEEDS")}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            import monitor
+            self.assertEqual(monitor.feeds_from_env(), ["et", "sx", "vehicles"])
+            os.environ["RECEIVER_FEEDS"] = "et"
+            self.assertEqual(monitor.feeds_from_env(), ["et", "vehicles"])
+
     def test_stale_part(self):
         old = time.time() - 600
         os.utime(self.part, (old, old))
@@ -302,6 +328,10 @@ class ExporterTest(unittest.TestCase):
             sx = d / "landing" / "siri-sx" / "date=2026-10-15"
             sx.mkdir(parents=True)
             (sx / "hour=01.jsonl.gz").write_bytes(b"x" * 7)
+            veh = d / "landing" / "vehicles" / "date=2026-10-15"
+            veh.mkdir(parents=True)
+            (veh / "hour=01.jsonl.gz").write_bytes(b"x" * 11)
+            (veh / "hour=02.jsonl.part").write_bytes(b"x" * 5)
             state = d / "receiver.json"
             state.write_text(json.dumps({
                 "pid": os.getpid(), "started_at": "2026-10-15T00:00:00Z", "subscribing": True,
@@ -314,7 +344,8 @@ class ExporterTest(unittest.TestCase):
                 "checks": {"receiver": {"ok": True}, "disk": {"ok": False}}}))
 
             import exporter
-            text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx"], str(d / "status")).collect()
+            text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx", "vehicles"],
+                                      str(d / "status")).collect()
 
         m = {}
         for line in text.splitlines():
@@ -327,6 +358,8 @@ class ExporterTest(unittest.TestCase):
         self.assertEqual(m['dat535_landing_open_bytes{feed="et"}'], 50)
         self.assertEqual(m['dat535_landing_pending_parts{feed="et"}'], 1)
         self.assertNotIn('dat535_landing_open_bytes{feed="sx"}', m)
+        self.assertEqual(m['dat535_landing_closed_bytes{feed="vehicles"}'], 11)
+        self.assertEqual(m['dat535_landing_open_bytes{feed="vehicles"}'], 5)
         self.assertEqual(m['dat535_landing_day_bytes{feed="et",date="2026-10-15"}'], 300)
         self.assertEqual(m['dat535_landing_day_hours{feed="et",date="2026-10-15"}'], 2)
         self.assertEqual(m['dat535_landing_day_hours{feed="et",date="2026-10-14"}'], 1)
