@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entur vehicle positions collector (experiment).
+"""Entur vehicle positions collector.
 
 Holds one GraphQL subscription to all vehicles in Norway (Entur Vehicle Positions API v2,
 `graphql-transport-ws` over a websocket) and appends every message the server sends,

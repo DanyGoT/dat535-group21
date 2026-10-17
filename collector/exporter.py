@@ -9,7 +9,7 @@ Prometheus scrapes it, nothing else should.
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
     RECEIVER_STATE_FILE     written by the receiver (default: ./run/receiver.json)
-    RECEIVER_FEEDS          feeds to report (default: et,sx)
+    MONITOR_FEEDS           feeds to report (default: the receiver's RECEIVER_FEEDS plus vehicles)
     MONITOR_STATUS_DIR      where the monitor writes status.json (default: ./status)
     EXPORTER_BIND           default: 127.0.0.1
     EXPORTER_PORT           default: 8752
@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from monitor import parse_iso, pid_alive
+from monitor import feeds_from_env, landing_dir, parse_iso, pid_alive
 
 HOUR_FILE = re.compile(r"hour=(\d{2})\.jsonl(\.gz|\.part)?$")
 DATE_DIR = re.compile(r"date=(\d{4}-\d{2}-\d{2})$")
@@ -59,7 +59,7 @@ def hour_ts(date, hour):
 
 
 def collect_landing(landing, feed, out):
-    root = Path(landing) / f"siri-{feed}"
+    root = Path(landing) / landing_dir(feed)
     if not root.is_dir():
         return
     closed_bytes = closed_files = 0
@@ -219,10 +219,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    feeds = [f.strip() for f in os.environ.get("RECEIVER_FEEDS", "et,sx").split(",") if f.strip()]
     Handler.collector = Collector(os.environ.get("DAT535_LANDING_DIR", "landing"),
                                   os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"),
-                                  feeds, os.environ.get("MONITOR_STATUS_DIR", "status"))
+                                  feeds_from_env(), os.environ.get("MONITOR_STATUS_DIR", "status"))
     bind = os.environ.get("EXPORTER_BIND", "127.0.0.1")
     port = int(os.environ.get("EXPORTER_PORT", "8752"))
     server = ThreadingHTTPServer((bind, port), Handler)

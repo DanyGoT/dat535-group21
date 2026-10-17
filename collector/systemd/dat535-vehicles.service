@@ -1,5 +1,5 @@
 [Unit]
-Description=DAT535 Entur vehicle positions collector (experiment)
+Description=DAT535 Entur vehicle positions collector
 After=network-online.target
 StartLimitIntervalSec=1h
 StartLimitBurst=10
