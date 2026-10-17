@@ -8,6 +8,14 @@ StartLimitIntervalSec=0
 EnvironmentFile=%h/.config/dat535/collector.env
 # Key and pinned host key are created once by hand (collector/README.md). The tunnel user on
 # the public host may only listen on 127.0.0.1:8750 and :8751, nothing else.
+# A silently dead tunnel keeps holding the ports on the public host (sshd's ClientAlive
+# never fires while they see traffic). Logging in first runs the tunnel user's forced
+# command, which ends its older sessions; '-' = a failed kick never blocks the tunnel.
+ExecStartPre=-/usr/bin/ssh -n -F none \
+  -o BatchMode=yes -o ConnectTimeout=15 \
+  -o IdentitiesOnly=yes -i %h/.ssh/dat535-tunnel \
+  -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%h/.config/dat535/tunnel_known_hosts \
+  ${TUNNEL_TARGET}
 ExecStart=/usr/bin/ssh -N -F none \
   -o BatchMode=yes -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
