@@ -8,7 +8,8 @@ Skips heartbeats and other protocol messages and shows the data itself:
     vehicles  a few vehicles per message, as indented JSON
 
 By default it samples the hour being written (newest .part) at random offsets, so every run
-shows different messages. A closed hour (.jsonl.gz) can only be read from the start, so
+shows different messages; if it holds too little data (SX early in an hour), the last
+closed hours fill in. A closed hour (.jsonl.gz) can only be read from the start, so
 --file on one shows its first data messages instead.
 
     python3 ~/dat535-collector/peek.py et
@@ -31,7 +32,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from monitor import current_part, fmt_bytes
+from monitor import current_part, fmt_bytes, landing_dir
 
 SIRI_NS = "http://www.siri.org.uk/siri"
 # Per SIRI feed: the element that carries one unit of data.
@@ -39,6 +40,7 @@ SIRI_ITEM = {"et": "EstimatedVehicleJourney", "sx": "PtSituationElement"}
 FEEDS = ["et", "sx", "vehicles"]
 VEHICLES_SHOWN = 2          # vehicles printed per message (a message holds up to 20)
 MAX_TRIES = 200             # random reads before falling back to reading from the start
+RECENT_HOURS = 3            # closed hours to top up from when the open hour has too little
 
 ET.register_namespace("", SIRI_NS)
 
@@ -168,21 +170,22 @@ def _read_gz(path, n, pick):
     return found
 
 
-def source(feed, path=None, landing=None):
-    """The file to read: `path`, else the feed's newest .part under `landing`."""
-    if path is not None:
-        return Path(path)
-    part = current_part(landing or os.environ.get("DAT535_LANDING_DIR", "landing"), feed)
-    if part is None:
-        raise FileNotFoundError(f"no open hour for {feed}; pass a file")
-    return part
-
-
 def sample(feed, n=2, path=None, landing=None):
-    """Up to n parsed data messages (see parse_line) from `path` or the hour being written."""
-    path = source(feed, path, landing)
-    read = _read_gz if path.name.endswith(".gz") else _read_part
-    return read(path, n, lambda line: parse_line(feed, line))
+    """Up to n parsed data messages (see parse_line) from `path`, else from the hour being
+    written, topped up from the last closed hours when it has too little (SX early in an hour)."""
+    pick = lambda line: parse_line(feed, line)
+    if path is not None:
+        path = Path(path)
+        return (_read_gz if path.name.endswith(".gz") else _read_part)(path, n, pick)
+    landing = landing or os.environ.get("DAT535_LANDING_DIR", "landing")
+    part = current_part(landing, feed)
+    found = _read_part(part, n, pick) if part else []
+    closed = sorted((Path(landing) / landing_dir(feed)).glob("date=*/hour=*.jsonl.gz"), reverse=True)
+    for gz in closed[:RECENT_HOURS]:
+        if len(found) >= n:
+            break
+        found += _read_gz(gz, n - len(found), pick)
+    return found
 
 
 def main():
@@ -192,12 +195,8 @@ def main():
     ap.add_argument("--file", type=Path, help="landing file to read (default: the newest .part)")
     args = ap.parse_args()
 
-    try:
-        path = source(args.feed, args.file)
-    except FileNotFoundError as e:
-        sys.exit(str(e))
-    found = sample(args.feed, args.n, path)
-    print(f"# {path}\n")
+    found = sample(args.feed, args.n, args.file)
+    print(f"# {args.file or 'hour being written, then the last closed hours'}\n")
     for msg in found:
         header, body = format_message(args.feed, msg)
         print(f"── {header}\n{body}\n")
