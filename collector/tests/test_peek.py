@@ -50,6 +50,20 @@ class PeekTest(unittest.TestCase):
         self.assertNotIn("Heartbeat", out)
         self.assertNotIn("xmlns", out)
 
+    def test_library(self):
+        sys.path.insert(0, str(COLLECTOR))
+        import peek
+        with tempfile.TemporaryDirectory() as d:
+            part = Path(d) / "siri-et" / "date=2026-10-17" / "hour=13.jsonl.part"
+            part.parent.mkdir(parents=True)
+            part.write_text(line("et", HEARTBEAT) + line("et", ET_DATA), encoding="utf-8")
+            msgs = peek.sample("et", 1, landing=d)
+        self.assertEqual(len(msgs), 1)
+        journey = msgs[0]["items"][0]
+        self.assertEqual(peek.flatten(journey)["LineRef"], "SKY:Line:760")
+        self.assertEqual(peek.calls(journey), [{"kind": "RecordedCall", "StopPointRef": "NSR:Quay:1"}])
+        self.assertNotIn("\n", peek.flatten(journey).get("LineRef"))
+
     def test_vehicles_closed_file(self):
         with tempfile.TemporaryDirectory() as d:
             gz = Path(d) / "hour=12.jsonl.gz"
