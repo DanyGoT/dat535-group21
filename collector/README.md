@@ -40,6 +40,43 @@ experiment: the monitor, exporter and Bronze do not cover it yet. Measured 2026-
 A tunnel may expose port 8750 (receiver) and 8751 (status page) on separate, fixed
 hostnames. Never expose the landing directory.
 
+## Tunnel
+
+`dat535-tunnel.service` holds a reverse SSH tunnel from the VM to a public host, where Caddy
+serves `siri-dat535.dany.no` -> `127.0.0.1:8750` and `status-dat535.dany.no` -> `:8751`. The VM
+is shared, so the key is treated as readable by anyone on it: on the public host it belongs
+to a `nologin` user that may only listen on those two loopback ports (no shell, no `-L`, no
+other ports), and sshd drops a dead tunnel within ~90 s so the reconnect can bind again.
+
+One-time setup on the VM:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C dat535-tunnel@vm -f ~/.ssh/dat535-tunnel
+ssh-keyscan -t ed25519 <public host> > ~/.config/dat535/tunnel_known_hosts   # check the fingerprint
+echo 'TUNNEL_TARGET=dat535-tunnel@<public host>' >> ~/.config/dat535/collector.env
+```
+
+On the public host: a system user `dat535-tunnel` (shell `/usr/sbin/nologin`) with the public
+key in its `authorized_keys`, and an sshd drop-in:
+
+```
+Match User dat535-tunnel
+    AuthenticationMethods publickey
+    AllowTcpForwarding remote
+    GatewayPorts no
+    PermitListen 127.0.0.1:8750 127.0.0.1:8751
+    PermitOpen none
+    AllowAgentForwarding no
+    AllowStreamLocalForwarding no
+    X11Forwarding no
+    PermitTTY no
+    PermitTunnel no
+    ForceCommand /usr/sbin/nologin
+    ClientAliveInterval 30
+    ClientAliveCountMax 3
+Match all
+```
+
 ## Tests
 
 `python3 -m unittest discover -s collector/tests` (localhost only, never Entur).

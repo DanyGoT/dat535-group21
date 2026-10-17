@@ -10,6 +10,7 @@
 #   sudo loginctl enable-linger "$USER"
 #   ~/.config/dat535/collector.env
 #   sudo apt install python3-websockets      (vehicles.py)
+#   ~/.ssh/dat535-tunnel + TUNNEL_TARGET     (dat535-tunnel.service)
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
@@ -76,7 +77,7 @@ unit_changes=$(rsync -rci "$SRC"/systemd/dat535-* "$UNITS/")
 [[ -n "$code_changes$unit_changes" ]] && printf '%s\n' "$code_changes" "$unit_changes" | sed '/^$/d'
 
 systemctl --user daemon-reload
-SERVICES=(dat535-receiver dat535-vehicles dat535-status dat535-exporter dat535-prometheus dat535-grafana)
+SERVICES=(dat535-tunnel dat535-receiver dat535-vehicles dat535-status dat535-exporter dat535-prometheus dat535-grafana)
 systemctl --user enable "${SERVICES[@]/%/.service}" dat535-monitor.timer
 
 changed() { grep -q -- "$1" <<<"$code_changes"$'\n'"$unit_changes"$'\n'"$tool_changes"; }
@@ -89,6 +90,7 @@ restart_if() {  # restart_if UNIT PATTERN: restart when PATTERN matches a change
     fi
 }
 
+restart_if dat535-tunnel.service 'dat535-tunnel.service'
 restart_if dat535-receiver.service 'receiver.py\|dat535-receiver.service'
 # vehicles.py imports its writer from receiver.py.
 restart_if dat535-vehicles.service 'vehicles.py\|receiver.py\|dat535-vehicles.service'

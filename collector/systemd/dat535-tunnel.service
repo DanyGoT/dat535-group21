@@ -1,0 +1,23 @@
+[Unit]
+Description=DAT535 reverse SSH tunnel (public host loopback 8750/8751 -> receiver, status page)
+After=network-online.target
+# Keep retrying for as long as it takes; every failure is a collection gap.
+StartLimitIntervalSec=0
+
+[Service]
+EnvironmentFile=%h/.config/dat535/collector.env
+# Key and pinned host key are created once by hand (collector/README.md). The tunnel user on
+# the public host may only listen on 127.0.0.1:8750 and :8751, nothing else.
+ExecStart=/usr/bin/ssh -N -F none \
+  -o BatchMode=yes -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -o IdentitiesOnly=yes -i %h/.ssh/dat535-tunnel \
+  -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%h/.config/dat535/tunnel_known_hosts \
+  -R 127.0.0.1:8750:127.0.0.1:${RECEIVER_PORT} \
+  -R 127.0.0.1:8751:127.0.0.1:${STATUS_PORT} \
+  ${TUNNEL_TARGET}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
