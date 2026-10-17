@@ -50,7 +50,22 @@ Base: `https://storage.googleapis.com/marduk-production/tiamat/`
 ## Real-time data
 
 See `realtime.md`. Use SIRI ET (delays/cancellations) and optionally SIRI SX (alerts).
-Skip GTFS-RT (no national feed, partial coverage) and SIRI VM (positions, not needed).
+Skip GTFS-RT (no national feed, partial coverage) and SIRI VM.
+
+Vehicle positions are collected as an experiment (`collector/vehicles.py`) from the
+Vehicle Positions GraphQL API v2 (https://developer.entur.no/apis/graphql/vehicle-positions):
+
+- Subscriptions: `wss://api.entur.io/realtime/v2/vehicles/subscriptions`, subprotocol
+  `graphql-transport-ws` (verified 2026-10-17; the docs say "graphql-ws"). Queries:
+  `POST https://api.entur.io/realtime/v2/vehicles/graphql`. `ET-Client-Name` required.
+- `subscription { vehicles(...) }` with no filter = all of Norway. Server batches updates
+  (`bufferSize` default 20, `bufferTime` default 250 ms). A new subscription starts with a
+  snapshot of all current vehicles.
+- Introspection works per type (`__type(name: ...)`); a full `__schema` dump is refused.
+- Field coverage in one minute of data (2026-10-17): location, delay, line, serviceJourney,
+  occupancyStatus ~100 %; monitoredCall 92 %; progressBetweenStops 69 %; datedServiceJourney
+  44 %; speed 10 %. Mostly BUS (91 %), then FERRY, COACH, RAIL, TRAM.
+- Rate limits and history: not documented. **UNVERIFIED**.
 
 ## Historical real-time
 
