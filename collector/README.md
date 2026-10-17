@@ -46,7 +46,9 @@ hostnames. Never expose the landing directory.
 serves `siri-dat535.dany.no` -> `127.0.0.1:8750` and `status-dat535.dany.no` -> `:8751`. The VM
 is shared, so the key is treated as readable by anyone on it: on the public host it belongs
 to a `nologin` user that may only listen on those two loopback ports (no shell, no `-L`, no
-other ports), and sshd drops a dead tunnel within ~90 s so the reconnect can bind again.
+other ports). Every login runs a forced command that ends the user's older sessions, which
+the unit does before each start: sshd never notices a silently dead tunnel while its
+ports see traffic, and the stale session would hold them (observed: 41 min).
 
 One-time setup on the VM:
 
@@ -56,8 +58,11 @@ ssh-keyscan -t ed25519 <public host> > ~/.config/dat535/tunnel_known_hosts   # c
 echo 'TUNNEL_TARGET=dat535-tunnel@<public host>' >> ~/.config/dat535/collector.env
 ```
 
-On the public host: a system user `dat535-tunnel` (shell `/usr/sbin/nologin`) with the public
-key in its `authorized_keys`, and an sshd drop-in:
+On the public host: a system user `dat535-tunnel` (shell `/bin/sh`, needed to run the forced
+command) with the key in `authorized_keys` as
+`restrict,port-forwarding,permitlisten="127.0.0.1:8750",permitlisten="127.0.0.1:8751",command="/usr/local/bin/dat535-tunnel-kick" <key>`,
+the kick script (ends the user's `sshd` processes other than its own ancestors), and an
+sshd drop-in:
 
 ```
 Match User dat535-tunnel
@@ -71,7 +76,7 @@ Match User dat535-tunnel
     X11Forwarding no
     PermitTTY no
     PermitTunnel no
-    ForceCommand /usr/sbin/nologin
+    ForceCommand /usr/local/bin/dat535-tunnel-kick
     ClientAliveInterval 30
     ClientAliveCountMax 3
 Match all
