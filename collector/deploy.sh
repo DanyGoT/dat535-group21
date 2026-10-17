@@ -9,6 +9,7 @@
 # One-time prerequisites on the VM (see collector/README.md):
 #   sudo loginctl enable-linger "$USER"
 #   ~/.config/dat535/collector.env
+#   sudo apt install python3-websockets      (vehicles.py)
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
@@ -28,6 +29,10 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "missing $ENV_FILE (copy collector/systemd/collector.env.example)" >&2
+    exit 1
+fi
+if ! /usr/bin/python3 -c 'import websockets' 2>/dev/null; then
+    echo "python3 has no websockets module (run: sudo apt install python3-websockets)" >&2
     exit 1
 fi
 if [[ ! -S "$XDG_RUNTIME_DIR/bus" ]]; then
@@ -71,7 +76,7 @@ unit_changes=$(rsync -rci "$SRC"/systemd/dat535-* "$UNITS/")
 [[ -n "$code_changes$unit_changes" ]] && printf '%s\n' "$code_changes" "$unit_changes" | sed '/^$/d'
 
 systemctl --user daemon-reload
-SERVICES=(dat535-receiver dat535-status dat535-exporter dat535-prometheus dat535-grafana)
+SERVICES=(dat535-receiver dat535-vehicles dat535-status dat535-exporter dat535-prometheus dat535-grafana)
 systemctl --user enable "${SERVICES[@]/%/.service}" dat535-monitor.timer
 
 changed() { grep -q -- "$1" <<<"$code_changes"$'\n'"$unit_changes"$'\n'"$tool_changes"; }
@@ -85,6 +90,8 @@ restart_if() {  # restart_if UNIT PATTERN: restart when PATTERN matches a change
 }
 
 restart_if dat535-receiver.service 'receiver.py\|dat535-receiver.service'
+# vehicles.py imports its writer from receiver.py.
+restart_if dat535-vehicles.service 'vehicles.py\|receiver.py\|dat535-vehicles.service'
 restart_if dat535-status.service 'serve_status.py\|dat535-status.service'
 # exporter.py imports from monitor.py.
 restart_if dat535-exporter.service 'exporter.py\|monitor.py\|dat535-exporter.service'
