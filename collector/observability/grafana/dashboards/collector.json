@@ -664,7 +664,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "dat535_landing_day_bytes",
+          "expr": "sum by (date, feed) (dat535_landing_day_bytes)",
           "legendFormat": "__auto",
           "range": false,
           "instant": true,
@@ -676,7 +676,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "dat535_landing_day_hours",
+          "expr": "sum by (date, feed) (dat535_landing_day_hours)",
           "legendFormat": "__auto",
           "range": false,
           "instant": true,
