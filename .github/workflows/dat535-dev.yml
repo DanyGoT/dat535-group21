@@ -39,14 +39,14 @@ jobs:
           echo "landing=$landing" >> "$GITHUB_OUTPUT"
           echo "output=$(dirname "$landing")/dev" >> "$GITHUB_OUTPUT"
 
-      - name: Run Bronze (yesterday, UTC)
+      - name: Run Bronze (yesterday 08:00-09:00 UTC)
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
         run: |
           source ~/spark-env/bin/activate
           mkdir -p "$DAT535_OUTPUT_DIR"
-          python pipeline/bronze.py
+          python pipeline/bronze.py --hours 08
 
       - name: Upload Bronze run records
         # Only the small run records; the Parquet data stays on the VM.
