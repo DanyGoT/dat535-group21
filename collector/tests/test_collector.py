@@ -255,10 +255,10 @@ class MonitorTest(unittest.TestCase):
 
         r = self.run_monitor()  # no growth since last check
         self.assertEqual(r.returncode, 1)
-        self.assertIn("has not grown", r.stdout)
+        self.assertIn("et: no pushes received for", r.stdout)
         self.assertEqual(len(Recorder.requests), 1)
         self.assertEqual(Recorder.requests[0][1]["Title"], "Collector FAIL")
-        self.assertEqual(Recorder.requests[0][2], "et: no new data since last check")
+        self.assertRegex(Recorder.requests[0][2], r"^et: no data for \d+s$")
 
         self.state.unlink()  # receiver gone too: still FAIL, no second notification
         r = self.run_monitor()
@@ -286,7 +286,7 @@ class MonitorTest(unittest.TestCase):
         self.feeds = "et,vehicles"
         r = self.run_monitor()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("vehicles: no .part file", r.stdout)
+        self.assertIn("vehicles: nothing in the landing zone yet", r.stdout)
         part.parent.mkdir(parents=True)
         part.write_text("x\n")
         self.part.write_text("x\ny\n")
@@ -309,7 +309,31 @@ class MonitorTest(unittest.TestCase):
         os.utime(self.part, (old, old))
         r = self.run_monitor()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("not modified for", r.stdout)
+        self.assertIn("et: no pushes received for 10m", r.stdout)
+
+    def test_hour_turned_before_next_push(self):
+        # The hour just closed (.part gzipped) and the quiet feed has not pushed yet: not a failure.
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        closed = self.part.with_name(self.part.name.replace(".part", ".gz"))
+        self.part.rename(closed)
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(Recorder.requests, [])
+        r = self.run_monitor()  # still nothing a check later: now it is a failure
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("last write to", r.stdout)
+
+    def test_all_feeds_stopped_hint(self):
+        self.feeds = "et,sx"
+        now = datetime.now(timezone.utc)
+        sx = self.landing / "siri-sx" / f"date={now:%Y-%m-%d}" / f"hour={now:%H}.jsonl.part"
+        sx.parent.mkdir(parents=True)
+        sx.write_text("x\n")
+        self.run_monitor()
+        self.run_monitor()
+        self.assertEqual(len(Recorder.requests), 1)
+        self.assertIn("all feeds stopped together", Recorder.requests[0][2])
 
 
 class ExporterTest(unittest.TestCase):

@@ -84,27 +84,39 @@ def landing_dir(feed):
     return VEHICLES if feed == VEHICLES else f"siri-{feed}"
 
 
-def current_part(landing, feed):
-    parts = sorted((Path(landing) / landing_dir(feed)).glob("date=*/hour=*.jsonl.part"))
-    return parts[-1] if parts else None
+def newest_file(landing, feed):
+    """Most recently written landing file of a feed: this hour's .part or, right after the hour
+    turned and before the next push, the hour just closed. Only the last two days are looked at."""
+    days = sorted((Path(landing) / landing_dir(feed)).glob("date=*"))[-2:]
+    files = [p for d in days for p in d.glob("hour=*.jsonl*") if not p.name.endswith(".tmp")]
+    return max(files, key=lambda p: p.stat().st_mtime, default=None)
 
 
 def check_feed(landing, feed, prev, now, max_age_min):
-    part = current_part(landing, feed)
-    if part is None:
-        return {"ok": False, "reason": f"{feed}: no .part file", "short": f"{feed}: no data yet",
-                "file": None, "size": None, "age_s": None}
-    st = part.stat()
-    rel = f"{part.parent.name}/{part.name}"
+    path = newest_file(landing, feed)
+    if path is None:
+        return {"ok": False, "reason": f"{feed}: nothing in the landing zone yet",
+                "short": f"{feed}: no data yet", "file": None, "size": None, "age_s": None}
+    st = path.stat()
+    rel = f"{path.parent.name}/{path.name}"
     age = now.timestamp() - st.st_mtime
     res = {"ok": True, "reason": None, "short": None, "file": rel, "size": st.st_size, "age_s": round(age)}
-    if age > max_age_min * 60:
-        res.update(ok=False, reason=f"{feed}: {rel} not modified for {fmt_age(age)}",
-                   short=f"{feed}: no new data for {fmt_age(age)}")
-    elif prev and prev.get("file") == rel and prev.get("size") is not None and st.st_size <= prev["size"]:
-        res.update(ok=False, reason=f"{feed}: {rel} has not grown since last check",
-                   short=f"{feed}: no new data since last check")
+    stale = age > max_age_min * 60
+    if stale or (prev and prev.get("file") == rel and prev.get("size") is not None
+                 and st.st_size <= prev["size"]):
+        what = "pushes" if feed != VEHICLES else "positions"
+        res.update(ok=False, reason=f"{feed}: no {what} received for {fmt_age(age)} (last write to {rel})",
+                   short=f"{feed}: no data for {fmt_age(age)}")
     return res
+
+
+def fail_body(checks):
+    """Notification text: one line per failed check, plus a hint when every feed stopped at once."""
+    lines = [c["short"] for c in checks.values() if not c["ok"]]
+    feeds = [c for k, c in checks.items() if k.startswith("feed:")]
+    if len(feeds) > 1 and checks["receiver"]["ok"] and not any(c["ok"] for c in feeds):
+        lines.append("all feeds stopped together: likely the VM network or the tunnel, not Entur")
+    return "\n".join(lines)
 
 
 def check_disk(landing, max_pct):
@@ -323,10 +335,19 @@ def render(status, host):
             parts.append(f"subscribed {fmt_age((now - sub).total_seconds())} ago")
         if exp:
             parts.append(f"expires {exp.astimezone(LOCAL_TZ):%Y-%m-%d %H:%M}")
-        cls = ' class="warn"' if s.get("last_error") else ""
+        # last_error belongs to the last subscribe attempt; pushes after it mean the
+        # subscription survived, so the error is history rather than a current problem.
+        err = s.get("last_error")
+        attempt = parse_iso(s.get("last_attempt"))
+        current = err and not (last and attempt and last > attempt)
+        cls = ' class="warn"' if current else ""
         out.append(f'    <span class="mute">{e(feed)}</span><span{cls}>{e(" · ".join(parts))}</span>\n')
-        if s.get("last_error"):
-            out.append(f'    <span class="mute"></span><span class="warn">{e(s["last_error"])}</span>\n')
+        if current:
+            out.append(f'    <span class="mute"></span><span class="warn">{e(err)}</span>\n')
+        elif err:
+            when = f"{attempt.astimezone(LOCAL_TZ):%H:%M} " if attempt else ""
+            out.append(f'    <span class="mute"></span><span class="mute">resubscribe {e(when)}failed'
+                       f' ({e(err)}); pushes resumed since</span>\n')
     out.append("  </div>\n")
 
     out.append('  <h2>INFO</h2>\n  <div class="kv">\n'
@@ -385,7 +406,7 @@ def main():
                 start = parse_iso(prev.get("since")) if prev.get("ok") is False else None
                 body = f"recovered after {fmt_age((now - start).total_seconds())}" if start else "recovered"
             else:
-                body = "\n".join(c["short"] for c in checks.values() if not c["ok"])
+                body = fail_body(checks)
             notify(server, topic, ok, body, click_url)
             notified = ok
         except (urllib.error.URLError, OSError) as e:
