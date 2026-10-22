@@ -32,7 +32,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from monitor import current_part, fmt_bytes, landing_dir
+from monitor import fmt_bytes, landing_dir
 
 SIRI_NS = "http://www.siri.org.uk/siri"
 # Per SIRI feed: the element that carries one unit of data.
@@ -125,6 +125,11 @@ def calls(journey):
         for c in journey.iter(f"{{{SIRI_NS}}}{kind}"):
             rows.append({"kind": kind, **flatten(c)})
     return rows
+
+
+def current_part(landing, feed):
+    parts = sorted((Path(landing) / landing_dir(feed)).glob("date=*/hour=*.jsonl.part"))
+    return parts[-1] if parts else None
 
 
 def _read_part(path, n, pick):
