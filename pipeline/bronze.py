@@ -6,7 +6,7 @@ Writes  $DAT535_OUTPUT_DIR/bronze/siri-<feed>/date=D/*.parquet
         $DAT535_OUTPUT_DIR/bronze/_runs/date=D/<run_id>.json   (one record per run)
 
 The raw XML payload is kept unchanged as a string; parsing it is Silver's job. Lines that
-are not valid JSON, or lack a field, are kept with `_status` set, never dropped.
+are not valid JSON, or lack a field, are kept with `_bronze_status` set, never dropped.
 Rerunning a date replaces that date only, so reruns and late reruns are safe.
 `--hours` limits a run to some hours of the day (the dev workflow's small run); the date's
 partition then holds only those hours.
@@ -120,32 +120,33 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         StructField("received_at", StringType()),
         StructField("endpoint", StringType()),
         StructField("payload", StringType()),
-        StructField("_raw_line", StringType()),
+        StructField("_bronze_raw_line", StringType()),
     ])
     raw = spark.read \
         .schema(schema) \
         .option("mode", "PERMISSIVE") \
-        .option("columnNameOfCorruptRecord", "_raw_line") \
+        .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
         .option("encoding", "UTF-8") \
         .json([str(f) for f in files])
 
-    status = when(col("_raw_line").isNotNull(), "corrupt") \
+    status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
         .when(col("received_at").isNull() | col("payload").isNull(), "incomplete") \
         .when(col("endpoint") != feed, "wrong_endpoint") \
         .otherwise("ok")
 
     bronze = raw \
-        .withColumn("_source_file", input_file_name()) \
-        .withColumn("hour", regexp_extract(col("_source_file"), r"hour=(\d{2})\.jsonl", 1)) \
+        .withColumn("_bronze_source_file", input_file_name()) \
+        .withColumn("hour", regexp_extract(col("_bronze_source_file"), r"hour=(\d{2})\.jsonl", 1)) \
         .withColumn("feed", lit(feed)) \
-        .withColumn("_payload_sha256", sha2(col("payload"), 256)) \
-        .withColumn("_payload_bytes", octet_length(col("payload"))) \
-        .withColumn("_status", status) \
-        .withColumn("_ingested_at", lit(ingested_at)) \
-        .withColumn("_run_id", lit(rid)) \
+        .withColumn("_bronze_payload_sha256", sha2(col("payload"), 256)) \
+        .withColumn("_bronze_payload_bytes", octet_length(col("payload"))) \
+        .withColumn("_bronze_status", status) \
+        .withColumn("_bronze_ingested_at", lit(ingested_at)) \
+        .withColumn("_bronze_run_id", lit(rid)) \
         .withColumn("date", lit(str(day))) \
-        .select("received_at", "endpoint", "payload", "feed", "hour", "_payload_sha256",
-                "_payload_bytes", "_status", "_raw_line", "_source_file", "_ingested_at", "_run_id", "date")
+        .select("received_at", "endpoint", "payload", "feed", "hour",
+                "_bronze_payload_sha256", "_bronze_payload_bytes", "_bronze_status", "_bronze_raw_line",
+                "_bronze_source_file", "_bronze_ingested_at", "_bronze_run_id", "date")
 
     # No cache and no coalesce: a day of ET is ~200 GB of raw lines. Gzip is not splittable,
     # so Spark reads one task per hour file and writes about one Parquet file per hour.
@@ -155,9 +156,9 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .partitionBy("date") \
         .parquet(str(target))
 
-    # Count from the written Parquet: reads only the _status column instead of re-parsing.
+    # Count from the written Parquet: reads only the _bronze_status column instead of re-parsing.
     written = spark.read.parquet(str(target / f"date={day}"))
-    counts = {r["_status"]: r["count"] for r in written.groupBy("_status").count().collect()}
+    counts = {r["_bronze_status"]: r["count"] for r in written.groupBy("_bronze_status").count().collect()}
     return {"rows": sum(counts.values()),
             "bad_rows": {k: v for k, v in counts.items() if k != "ok"}}
 

@@ -130,16 +130,16 @@ class IngestTest(LandingCase):
 
         rows = self.read("et").collect()
         self.assertEqual(len(rows), 6)
-        ok = [r for r in rows if r["_status"] == "ok"]
+        ok = [r for r in rows if r["_bronze_status"] == "ok"]
         self.assertEqual(len(ok), 3)
         self.assertTrue(all(r["payload"] == ET_XML for r in ok))   # payload unchanged
         self.assertEqual(sorted({r["hour"] for r in rows}), ["04", "05"])
-        self.assertEqual(len({r["_payload_sha256"] for r in ok}), 1)
-        self.assertTrue(all(r["_payload_bytes"] == len(ET_XML.encode("utf-8")) for r in ok))
-        corrupt = [r for r in rows if r["_status"] == "corrupt"]
-        self.assertEqual(corrupt[0]["_raw_line"], "{not json")
-        self.assertTrue(all(r["_source_file"].endswith((".jsonl", ".jsonl.gz")) for r in rows))
-        self.assertTrue(all(r["_run_id"] == record["run_id"] for r in rows))
+        self.assertEqual(len({r["_bronze_payload_sha256"] for r in ok}), 1)
+        self.assertTrue(all(r["_bronze_payload_bytes"] == len(ET_XML.encode("utf-8")) for r in ok))
+        corrupt = [r for r in rows if r["_bronze_status"] == "corrupt"]
+        self.assertEqual(corrupt[0]["_bronze_raw_line"], "{not json")
+        self.assertTrue(all(r["_bronze_source_file"].endswith((".jsonl", ".jsonl.gz")) for r in rows))
+        self.assertTrue(all(r["_bronze_run_id"] == record["run_id"] for r in rows))
 
     def test_rerun_replaces_only_that_day(self):
         other = date(2026, 10, 14)
@@ -150,7 +150,7 @@ class IngestTest(LandingCase):
         df = self.read("et")
         self.assertEqual(df.filter(df.date == str(DAY)).count(), 6)
         self.assertEqual(df.filter(df.date == str(other)).count(), 1)
-        self.assertEqual({r["_run_id"] for r in df.filter(df.date == str(DAY)).collect()},
+        self.assertEqual({r["_bronze_run_id"] for r in df.filter(df.date == str(DAY)).collect()},
                          {second["run_id"]})
 
     def test_some_hours(self):
