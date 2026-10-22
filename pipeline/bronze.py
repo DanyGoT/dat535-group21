@@ -8,12 +8,15 @@ Writes  $DAT535_OUTPUT_DIR/bronze/siri-<feed>/date=D/*.parquet
 The raw XML payload is kept unchanged as a string; parsing it is Silver's job. Lines that
 are not valid JSON, or lack a field, are kept with `_status` set, never dropped.
 Rerunning a date replaces that date only, so reruns and late reruns are safe.
+`--hours` limits a run to some hours of the day (the dev workflow's small run); the date's
+partition then holds only those hours.
 Landing is read-only here: open (*.part) and in-progress (*.tmp) files are never read.
 
 Usage:
     python pipeline/bronze.py                    # yesterday (UTC)
     python pipeline/bronze.py --date 2026-10-15
     python pipeline/bronze.py --date 2026-10-15 --feeds et
+    python pipeline/bronze.py --hours 08         # yesterday, 08:00-09:00 UTC only
 """
 
 import argparse
@@ -55,8 +58,18 @@ def run_id():
     return f"local-{utcnow():%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
 
 
-def scan_day(landing, feed, day):
+def parse_hours(text):
+    """"08,09" -> ["08", "09"]: two-digit UTC hours, sorted, no duplicates."""
+    hours = sorted({f"{int(h):02d}" for h in text.split(",") if h.strip()})
+    if not hours or any(h not in HOURS for h in hours):
+        raise ValueError(f"hours must be 0-23, comma-separated: {text!r}")
+    return hours
+
+
+def scan_day(landing, feed, day, hours=HOURS):
     """Closed files of one feed and UTC day, plus which hours are missing or still open.
+
+    Only `hours` are looked at; files of other hours are ignored.
 
     Returns (files sorted by hour, missing hours, open hours). Raises if an hour has both a
     .jsonl and a .jsonl.gz, which the receiver never produces: a human must look at it.
@@ -65,13 +78,16 @@ def scan_day(landing, feed, day):
     closed, open_hours = {}, []
     if folder.is_dir():
         for path in sorted(folder.iterdir()):
-            if m := CLOSED.match(path.name):
+            m = CLOSED.match(path.name) or OPEN.match(path.name)
+            if not m or m.group(1) not in hours:
+                continue
+            if CLOSED.match(path.name):
                 if m.group(1) in closed:
                     raise RuntimeError(f"two closed files for one hour: {closed[m.group(1)]} and {path}")
                 closed[m.group(1)] = path
-            elif m := OPEN.match(path.name):
+            else:
                 open_hours.append(m.group(1))
-    missing = [h for h in HOURS if h not in closed]
+    missing = [h for h in hours if h not in closed]
     return [closed[h] for h in sorted(closed)], missing, open_hours
 
 
@@ -157,15 +173,18 @@ def write_run_record(out_root, day, rid, record):
     return final
 
 
-def run(landing, output_dir, day, feeds=FEEDS, spark=None):
-    """Bronze for one UTC day. Returns the run record (also written under _runs/)."""
+def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
+    """Bronze for one UTC day (or some of its hours). Returns the run record (also written
+    under _runs/)."""
     out_root = Path(output_dir) / "bronze"
     rid = run_id()
     started = utcnow()
     record = {"run_id": rid, "env": os.environ.get("DAT535_ENV", "local"), "date": str(day),
               "landing": str(landing), "started_at": iso(started), "feeds": {}}
+    if hours != HOURS:
+        record["hours"] = list(hours)
     for feed in feeds:
-        files, missing, open_hours = scan_day(landing, feed, day)
+        files, missing, open_hours = scan_day(landing, feed, day, hours)
         entry = {"files": len(files), "missing_hours": missing, "open_hours": open_hours}
         if open_hours:
             log.warning("siri-%s %s: hours still open %s; rerun once they close", feed, day, open_hours)
@@ -194,6 +213,8 @@ def main(argv=None):
                    help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
     p.add_argument("--feeds", default=",".join(FEEDS),
                    help="comma-separated feeds (default: et,sx)")
+    p.add_argument("--hours", type=parse_hours, default=HOURS,
+                   help="comma-separated UTC hours, e.g. 08,09 (default: the whole day)")
     args = p.parse_args(argv)
     feeds = [f.strip() for f in args.feeds.split(",") if f.strip()]
     unknown = set(feeds) - set(FEEDS)
@@ -208,7 +229,7 @@ def main(argv=None):
     if not landing.is_dir():
         log.error("landing directory %s does not exist", landing)
         return 1
-    run(landing, output_dir, args.date, feeds)
+    run(landing, output_dir, args.date, feeds, hours=args.hours)
     return 0
 
 

@@ -73,6 +73,23 @@ class ScanDayTest(LandingCase):
         with self.assertRaises(RuntimeError):
             bronze.scan_day(self.landing, "et", DAY)
 
+    def test_some_hours(self):
+        self.put("et", "hour=04.jsonl", line("et"))
+        gz = self.put("et", "hour=05.jsonl.gz", line("et"))
+        self.put("et", "hour=07.jsonl.part", line("et"))
+        files, missing, open_hours = bronze.scan_day(self.landing, "et", DAY, ["05", "06", "07"])
+        self.assertEqual((files, missing, open_hours), ([gz], ["06", "07"], ["07"]))
+
+
+class ParseHoursTest(unittest.TestCase):
+    def test_valid(self):
+        self.assertEqual(bronze.parse_hours("9, 08,9"), ["08", "09"])
+
+    def test_invalid(self):
+        for text in ("24", "-1", "x", ""):
+            with self.assertRaises(ValueError):
+                bronze.parse_hours(text)
+
 
 @unittest.skipUnless(find_spec("pyspark"), "pyspark not installed")
 class IngestTest(LandingCase):
@@ -135,6 +152,12 @@ class IngestTest(LandingCase):
         self.assertEqual(df.filter(df.date == str(other)).count(), 1)
         self.assertEqual({r["_run_id"] for r in df.filter(df.date == str(DAY)).collect()},
                          {second["run_id"]})
+
+    def test_some_hours(self):
+        record = bronze.run(self.landing, self.out, DAY, feeds=["et"], spark=self.spark, hours=["05"])
+        self.assertEqual(record["hours"], ["05"])
+        self.assertEqual((record["feeds"]["et"]["files"], record["feeds"]["et"]["rows"]), (1, 4))
+        self.assertEqual({r["hour"] for r in self.read("et").collect()}, {"05"})
 
     def test_landing_untouched(self):
         before = sorted((p.relative_to(self.landing), p.stat().st_size, p.stat().st_mtime_ns)
