@@ -1,0 +1,8 @@
+{
+  "include": ["collector", "pipeline", "notebooks"],
+  "exclude": ["labs", "**/__pycache__", "**/*.sync-conflict-*"],
+  "extraPaths": ["collector", "pipeline"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportImplicitRelativeImport": false
+}
