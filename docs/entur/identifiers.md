@@ -22,9 +22,16 @@ so the id alone is not unique.
 - **ID remapping:** Entur remaps real-time ids to match the static data by default.
   `useOriginalId=true` returns source-system ids that won't join. Keep the default.
 - **Codespaces:** ids are prefixed by operator/authority codespace (e.g. `RUT`, `BNR`, `SJN`).
-  The exact pattern `RUT:ServiceJourney:...` is **UNVERIFIED** — check real data.
+  Entur's BigQuery docs (`entur-ai-docs/`) show `RUT:ServiceJourney:17-154797-20890925`,
+  `AKT:Line:100` and `NSR:Quay:105273`. **UNVERIFIED** in our raw XML — check real data.
 - **GTFS vs NeTEx:** whether GTFS `trip_id` equals the NeTEx ServiceJourney id is
   **UNVERIFIED**. Use NeTEx for joins.
 - **Schedule retention:** the static export keeps ≤48 h of past data. Join each operating day
   against the NeTEx archived on (or just before) that day, not the latest download.
 - `DatedServiceJourney` exists in NeTEx; whether Entur's feeds use it is **UNVERIFIED**.
+  Entur's BigQuery tables build `datedServiceJourneyId` as `<operatingDate>:<serviceJourneyId>`
+  (e.g. `2021-09-09:RUT:ServiceJourney:...`) and key rows on
+  `operatingDate + datedServiceJourneyId + sequenceNr`. That is a model for our Silver grain,
+  not a SIRI field.
+- **Stop refs are Quays.** `StopPointRef` is an NSR Quay id; reach the Stop Place via the
+  Quay's `stopPlaceRef`.

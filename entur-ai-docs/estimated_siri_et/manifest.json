@@ -1,0 +1,707 @@
+{
+  "catalog": "Entur Public Data Catalog",
+  "license": "https://data.norge.no/nlod/en/2.0",
+  "datasets": [
+    {
+      "name": "fare_zones_all_versions",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. All historical versions of every Fare Zone in the Norwegian National Stop Registry (NSR), with polygon geometry. One row per (`id`, `version`). Fare Zones are referenced from Stop Places via `fareZoneRefs` (key + version).",
+      "uniqueKey": [
+        "id",
+        "version"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Fare Zone"
+        },
+        {
+          "name": "version",
+          "description": "Version of Fare Zone"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "validBetween",
+          "description": "From and to date. NULL in to date is used for active versions"
+        },
+        {
+          "name": "geometry",
+          "description": "Polygon outline of the Fare Zone"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/fare_zones_all_versions/README.md",
+        "jsonld": "national_stop_registry/fare_zones_all_versions/dataset.jsonld",
+        "examples": "national_stop_registry/fare_zones_all_versions/examples.sql",
+        "freshness": "national_stop_registry/fare_zones_all_versions/freshness.json"
+      }
+    },
+    {
+      "name": "quays_all_versions",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. All historical versions of every Quay in the Norwegian National Stop Registry (NSR). One row per (`id`, `version`); use the parent Stop Place's `validBetween` to determine which version was active at a given time. A Stop Place may contain multiple Quays; join to `stop_places_all_versions` via `stopPlaceRef` + `stopPlaceVersion`. For only the latest version per Quay, see `quays_last_version`.",
+      "uniqueKey": [
+        "id",
+        "version"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Quay"
+        },
+        {
+          "name": "version",
+          "description": "Version of Quay"
+        },
+        {
+          "name": "publicCode",
+          "description": "Public Code, if any"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "shortName",
+          "description": "Short name, if any"
+        },
+        {
+          "name": "description",
+          "description": "Description, used to supplement name."
+        },
+        {
+          "name": "location_longitude",
+          "description": "Longitude of location"
+        },
+        {
+          "name": "location_latitude",
+          "description": "Latitude of location"
+        },
+        {
+          "name": "stopPlaceRef",
+          "description": "Reference to parent Stop Place"
+        },
+        {
+          "name": "stopPlaceVersion",
+          "description": "Reference to the version of the parent Stop Place"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/quays_all_versions/README.md",
+        "jsonld": "national_stop_registry/quays_all_versions/dataset.jsonld",
+        "examples": "national_stop_registry/quays_all_versions/examples.sql",
+        "freshness": "national_stop_registry/quays_all_versions/freshness.json"
+      }
+    },
+    {
+      "name": "quays_last_version",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. Latest version of each Quay in the Norwegian National Stop Registry (NSR), including inactive ones. One row per Quay `id`. A Stop Place may contain multiple Quays; join to `stop_places_last_version` via `stopPlaceRef`. Quay ids are commonly used as join keys against other Entur data assets (e.g. SIRI-ET `stopPointRef`). For historical versions, see `quays_all_versions`.",
+      "uniqueKey": [
+        "id"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Quay"
+        },
+        {
+          "name": "version",
+          "description": "Version of Quay"
+        },
+        {
+          "name": "publicCode",
+          "description": "Public Code, if any"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "shortName",
+          "description": "Short name, if any"
+        },
+        {
+          "name": "description",
+          "description": "Description, used to supplement name."
+        },
+        {
+          "name": "location_longitude",
+          "description": "Longitude of location"
+        },
+        {
+          "name": "location_latitude",
+          "description": "Latitude of location"
+        },
+        {
+          "name": "stopPlaceRef",
+          "description": "Reference to parent Stop Place"
+        },
+        {
+          "name": "stopPlaceVersion",
+          "description": "Reference to the version of the parent Stop Place"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/quays_last_version/README.md",
+        "jsonld": "national_stop_registry/quays_last_version/dataset.jsonld",
+        "examples": "national_stop_registry/quays_last_version/examples.sql",
+        "freshness": "national_stop_registry/quays_last_version/freshness.json"
+      }
+    },
+    {
+      "name": "stop_places_all_versions",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. All historical versions of every Stop Place in the Norwegian National Stop Registry (NSR). One row per (`id`, `version`); use `validBetween` to determine which version was active at a given time. For only the latest version per Stop Place, see `stop_places_last_version`. Stop Places can also be browsed at https://stoppested.entur.org.",
+      "uniqueKey": [
+        "id",
+        "version"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Stop Place"
+        },
+        {
+          "name": "version",
+          "description": "Version of Stop Place"
+        },
+        {
+          "name": "publicCode",
+          "description": "Public Code, if any"
+        },
+        {
+          "name": "transportMode",
+          "description": "Transport mode using the stop place"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "shortName",
+          "description": "Short name, if any"
+        },
+        {
+          "name": "description",
+          "description": "Description, used to supplement name."
+        },
+        {
+          "name": "location_longitude",
+          "description": "Longitude of location"
+        },
+        {
+          "name": "location_latitude",
+          "description": "Latitude of location"
+        },
+        {
+          "name": "topographicPlaceRef",
+          "description": "Reference to a topographic place key and version"
+        },
+        {
+          "name": "alternativeNames",
+          "description": "Alternative name, if any"
+        },
+        {
+          "name": "tariffZoneRefs",
+          "description": "Reference to a tariff zone key and version"
+        },
+        {
+          "name": "fareZoneRefs",
+          "description": "Reference to a fare zone key and version"
+        },
+        {
+          "name": "validBetween",
+          "description": "From and to date. NULL in to date is used for active versions"
+        },
+        {
+          "name": "parentRef",
+          "description": "Some stop places include a reference to a parent stop place (e.g. stop places part of a multimodal stop place)"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/stop_places_all_versions/README.md",
+        "jsonld": "national_stop_registry/stop_places_all_versions/dataset.jsonld",
+        "examples": "national_stop_registry/stop_places_all_versions/examples.sql",
+        "freshness": "national_stop_registry/stop_places_all_versions/freshness.json"
+      }
+    },
+    {
+      "name": "stop_places_last_version",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. Latest version of each Stop Place in the Norwegian National Stop Registry (NSR), including inactive ones. One row per Stop Place `id`. Referenced in f.e quays. For historical versions, see `stop_places_all_versions`. Stop Places can also be browsed at https://stoppested.entur.org.",
+      "uniqueKey": [
+        "id"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Stop Place"
+        },
+        {
+          "name": "version",
+          "description": "Version of Stop Place"
+        },
+        {
+          "name": "publicCode",
+          "description": "Public Code, if any"
+        },
+        {
+          "name": "transportMode",
+          "description": "Transport mode using the stop place"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "shortName",
+          "description": "Short name, if any"
+        },
+        {
+          "name": "description",
+          "description": "Description, used to supplement name."
+        },
+        {
+          "name": "location_longitude",
+          "description": "Longitude of location"
+        },
+        {
+          "name": "location_latitude",
+          "description": "Latitude of location"
+        },
+        {
+          "name": "topographicPlaceRef",
+          "description": "Reference to a topographic place key and version"
+        },
+        {
+          "name": "alternativeNames",
+          "description": "Alternative name, if any"
+        },
+        {
+          "name": "tariffZoneRefs",
+          "description": "Reference to a tariff zone key and version"
+        },
+        {
+          "name": "fareZoneRefs",
+          "description": "Reference to a fare zone key and version"
+        },
+        {
+          "name": "validBetween",
+          "description": "From and to date. NULL in to date is used for active versions"
+        },
+        {
+          "name": "parentRef",
+          "description": "Some stop places include a reference to a parent stop place (e.g. stop places part of a multimodal stop place)"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/stop_places_last_version/README.md",
+        "jsonld": "national_stop_registry/stop_places_last_version/dataset.jsonld",
+        "examples": "national_stop_registry/stop_places_last_version/examples.sql",
+        "freshness": "national_stop_registry/stop_places_last_version/freshness.json"
+      }
+    },
+    {
+      "name": "tariff_zones_all_versions",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. All historical versions of every Tariff Zone in the Norwegian National Stop Registry (NSR), with polygon geometry. One row per (`id`, `version`). Tariff Zones are referenced from Stop Places via `tariffZoneRefs` (key + version).",
+      "uniqueKey": [
+        "id",
+        "version"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Tariff Zone"
+        },
+        {
+          "name": "version",
+          "description": "Version of Tariff Zone"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "validBetween",
+          "description": "From and to date. NULL in to date is used for active versions"
+        },
+        {
+          "name": "geometry",
+          "description": "Polygon outline of the Tariff Zone"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/tariff_zones_all_versions/README.md",
+        "jsonld": "national_stop_registry/tariff_zones_all_versions/dataset.jsonld",
+        "examples": "national_stop_registry/tariff_zones_all_versions/examples.sql",
+        "freshness": "national_stop_registry/tariff_zones_all_versions/freshness.json"
+      }
+    },
+    {
+      "name": "topographic_places_all_versions",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "national_stop_registry",
+      "description": "Refreshed daily. All historical versions of every Topographic Place (administrative area: country, county, municipality, etc.) in the Norwegian National Stop Registry (NSR), with polygon geometry. One row per (`id`, `version`). Topographic Places are referenced from Stop Places via `topographicPlaceRef` (key + version), and can be hierarchical via `parentRef`.",
+      "uniqueKey": [
+        "id",
+        "version"
+      ],
+      "tags": [
+        "nsr",
+        "daily"
+      ],
+      "labels": {
+        "domain": "nsr",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "description": "Id of Topographic Place"
+        },
+        {
+          "name": "version",
+          "description": "Version of Topographic Place"
+        },
+        {
+          "name": "name",
+          "description": "Name"
+        },
+        {
+          "name": "type",
+          "description": "Short name, if any"
+        },
+        {
+          "name": "countryRef",
+          "description": "2 Letter country code"
+        },
+        {
+          "name": "validBetween",
+          "description": "From and to date. NULL in to date is used for active versions"
+        },
+        {
+          "name": "parentRef",
+          "description": "Reference to parent Topographic Place, if any."
+        },
+        {
+          "name": "geometry",
+          "description": "Polygon outline of the Topographic Place"
+        }
+      ],
+      "paths": {
+        "readme": "national_stop_registry/topographic_places_all_versions/README.md",
+        "jsonld": "national_stop_registry/topographic_places_all_versions/dataset.jsonld",
+        "examples": "national_stop_registry/topographic_places_all_versions/examples.sql",
+        "freshness": "national_stop_registry/topographic_places_all_versions/freshness.json"
+      }
+    },
+    {
+      "name": "siri_et_estimated_times",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "realtime_siri_et",
+      "description": "Refreshed daily. Per-stop SIRI-ET estimated arrival/departure times compared against the recorded actuals at fixed lead times before the stop (e.g. the estimate 5 minutes before the actual arrival). Lets you assess the quality of real-time estimates and the journey information available to travellers. Based on Entur's SIRI-ET stream covering multiple Norwegian operators — see developer.entur.org/pages-real-time-intro.",
+      "uniqueKey": [
+        "operatingDate",
+        "datedServiceJourneyId",
+        "sequenceNr",
+        "timeDeltaMinutes"
+      ],
+      "tags": [
+        "daily",
+        "siri_et_last_recorded"
+      ],
+      "labels": {
+        "domain": "siri_et",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "operatingDate",
+          "description": "Date of the vehicle journey. For example: 2020-01-10"
+        },
+        {
+          "name": "dataSource",
+          "description": "Codespace of the data source. For example: AKT (Agder kollektivtrafikk)"
+        },
+        {
+          "name": "transportMode",
+          "description": "Transport mode for the vehicle Journey. For example: BUS"
+        },
+        {
+          "name": "lineRef",
+          "description": "Reference to the line of the vehicle journey. For example: AKT:Line:100"
+        },
+        {
+          "name": "serviceJourneyId",
+          "description": "ID of the service journey. For example: RUT:ServiceJourney:17-154797-20890925"
+        },
+        {
+          "name": "datedServiceJourneyId",
+          "description": "ID of the service journey with date. For example: 2021-09-09:RUT:ServiceJourney:17-154797-20890925"
+        },
+        {
+          "name": "stopPointRef",
+          "description": "Served quay by the vehicle journey in NSR format. For example: NSR:Quay:105273 (Storgata)"
+        },
+        {
+          "name": "parentStopPointRef",
+          "description": "Parent stop point for th equay specified in StopPointRef."
+        },
+        {
+          "name": "stopPointName",
+          "description": "Name of stop. For example: Storgata"
+        },
+        {
+          "name": "sequenceNr",
+          "description": "Number in the sequence of served stops. For example: 23"
+        },
+        {
+          "name": "timeDeltaMinutes",
+          "description": "Describes how many minutes before the actual arrival/departure the estimated times are taken from. Example: 10"
+        },
+        {
+          "name": "AimedArrivalTime",
+          "description": "Planned arrival time of vehicle at a stop. For example: 2020-02-13 23:23:00 UTC"
+        },
+        {
+          "name": "arrivalTime",
+          "description": "Actual arrival time of a vehicle at a stop. For example: 2020-02-13 23:25:11 UTC"
+        },
+        {
+          "name": "estimatedArrivalTime",
+          "description": "Estimated arrival time of a vehicle at a stop at a certain point in time(timeDelataMinutes before arrivalTime). For example: 2020-02-13 23:23:10 UTC"
+        },
+        {
+          "name": "EstimatedArrivalRecordedAtTime",
+          "description": "Timestamp when estimatedArrivalTime was generated. Closest timestamp larger than arrivaltime - timeDeltaMinutes"
+        },
+        {
+          "name": "AimedDepartureTime",
+          "description": "Planned departure time of a vehicle from a stop. For example: 2020-02-13 23:23:00 UTC"
+        },
+        {
+          "name": "departureTime",
+          "description": "Actual departure time of a vehicle from a stop. For example: 2020-02-13 23:25:11 UTC"
+        },
+        {
+          "name": "estimatedDepartureTime",
+          "description": "Estimated departure time of a vehicle at a stop at a certain point in time(timeDelataMinutes before departureTime). For example: 2020-02-13 23:23:10 UTC"
+        },
+        {
+          "name": "EstimatedDepartureRecordedAtTime",
+          "description": "Timestamp when estimatedDepartureTime was generated. Closest timestamp larger than departuretime - timeDeltaMinutes"
+        }
+      ],
+      "paths": {
+        "readme": "realtime_siri_et/siri_et_estimated_times/README.md",
+        "jsonld": "realtime_siri_et/siri_et_estimated_times/dataset.jsonld",
+        "examples": "realtime_siri_et/siri_et_estimated_times/examples.sql",
+        "freshness": "realtime_siri_et/siri_et_estimated_times/freshness.json"
+      }
+    },
+    {
+      "name": "realtime_siri_et_last_recorded",
+      "database": "ent-data-sharing-ext-prd",
+      "schema": "realtime_siri_et",
+      "description": "Refreshed daily. Recorded SIRI-ET data: the last message of a journey, providing a \"trip summary\". The most-used fields, with one row per stop in a journey. Covers multiple Norwegian operators from Q1 2020 onward and is updated every morning. Based on Entur's SIRI-ET stream — see developer.entur.org/pages-real-time-intro.",
+      "uniqueKey": [
+        "operatingDate",
+        "datedServiceJourneyId",
+        "sequenceNr"
+      ],
+      "tags": [
+        "daily",
+        "siri_et_last_recorded"
+      ],
+      "labels": {
+        "domain": "siri_et",
+        "pii": "false",
+        "team": "data",
+        "slack": "talk-data"
+      },
+      "columns": [
+        {
+          "name": "recordedAtTime",
+          "description": "The time when the data object was created/published. For example: 2020-02-13 23:29:54.82 UTC"
+        },
+        {
+          "name": "lineRef",
+          "description": "Reference to the line of the vehicle journey. For example: AKT:Line:100"
+        },
+        {
+          "name": "directionRef",
+          "description": "Reference to the relative direction of the vehicle journey. For example: 2 (Outbound)"
+        },
+        {
+          "name": "operatingDate",
+          "description": "Date of the vehicle journey. For example: 2020-01-10"
+        },
+        {
+          "name": "dayOfTheWeek",
+          "description": "Day of the week. For example: 3 (Wednesday)"
+        },
+        {
+          "name": "serviceJourneyId",
+          "description": "ID of the service journey. For example: RUT:ServiceJourney:17-154797-20890925"
+        },
+        {
+          "name": "datedServiceJourneyId",
+          "description": "ID of the service journey with date. For example: 2021-09-09:RUT:ServiceJourney:17-154797-20890925"
+        },
+        {
+          "name": "operatorRef",
+          "description": "ID to the corresponding company responsible for vehicle journey. For example: nettbuss"
+        },
+        {
+          "name": "vehicleMode",
+          "description": "Transport type. For example: bus"
+        },
+        {
+          "name": "extraJourney",
+          "description": "Boolean indicator of if vehicle journey is a replacement departure. For example: true (vehicle journey is a replacement departure)"
+        },
+        {
+          "name": "journeyCancellation",
+          "description": "Boolean indicator of if vehicle journey is a cancelled departure. For example: true (vehicle journey is a cancelled departure)"
+        },
+        {
+          "name": "stopPointRef",
+          "description": "Served quay by the vehicle journey in NSR format. For example: NSR:Quay:105273 (Storgata)"
+        },
+        {
+          "name": "sequenceNr",
+          "description": "Number in the sequence of served stops. For example: 23"
+        },
+        {
+          "name": "stopPointName",
+          "description": "Name of stop. For example: Storgata"
+        },
+        {
+          "name": "originName",
+          "description": "Name of the first stop of the departure. For example: Skøyen stasjon"
+        },
+        {
+          "name": "destinationName",
+          "description": "Name of the last stop of the vehicle journey. For example: Simensbråten"
+        },
+        {
+          "name": "extraCall",
+          "description": "Boolean indicator of whether the served stop is in addition to the planned stop sequence"
+        },
+        {
+          "name": "stopCancellation",
+          "description": "Boolean indicator for whether a stop is cancelled in this journey. For example: True (Stop is not served on this journey)"
+        },
+        {
+          "name": "estimated",
+          "description": "Boolean indicator of whether the data is estimated"
+        },
+        {
+          "name": "aimedArrivalTime",
+          "description": "Planned arrival time of vehicle at a stop. For example: 2020-02-13 23:23:00 UTC"
+        },
+        {
+          "name": "arrivalTime",
+          "description": "Actual arrival time of a vehicle at a stop. For example: 2020-02-13 23:25:11 UTC"
+        },
+        {
+          "name": "aimedDepartureTime",
+          "description": "Planned departure time of a vehicle from a stop. For example: 2020-02-13 23:23:00 UTC"
+        },
+        {
+          "name": "departureTime",
+          "description": "Actual departure time of a vehicle from a stop. For example: 2020-02-13 23:25:11 UTC"
+        },
+        {
+          "name": "dataSource",
+          "description": "Codespace of the data source. For example: AKT (Agder kollektivtrafikk)"
+        },
+        {
+          "name": "dataSourceName",
+          "description": "Name of the data source. For example: Agder kollektivtrafikk"
+        }
+      ],
+      "paths": {
+        "readme": "realtime_siri_et/realtime_siri_et_last_recorded/README.md",
+        "jsonld": "realtime_siri_et/realtime_siri_et_last_recorded/dataset.jsonld",
+        "examples": "realtime_siri_et/realtime_siri_et_last_recorded/examples.sql",
+        "freshness": "realtime_siri_et/realtime_siri_et_last_recorded/freshness.json"
+      }
+    }
+  ]
+}

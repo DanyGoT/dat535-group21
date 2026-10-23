@@ -74,9 +74,22 @@ Vehicle Positions GraphQL API v2 (https://developer.entur.no/apis/graphql/vehicl
 
 ## Historical real-time
 
-No public archive found (no historical SIRI, BigQuery or bulk download). **UNVERIFIED** —
-the Entur Confluence space wasn't fully searched; asking Entur would settle it. Until then,
-analysis depth = how long we have been collecting.
+Entur publishes processed SIRI-ET history as open BigQuery tables (NLOD, refreshed daily,
+from Q1 2020). Docs: `entur-ai-docs/` (Entur's generated catalog) and
+https://data.entur.no/public/datasets. Queries need your own GCP project and must filter on
+`operatingDate` (partitioned, billions of rows).
+
+| Table (`ent-data-sharing-ext-prd.realtime_siri_et.`) | Content | Grain |
+| --------------------------------------------------- | ------- | ----- |
+| `realtime_siri_et_last_recorded` | Last message per journey: aimed/actual times, journey/stop cancellation, extra journey/call | operatingDate, datedServiceJourneyId, sequenceNr |
+| `siri_et_estimated_times` | Estimate vs actual at fixed lead times (1–45 min) | + timeDeltaMinutes |
+
+- These are Entur's own processed product (a subset of fields, ET only, no SX), so we don't
+  use them as pipeline input. Use them as a reference for Silver design and to cross-check
+  our Silver/Gold numbers for the same operating day.
+- Access and table contents: **UNVERIFIED** (taken from the docs, no query run yet).
+- No raw SIRI archive or bulk download found. Raw-data analysis depth = how long we have been
+  collecting.
 
 ## Relevant repos
 
