@@ -95,7 +95,8 @@ def create_spark(app_name="DAT535-Bronze"):
     from pyspark.sql import SparkSession
     # Local mode runs everything in the driver JVM; the 1g default is too small for
     # payloads of up to ~15 MB per line across several parallel tasks.
-    spark = SparkSession.builder \
+    builder: SparkSession.Builder = SparkSession.builder # pyright: ignore[reportAssignmentType]
+    spark = builder \
         .appName(app_name) \
         .config("spark.driver.memory", os.environ.get("SPARK_DRIVER_MEMORY", "4g")) \
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
