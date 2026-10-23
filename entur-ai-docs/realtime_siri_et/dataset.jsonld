@@ -1,0 +1,207 @@
+{
+  "@context": "https://schema.org/",
+  "@type": "Dataset",
+  "name": "realtime_siri_et_last_recorded",
+  "description": "Refreshed daily. Recorded SIRI-ET data: the last message of a journey, providing a \"trip summary\". The most-used fields, with one row per stop in a journey. Covers multiple Norwegian operators from Q1 2020 onward and is updated every morning. Based on Entur's SIRI-ET stream — see developer.entur.org/pages-real-time-intro.",
+  "identifier": "ent-data-sharing-ext-prd.realtime_siri_et.realtime_siri_et_last_recorded",
+  "url": "https://data.entur.no/public/datasets/realtime_siri_et/realtime_siri_et_last_recorded",
+  "keywords": [
+    "daily",
+    "siri_et_last_recorded"
+  ],
+  "isAccessibleForFree": true,
+  "license": "https://data.norge.no/nlod/en/2.0",
+  "creator": {
+    "@type": "Organization",
+    "name": "Entur AS",
+    "url": "https://entur.no",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "data team",
+      "url": "https://entur.slack.com/archives/talk-data"
+    }
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Entur AS",
+    "url": "https://entur.no"
+  },
+  "spatialCoverage": {
+    "@type": "Place",
+    "name": "Norway",
+    "geo": {
+      "@type": "GeoShape",
+      "box": "57.9 4.5 71.2 31.1"
+    }
+  },
+  "dateModified": "GENERATED_AT_RUNTIME_FROM_BIGQUERY",
+  "variableMeasured": [
+    {
+      "@type": "PropertyValue",
+      "name": "recordedAtTime",
+      "description": "The time when the data object was created/published. For example: 2020-02-13 23:29:54.82 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "lineRef",
+      "description": "Reference to the line of the vehicle journey. For example: AKT:Line:100"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "directionRef",
+      "description": "Reference to the relative direction of the vehicle journey. For example: 2 (Outbound)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "operatingDate",
+      "description": "Date of the vehicle journey. For example: 2020-01-10"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "dayOfTheWeek",
+      "description": "Day of the week. For example: 3 (Wednesday)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "serviceJourneyId",
+      "description": "ID of the service journey. For example: RUT:ServiceJourney:17-154797-20890925"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "datedServiceJourneyId",
+      "description": "ID of the service journey with date. For example: 2021-09-09:RUT:ServiceJourney:17-154797-20890925"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "operatorRef",
+      "description": "ID to the corresponding company responsible for vehicle journey. For example: nettbuss"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "vehicleMode",
+      "description": "Transport type. For example: bus"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "extraJourney",
+      "description": "Boolean indicator of if vehicle journey is a replacement departure. For example: true (vehicle journey is a replacement departure)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "journeyCancellation",
+      "description": "Boolean indicator of if vehicle journey is a cancelled departure. For example: true (vehicle journey is a cancelled departure)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "stopPointRef",
+      "description": "Served quay by the vehicle journey in NSR format. For example: NSR:Quay:105273 (Storgata)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "sequenceNr",
+      "description": "Number in the sequence of served stops. For example: 23"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "stopPointName",
+      "description": "Name of stop. For example: Storgata"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "originName",
+      "description": "Name of the first stop of the departure. For example: Skøyen stasjon"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "destinationName",
+      "description": "Name of the last stop of the vehicle journey. For example: Simensbråten"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "extraCall",
+      "description": "Boolean indicator of whether the served stop is in addition to the planned stop sequence"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "stopCancellation",
+      "description": "Boolean indicator for whether a stop is cancelled in this journey. For example: True (Stop is not served on this journey)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "estimated",
+      "description": "Boolean indicator of whether the data is estimated"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "aimedArrivalTime",
+      "description": "Planned arrival time of vehicle at a stop. For example: 2020-02-13 23:23:00 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "arrivalTime",
+      "description": "Actual arrival time of a vehicle at a stop. For example: 2020-02-13 23:25:11 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "aimedDepartureTime",
+      "description": "Planned departure time of a vehicle from a stop. For example: 2020-02-13 23:23:00 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "departureTime",
+      "description": "Actual departure time of a vehicle from a stop. For example: 2020-02-13 23:25:11 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "dataSource",
+      "description": "Codespace of the data source. For example: AKT (Agder kollektivtrafikk)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "dataSourceName",
+      "description": "Name of the data source. For example: Agder kollektivtrafikk"
+    }
+  ],
+  "additionalProperty": [
+    {
+      "@type": "PropertyValue",
+      "name": "grain",
+      "value": [
+        "operatingDate",
+        "datedServiceJourneyId",
+        "sequenceNr"
+      ]
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "domain",
+      "value": "siri_et"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "containsPii",
+      "value": false
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "tags",
+      "value": [
+        "daily",
+        "siri_et_last_recorded"
+      ]
+    }
+  ],
+  "distribution": [
+    {
+      "@type": "DataDownload",
+      "name": "BigQuery table",
+      "encodingFormat": "application/vnd.google.bigquery",
+      "contentUrl": "https://console.cloud.google.com/bigquery?p=ent-data-sharing-ext-prd&d=realtime_siri_et&t=realtime_siri_et_last_recorded&page=table"
+    }
+  ],
+  "isPartOf": {
+    "@type": "DataCatalog",
+    "name": "Entur Public Data Catalog",
+    "url": "https://data.entur.no/public/datasets"
+  }
+}

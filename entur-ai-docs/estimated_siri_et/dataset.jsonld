@@ -1,0 +1,178 @@
+{
+  "@context": "https://schema.org/",
+  "@type": "Dataset",
+  "name": "siri_et_estimated_times",
+  "description": "Refreshed daily. Per-stop SIRI-ET estimated arrival/departure times compared against the recorded actuals at fixed lead times before the stop (e.g. the estimate 5 minutes before the actual arrival). Lets you assess the quality of real-time estimates and the journey information available to travellers. Based on Entur's SIRI-ET stream covering multiple Norwegian operators — see developer.entur.org/pages-real-time-intro.",
+  "identifier": "ent-data-sharing-ext-prd.realtime_siri_et.siri_et_estimated_times",
+  "url": "https://data.entur.no/public/datasets/realtime_siri_et/siri_et_estimated_times",
+  "keywords": [
+    "daily",
+    "siri_et_last_recorded"
+  ],
+  "isAccessibleForFree": true,
+  "license": "https://data.norge.no/nlod/en/2.0",
+  "creator": {
+    "@type": "Organization",
+    "name": "Entur AS",
+    "url": "https://entur.no",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "data team",
+      "url": "https://entur.slack.com/archives/talk-data"
+    }
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Entur AS",
+    "url": "https://entur.no"
+  },
+  "spatialCoverage": {
+    "@type": "Place",
+    "name": "Norway",
+    "geo": {
+      "@type": "GeoShape",
+      "box": "57.9 4.5 71.2 31.1"
+    }
+  },
+  "dateModified": "GENERATED_AT_RUNTIME_FROM_BIGQUERY",
+  "variableMeasured": [
+    {
+      "@type": "PropertyValue",
+      "name": "operatingDate",
+      "description": "Date of the vehicle journey. For example: 2020-01-10"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "dataSource",
+      "description": "Codespace of the data source. For example: AKT (Agder kollektivtrafikk)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "transportMode",
+      "description": "Transport mode for the vehicle Journey. For example: BUS"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "lineRef",
+      "description": "Reference to the line of the vehicle journey. For example: AKT:Line:100"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "serviceJourneyId",
+      "description": "ID of the service journey. For example: RUT:ServiceJourney:17-154797-20890925"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "datedServiceJourneyId",
+      "description": "ID of the service journey with date. For example: 2021-09-09:RUT:ServiceJourney:17-154797-20890925"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "stopPointRef",
+      "description": "Served quay by the vehicle journey in NSR format. For example: NSR:Quay:105273 (Storgata)"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "parentStopPointRef",
+      "description": "Parent stop point for th equay specified in StopPointRef."
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "stopPointName",
+      "description": "Name of stop. For example: Storgata"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "sequenceNr",
+      "description": "Number in the sequence of served stops. For example: 23"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "timeDeltaMinutes",
+      "description": "Describes how many minutes before the actual arrival/departure the estimated times are taken from. Example: 10"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "AimedArrivalTime",
+      "description": "Planned arrival time of vehicle at a stop. For example: 2020-02-13 23:23:00 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "arrivalTime",
+      "description": "Actual arrival time of a vehicle at a stop. For example: 2020-02-13 23:25:11 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "estimatedArrivalTime",
+      "description": "Estimated arrival time of a vehicle at a stop at a certain point in time(timeDelataMinutes before arrivalTime). For example: 2020-02-13 23:23:10 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "EstimatedArrivalRecordedAtTime",
+      "description": "Timestamp when estimatedArrivalTime was generated. Closest timestamp larger than arrivaltime - timeDeltaMinutes"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "AimedDepartureTime",
+      "description": "Planned departure time of a vehicle from a stop. For example: 2020-02-13 23:23:00 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "departureTime",
+      "description": "Actual departure time of a vehicle from a stop. For example: 2020-02-13 23:25:11 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "estimatedDepartureTime",
+      "description": "Estimated departure time of a vehicle at a stop at a certain point in time(timeDelataMinutes before departureTime). For example: 2020-02-13 23:23:10 UTC"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "EstimatedDepartureRecordedAtTime",
+      "description": "Timestamp when estimatedDepartureTime was generated. Closest timestamp larger than departuretime - timeDeltaMinutes"
+    }
+  ],
+  "additionalProperty": [
+    {
+      "@type": "PropertyValue",
+      "name": "grain",
+      "value": [
+        "operatingDate",
+        "datedServiceJourneyId",
+        "sequenceNr",
+        "timeDeltaMinutes"
+      ]
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "domain",
+      "value": "siri_et"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "containsPii",
+      "value": false
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "tags",
+      "value": [
+        "daily",
+        "siri_et_last_recorded"
+      ]
+    }
+  ],
+  "distribution": [
+    {
+      "@type": "DataDownload",
+      "name": "BigQuery table",
+      "encodingFormat": "application/vnd.google.bigquery",
+      "contentUrl": "https://console.cloud.google.com/bigquery?p=ent-data-sharing-ext-prd&d=realtime_siri_et&t=siri_et_estimated_times&page=table"
+    }
+  ],
+  "isPartOf": {
+    "@type": "DataCatalog",
+    "name": "Entur Public Data Catalog",
+    "url": "https://data.entur.no/public/datasets"
+  }
+}

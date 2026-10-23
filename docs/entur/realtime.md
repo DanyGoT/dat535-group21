@@ -115,3 +115,15 @@ Consequences for the receiver: answer 2xx fast (append, then reply), accept `HEA
 - How cancellations are encoded (journey-level vs call-level flags).
 - How extra/additional journeys are marked and identified.
 - How missing recorded times appear (e.g. a stop passed without a `RecordedCall`).
+
+Hints from Entur's BigQuery docs (`entur-ai-docs/realtime_siri_et/README.md`), derived from
+the same stream:
+
+- Flags exposed there: `journeyCancellation`, `stopCancellation`, `extraJourney`, `extraCall`,
+  `estimated` (estimated rather than recorded).
+- Some operators fill missing actual times with the aimed times, which pulls delay
+  aggregates toward zero.
+- Train data used to come only from Bane NOR (`BNR`); train companies later got their own
+  streams. Split older data by `serviceJourneyId`/`lineRef`.
+- Delay = actual − aimed. `RecordedAtTime` is publish time, not arrival/departure.
+- Per-operator quality over time: https://data-quality.entur.no/SIRI_ET

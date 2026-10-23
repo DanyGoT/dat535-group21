@@ -1,7 +1,7 @@
 # Architecture
 
-Entur has no public archive of past real-time data (see `entur/sources.md`), so we collect
-it ourselves. A small always-on receiver stores raw pushes; scheduled Spark batch jobs turn
+Entur has no public archive of raw real-time data, only processed BigQuery tables used as a
+reference (see `entur/sources.md`), so we collect it ourselves. A small always-on receiver stores raw pushes; scheduled Spark batch jobs turn
 them into Medallion layers.
 
 ```
