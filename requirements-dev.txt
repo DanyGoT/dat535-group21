@@ -1,0 +1,5 @@
+# Local dev environment (editor/LSP, tests). Matches the VM's Spark version.
+pyspark==3.5.0
+findspark
+websockets
+pytest
