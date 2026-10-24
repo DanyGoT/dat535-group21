@@ -167,6 +167,13 @@ class IngestTest(LandingCase):
                        for p in self.landing.rglob("*") if p.is_file())
         self.assertEqual(before, after)
 
+    def test_payload_longer_than_jacksons_default(self):
+        # Prod ET had pushes of 21.6M and 22.8M characters on 2026-10-22, marked corrupt then.
+        big = "<Siri>" + "x" * 20_000_100 + "</Siri>"
+        self.put("et", "hour=05.jsonl.gz", line("et", payload=big), day=date(2026, 10, 2))
+        record = bronze.run(self.landing, self.out, date(2026, 10, 2), feeds=["et"], spark=self.spark)
+        self.assertEqual((record["feeds"]["et"]["rows"], record["feeds"]["et"]["bad_rows"]), (1, {}))
+
     def test_day_without_data_is_skipped(self):
         record = bronze.run(self.landing, self.out, date(2026, 10, 1), spark=self.spark)
         self.assertTrue(record["feeds"]["et"]["skipped"])
