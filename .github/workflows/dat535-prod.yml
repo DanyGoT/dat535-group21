@@ -78,8 +78,22 @@ jobs:
           # One Spark job at a time on the 8 GB VM (dev and prod share it): wait, never overlap.
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
 
+      - name: Run Bronze DATEX
+        # Its own step, run even if SIRI Bronze failed: one source must not hide the other.
+        if: ${{ !cancelled() && steps.dirs.outcome == 'success' }}
+        env:
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+          BRONZE_DATE: ${{ github.event.inputs.bronze_date }}
+        run: |
+          source ~/spark-env/bin/activate
+          mkdir -p "$DAT535_OUTPUT_DIR"
+          # One Spark job at a time on the 8 GB VM (dev and prod share it): wait, never overlap.
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze_datex.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
+
       - name: Upload Bronze run records
         # Only the small run records; the Parquet data stays on the VM.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: prod-bronze-runs-${{ github.run_number }}
@@ -93,11 +107,15 @@ jobs:
           OUT: ${{ steps.dirs.outputs.output }}
         run: |
           echo "## Bronze run" >> "$GITHUB_STEP_SUMMARY"
-          latest=$(ls -t "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-*.json 2>/dev/null | head -1)
-          if [ -n "$latest" ]; then
-            echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            cat "$latest" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # This attempt's records: <run id>.json (SIRI) and <run id>.datex.json.
+          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json 2>/dev/null)
+          if [ -n "$records" ]; then
+            for r in $records; do
+              echo "### $(basename "$r")" >> "$GITHUB_STEP_SUMMARY"
+              echo '```json' >> "$GITHUB_STEP_SUMMARY"
+              cat "$r" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            done
           else
             echo "No run record written." >> "$GITHUB_STEP_SUMMARY"
           fi
