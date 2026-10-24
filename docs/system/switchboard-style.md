@@ -1,8 +1,16 @@
 # Switchboard style
 
-Look for the monitor's status page. Adapted from Switchboard; the page in this
-project is **read-only**: no forms, no buttons that act, no POST endpoints.
-Copy the CSS verbatim and follow the structure.
+Visual style of the monitor's status page (`collector/monitor.py` renders it). Adapted from
+Switchboard; the page in this project is **read-only**: no forms, no buttons that act, no
+POST endpoints. Copy the CSS verbatim and follow the structure.
+
+## What the collector's page shows
+
+- **CHECKS**: one row each for `receiver`, `datex`, every feed (`siri-et`, `siri-sx`,
+  `vehicles`, `datex-<feed>`), `disk` and `root-disk`.
+- **PROBLEMS** (only when something fails), **LAST 24H** (embedded Grafana panels),
+  **SUBSCRIPTIONS** (SIRI), **POLLING · DATEX**, **INFO** (overall state, since, checked).
+- Refreshes every 120 s (one monitor run); ntfy notifications only on OK↔FAIL.
 
 ## Web
 
@@ -143,7 +151,7 @@ right-aligned muted numbers. Description under it.
 ```
 
 State words: `RUNNING`, `DONE`, `FAILED`, `STARTING`, `RESTARTING`,
-`STOPPING`, `STOPPED`.
+`STOPPING`, `STOPPED`, and `IDLE` (muted: deliberately off, e.g. DATEX without credentials).
 
 ### Detail page (key/value sections + logs)
 

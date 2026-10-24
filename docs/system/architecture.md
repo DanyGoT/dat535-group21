@@ -1,134 +1,156 @@
 # Architecture
 
-Entur has no public archive of raw real-time data, only processed BigQuery tables used as a
-reference (see `entur/sources.md`), so we collect it ourselves. A small always-on receiver stores raw pushes; scheduled Spark batch jobs turn
-them into Medallion layers.
+Neither source keeps the raw data we need: Entur has no archive of raw real-time messages
+(only processed BigQuery tables, [entur/sources.md](../entur/sources.md)), and NPRA's DATEX only serves the current
+snapshot ([datex/sources.md](../datex/sources.md)). So always-on collectors store everything as it arrives, and scheduled
+Spark jobs turn it into Medallion layers. Everything runs on one UiS VM ([system/storage.md](storage.md)).
 
 ```
-Entur SIRI ET/SX ──push──▶ receiver ──append──▶ landing/ (raw, hourly JSONL)
-Entur NeTEx + NSR ─daily download──────────────▶ landing/ (raw zips)
-                                                    │
-                     monitor (read-only) ◀──────────┤──▶ main page + push notifications
-                     exporter (read-only) ◀─────────┤──▶ Prometheus ──▶ Grafana (/grafana/)
-                                                    ▼
-                      Spark batch (GitHub Actions, scheduled): Bronze → Silver → Gold
+Entur SIRI ET/SX ──push──────▶ receiver.py ──┐
+Entur vehicles ───websocket──▶ vehicles.py ──┼──▶ landing/<dataset>/date=D/hour=HH.jsonl.gz
+NPRA DATEX ◀─────poll (GET)── datex.py ──────┘     raw, hourly, UTC, never modified
+Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex, landing/nsr
+                                                   │
+  monitor.py   (reads) ◀───────────────────────────┤──▶ status page + ntfy on OK↔FAIL
+  exporter.py  (reads) ◀───────────────────────────┤──▶ Prometheus ──▶ Grafana (/grafana/)
+  retention.py (deletes whole days, by policy) ────┤
+                                                   ▼
+  Spark (GitHub Actions, 03:00 UTC): Bronze ──▶ Silver ──▶ Gold      /data/dat535/{prod,dev}
 ```
 
 ## Components
 
-### Receiver (always on)
+| Component | Code | Runs as | State (2026-10-24) |
+| --------- | ---- | ------- | ------------------ |
+| SIRI receiver | `collector/receiver.py` | `dat535-receiver.service` | running since 2026-10-15 |
+| Vehicle positions | `collector/vehicles.py` | `dat535-vehicles.service` | running since 2026-10-17 |
+| DATEX poller | `collector/datex.py` | `dat535-datex.service` | ready; needs credentials in `collector.env` |
+| NeTEx + NSR download | — | — | **not built**: needed by most Gold products ([pipeline/gold.md](../pipeline/gold.md)) |
+| Monitor + status page | `collector/monitor.py`, `serve_status.py` | timer (2 min), `dat535-status` | running |
+| Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
+| Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
+| Retention | `collector/retention.py` | timer (hourly) | new |
+| Bronze | `pipeline/bronze.py` (SIRI), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (DATEX) |
+| Silver, Gold | — | — | not built ([pipeline/silver.md](../pipeline/silver.md), [pipeline/gold.md](../pipeline/gold.md)) |
 
-- Holds a SIRI 2.0 pub/sub subscription with Entur and accepts pushed XML over HTTP.
-- Deliberately dumb: **no parsing, no filtering**. Each push becomes one line in the current
-  hourly file. The raw XML is kept unchanged inside the line.
-- Runs on the VM, or on a separate always-on machine (then files are synced to the VM).
-- Subscription request, heartbeat (30–60 s), renewal and failure handling: see
-  `entur/realtime.md` (verified against `entur/anshar`). The endpoint must be reachable
-  from the internet.
+## Collectors
 
-### Daily static download
+All three follow the same rules:
 
-- Once per day (Entur's limit): national NeTEx and NSR stops, stored unchanged by date.
-- Required, not optional: Entur keeps at most 48 h of past data in the static export, so
-  without our own copy we lose the planned schedule for older days and cannot compute delays.
+- **Dumb.** No parsing, no filtering. Every message (or poll) becomes one JSON line, with the
+  payload unchanged inside it.
+- **One writer.** `collector/hourly.py` appends to `hour=HH.jsonl.part` and, when the hour
+  ends, gzips it to `hour=HH.jsonl.gz` (via `.gz.tmp` and an atomic rename). Closed files are
+  never touched again; a restart adopts the open `.part` and closes stale ones.
+- **Coverage evidence is data too.** SIRI heartbeats, failed DATEX polls and every repeated
+  snapshot are stored, so gaps can be measured later.
 
-### Monitor (read-only)
+**SIRI receiver.** Holds SIRI 2.0 pub/sub subscriptions (ET, SX) with Entur, which POSTs to
+our public address (via the tunnel). Re-subscribes on silence (3 missed heartbeats) and every
+24 h. Protocol details: [entur/realtime.md](../entur/realtime.md).
 
-Runs periodically (cron/systemd timer). Only reads; never modifies landing data.
-Checks:
+**Vehicle positions.** One GraphQL subscription over a websocket to all vehicles in Norway;
+reconnects with backoff; every reconnect starts with a full snapshot. Ruter publishes no
+positions there.
+
+**DATEX poller.** One thread per feed polls NPRA's pull services with Basic Auth; one line per
+poll, failures included. Without credentials it runs idle (not a failure). Feeds, intervals
+and sizes: [datex/sources.md](../datex/sources.md).
+
+## Landing zone
+
+The contract between the collectors and Spark.
+
+```
+/data/dat535/landing/
+├── siri-et/date=YYYY-MM-DD/hour=HH.jsonl.gz       (hour=HH.jsonl.part while open)
+├── siri-sx/...
+├── vehicles/...
+├── datex-<feed>/...   situation, traveltime, weather, traveltime-locations, weather-sites
+├── netex/date=YYYY-MM-DD/rb_norway-aggregated-netex.zip    (planned)
+└── nsr/date=YYYY-MM-DD/Current_latest.zip                  (planned)
+```
+
+| Source | Line |
+| ------ | ---- |
+| SIRI, vehicles | `{"received_at": "<UTC>", "endpoint": "et\|sx\|vehicles", "payload": "<raw XML or JSON message>"}` |
+| DATEX | `{"requested_at", "received_at", "endpoint": "<feed>", "http_status", "last_modified", "error", "payload": "<XML or null>"}` |
+
+- `date=` and `hour=` are **UTC**, from `received_at`: no DST duplicates or gaps. Operating
+  days are Norwegian local time; Silver maps between them.
+- **Readers take closed files only** (`*.jsonl.gz`, and plain `*.jsonl` for hours closed before
+  2026-10-15); never `*.part` or `*.tmp`.
+- **JSON Lines, not concatenated XML:** each message stays one valid record, and a day can be
+  split by hour.
+- **Hourly files:** few enough for Spark to list, small enough to rerun one day or read while
+  the collectors write. Gzip is not splittable; one task per hour is fine at this size.
+- Payloads can exceed 20M characters: every Spark JSON read needs `maxStringLen` ([system/storage.md](storage.md)).
+- **Immutable.** Only the collectors write here, and files are never modified. The one
+  exception is `retention.py`, which may delete whole old days as a last resort ([system/storage.md](storage.md)).
+
+## Batch pipeline
+
+- The prod workflow runs at 03:00 UTC for the previous UTC day (after hour 23 has closed);
+  manual reruns take a date. The dev workflow runs one hour of yesterday on every push and PR
+  to `dev`. Outputs: `/data/dat535/prod` and `/data/dat535/dev`, next to the landing zone.
+- **Bronze**: closed hourly files → zstd Parquet per dataset and day, payload unchanged, plus
+  evidence columns (`_bronze_*`: source file, status, payload hash and size, run id) and a run
+  record per run under `bronze/_runs/`. `bronze.py` reads SIRI; `bronze_datex.py` reads DATEX
+  and also reports polls by outcome, distinct snapshots and the longest gap. Rerunning a day
+  replaces that day only.
+- **Silver**: one table per grain, keys and join rules in [pipeline/silver.md](../pipeline/silver.md); candidate tables for
+  all sources in [pipeline/gold.md](../pipeline/gold.md). Primary focus of the course.
+- **Gold**: products for named consumers, [pipeline/gold.md](../pipeline/gold.md).
+- **Spark on this VM**: one job at a time (workflow steps hold a `flock`), zstd, small reader
+  batches, no `partitionBy` on constants. Why: [system/storage.md](storage.md).
+
+## Monitoring
+
+**Monitor** (`monitor.py`, every 2 min, read-only). Checks, each with a one-line reason:
 
 1. Receiver process alive.
-2. Current `*.part` file modified within the last N minutes.
-3. Current `*.part` file has grown since the last check.
-4. Disk usage of the landing volume below a threshold.
+2. Per feed (SIRI, vehicles): newest landing file written recently and still growing.
+3. DATEX poller alive and its login accepted (skipped while idle).
+4. Per DATEX feed: last successful poll and last write within two poll intervals; travel
+   times and weather still changing (NPRA still publishing).
+5. Data volume and root volume below `MONITOR_DISK_MAX_PCT` (90 %).
 
-Any failure → non-zero exit plus a one-line reason.
+It writes the status page ([system/switchboard-style.md](switchboard-style.md)) and sends an ntfy push on state change
+only (OK→FAIL, FAIL→OK).
 
-### Main page and dashboards
+**Metrics.** The exporter turns file names and sizes (never contents), the state files, the
+monitor result, the retention ledger, disk and memory into Prometheus metrics. Prometheus
+scrapes every 30 s and keeps a year. Grafana shows one dashboard (`DAT535 Collector`),
+provisioned from the repo and read-only (anonymous viewers, no login). Prometheus also
+accepts OTLP pushes on localhost, so Spark jobs can report metrics later.
 
-- The monitor writes the main page (static HTML/JSON) to its own directory: the checks,
-  problems, a few embedded Grafana panels and subscription details. Viewable from a phone.
-- Push notifications are sent on **state change** only (OK→FAIL, FAIL→OK), not on every run.
-- Look and structure of the main page: `switchboard-style.md`.
-- The **exporter** turns the landing zone (file names and sizes only), the receiver state,
-  the monitor result and disk usage into Prometheus metrics. **Prometheus** scrapes it every
-  30 s and keeps a year of history. **Grafana** shows one dashboard (`DAT535 Collector`):
-  stored volume, ingest rate, freshness, per-day size and hour coverage, checks and disk.
-- Prometheus has its OTLP receiver on (`/api/v1/otlp/v1/metrics`, localhost only), so
-  OpenTelemetry instrumentation or the Spark layers can push metrics later into the same
-  store; add panels or dashboards next to `collector.json`.
-- Grafana is read-only: anonymous viewers, no login form, no admin user. The datasource and
-  dashboards are provisioned from the repo, so changes go through git.
-- One front server (`serve_status.py`) serves the main page at `/` and proxies `/grafana/`.
-  This is what a tunnel may expose: never the landing data, Prometheus or the exporter, and
-  no controls.
+**What is public.** `serve_status.py` serves the status page at `/` and proxies `/grafana/`;
+the tunnel exposes only it (port 8751) and the receiver (8750). Never the landing data,
+Prometheus or the exporter, and no controls.
 
-### Batch pipeline (Spark)
+## Operations
 
-- Runs on the self-hosted runner via the scheduled workflow, the morning after each
-  operating day (operating days cross midnight).
-- Bronze: closed hourly files → compacted Parquet per day, plus ingestion metadata
-  (source file, received_at, run id).
-- Silver: collapse repeated SIRI updates to the final state per journey × operating date ×
-  stop; join to the archived schedule and stops; flag/quarantine invalid rows. Primary focus.
-- Gold: reliability/punctuality aggregates for a concrete consumer (to be defined).
-- Collection gaps (from monitor/heartbeat data) are reported as a per-day coverage metric.
-
-## Landing zone layout
-
-```
-landing/
-├── siri-et/date=YYYY-MM-DD/hour=HH.jsonl.gz   (hour=HH.jsonl.part while open)
-├── siri-sx/date=YYYY-MM-DD/hour=HH.jsonl.gz   (hour=HH.jsonl.part while open)
-├── netex/date=YYYY-MM-DD/rb_norway-aggregated-netex.zip
-└── nsr/date=YYYY-MM-DD/Current_latest.zip
-```
-
-- **Hourly rotation:** the receiver writes `hour=HH.jsonl.part`. When the hour ends, a
-  background thread in the receiver gzips it to `hour=HH.jsonl.gz.tmp`, renames that to
-  `hour=HH.jsonl.gz` (atomic, so readers see only complete files) and removes the `.part`.
-  Closed files are never touched again. Batch jobs read `*.jsonl.gz` and ignore `*.part`
-  and `*.tmp`. Hours closed before compression was added (2026-10-15) are plain `*.jsonl`;
-  readers must accept both.
-  Batch jobs ignore `*.part`.
-- **Line format (JSON Lines):** `{"received_at": "<ISO-8601 UTC>", "endpoint": "<et|sx>", "payload": "<raw XML string>"}`.
-  Multi-line XML can't be concatenated into one valid file; JSON Lines can.
-- **Why hourly:** many tiny files are slow for Spark to list and schedule, and one huge file
-  can't be partitioned, rerun per day, or safely read while being written. 24 files per day
-  per feed is a good balance. Gzip is not splittable, which is fine at this file size.
-- `date=` and `hour=` are **UTC** (from `received_at`), so DST never produces a duplicate or
-  missing hour. Operating days are Norwegian local time; Silver maps between them.
-- Heartbeats are stored as ordinary lines (`HeartbeatNotification` payload). They keep the
-  `.part` growing at night and give the coverage metric its raw data.
-- Daily volume is unknown until measured.
-
-## Implementation
-
-`collector/` (Python standard library only; systemd units and example env in `collector/systemd/`):
-
-- `receiver.py`: receiver + subscription keeper. Unset `RECEIVER_PUBLIC_URL` = receive only.
-- `monitor.py`: the four checks; writes `status/index.html` + `status.json`; ntfy on change.
-- `serve_status.py`: front server. GET/HEAD-only for the status directory; proxies `/grafana/`
-  to Grafana (GET/HEAD/POST, no websockets). The tunnel points here.
-- `exporter.py`: read-only `/metrics` for Prometheus.
-- `observability/`: Prometheus config, Grafana config, provisioning and dashboard JSON.
-- Ports, all bound to 127.0.0.1: receiver 8750, front server 8751, exporter 8752,
-  Grafana 8753, Prometheus 8754.
-- Tests: `python3 -m unittest discover -s collector/tests` (localhost only, never Entur).
-- Deploy: the prod workflow tests, then runs `collector/deploy.sh`, which copies the code to
-  `~/dat535-collector` on the VM, installs pinned, checksum-verified Prometheus and Grafana
-  releases into `~/dat535-tools`, and (re)starts systemd **user** units. Each service restarts
-  only when its own files changed. Prometheus and Grafana data live in `~/.local/state/dat535/`.
-  No repo clone on the VM; one-time setup in `collector/README.md`.
+- Ports, all on 127.0.0.1: receiver 8750, status page 8751, exporter 8752, Grafana 8753,
+  Prometheus 8754.
+- Deploy: the prod workflow runs the tests, then `collector/deploy.sh`, which copies
+  `collector/` to `~/dat535-collector`, installs pinned, checksum-verified Prometheus and
+  Grafana into `~/dat535-tools`, and restarts only the systemd user units whose files changed
+  (a receiver restart means a collection gap and a re-subscribe). No repo clone on the VM.
+- Setup, credentials, commands: [collector/README.md](../../collector/README.md). Capacity: [system/storage.md](storage.md).
 
 ## Decisions
 
-- `ET-Client-Name`: `uis-dat535group21-collector` (also used as SIRI `RequestorRef`/`SubscriberRef`).
+- `ET-Client-Name`: `uis-dat535group21-collector` (also SIRI `RequestorRef`/`SubscriberRef`,
+  and the DATEX `User-Agent`).
+- The receiver runs on the VM, reachable through a reverse SSH tunnel to a public host.
 - Push notifications: ntfy.sh; the topic name is the secret.
+- DATEX credentials only in `~/.config/dat535/collector.env` (NPRA's terms make them
+  confidential); sent over https only, redirects not followed.
+- Bronze Parquet is zstd; storage is managed by tiered retention ([system/storage.md](storage.md)).
 
 ## Open decisions
 
-- XML parsing in Spark 3.5 (native `from_xml` only arrives in Spark 4.0): `spark-xml`
-  package vs Python XML parsing in `mapPartitions`.
-- Where the receiver runs (VM vs other machine) and how files reach the VM.
-- Gold consumer and questions.
+- XML parsing in Spark 3.5 (native `from_xml` arrives in Spark 4.0): the `spark-xml` package
+  or Python parsing in `mapPartitions`.
+- Where Silver spills (`spark.local.dir`): root `/tmp` is too small ([system/storage.md](storage.md)).
+- Which Gold products to build beyond #1 ([pipeline/gold.md](../pipeline/gold.md)).

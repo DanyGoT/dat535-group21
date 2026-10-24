@@ -29,7 +29,8 @@ from the VM, 2026-10-23/24.
 | traveltime-locations | `GetPredefinedTravelTimeLocations` | 0.6 MB / 0.16 MB | when sections change | 6 h | reference table |
 | weather-sites | `GetMeasurementWeatherSiteTable` | 1.9 MB / 44 KB | when stations change | 6 h | reference table |
 
-Not collected: road surface forecasts (only useful for predicting departures days ahead) and webcams.
+Not collected: road surface forecasts (only useful for predicting departures days ahead,
+[pipeline/gold.md](../pipeline/gold.md)) and webcams.
 
 ## What shaped the poller
 
@@ -53,7 +54,7 @@ Not collected: road surface forecasts (only useful for predicting departures day
 
 One landing line per poll, failures included (format in the `datex.py` docstring). Bronze is
 smaller than the gzipped landing: a situation snapshot is 27.8 MB raw, 2.72 MB gzipped,
-1.79 MB in Bronze. All of DATEX is ~7 % of what we store per day.
+1.79 MB in Bronze. All of DATEX is ~7 % of what we store per day ([system/storage.md](../system/storage.md)).
 
 ## End-to-end on the VM
 

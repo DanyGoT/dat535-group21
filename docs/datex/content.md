@@ -33,16 +33,16 @@ one `payload` element that carries its own `publicationTime`.
 
 - **Spark's JSON reader caps strings at 20,000,000 characters** (Jackson 2.15 in Spark 3.5)
   and marks longer lines corrupt. A situation line is ~28.6M. Both Bronze jobs read with
-  `.option("maxStringLen", ...)`.
+  `.option("maxStringLen", ...)` ([system/storage.md](../system/storage.md)).
 - Times inside the payloads are local with offset (`2026-10-23T15:36:18.000+02:00`); ours
   (`received_at`) are UTC.
 - Most polls of weather and nearly all of the location tables return the same snapshot again.
 
-## For Silver (not decided)
+## For Silver (not decided, [pipeline/silver.md](../pipeline/silver.md) section 2)
 
 - Grains: situation record version `(situationRecord id, version)`; road weather measurement
   `(site, measurementTimeDefault, quantity)`; travel time `(section, measurement time)`.
 - Drop repeated snapshots by `_bronze_payload_sha256` **before** parsing XML.
 - Join to transit through a small mapping table (quay → nearest station or road section),
-  built from coordinates. **UNVERIFIED:** coordinates and road
+  built from coordinates ([external/sources.md](../external/sources.md)). **UNVERIFIED:** coordinates and road
   references in the location tables (not yet looked at).

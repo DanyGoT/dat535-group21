@@ -1,82 +1,97 @@
 # Collector
 
-Receiver, vehicle positions collector, DATEX poller, monitor and status page. Design:
-`docs/system/architecture.md`; Entur subscription details: `docs/entur/realtime.md`; DATEX: `docs/datex/sources.md`.
+Everything that runs all the time on the VM: the collectors, the monitor, metrics, the status
+page and retention. How it fits together: [system/architecture.md](../docs/system/architecture.md). Capacity: [system/storage.md](../docs/system/storage.md).
 
-Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` on the VM, as
-systemd user units. Nothing is cloned on the VM.
+Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` as systemd
+**user** units. Nothing is cloned on the VM; edit here, push, approve the prod run.
+
+## What runs
+
+| Unit | Does | A restart costs |
+| ---- | ---- | --------------- |
+| `dat535-receiver` | SIRI ET/SX pub/sub receiver (`receiver.py`) | a gap and a re-subscribe at Entur, with a full resend |
+| `dat535-vehicles` | vehicle positions subscription (`vehicles.py`) | a gap and a full snapshot |
+| `dat535-datex` | DATEX poller (`datex.py`); idle without credentials | at most one poll per feed |
+| `dat535-tunnel` | reverse SSH tunnel to the public host (below) | the receiver and status page go dark briefly |
+| `dat535-status` | status page and `/grafana/` proxy (`serve_status.py`) | nothing |
+| `dat535-exporter`, `-prometheus`, `-grafana` | metrics and dashboard | nothing |
+| `dat535-monitor.timer` | checks every 2 min, status page, ntfy (`monitor.py`) | — |
+| `dat535-retention.timer` | hourly storage retention (`retention.py`) | — |
+
+`deploy.sh` restarts a unit only when its own files changed. The three collectors share
+`hourly.py`: changing it restarts all three.
 
 ## One-time VM setup
 
-As the user the runner runs as (here `ubuntu`):
+As the user the runner runs as (`ubuntu`):
 
 ```sh
 sudo loginctl enable-linger ubuntu          # user units run without a login session
-mkdir -p ~/dat535-data/landing ~/dat535-data/status ~/.config/dat535
-# create the env file from collector/systemd/collector.env.example, then:
-chmod 600 ~/.config/dat535/collector.env    # set NTFY_TOPIC; RECEIVER_PUBLIC_URL when reachable
-command -v rsync python3                    # both needed by deploy.sh
+mkdir -p ~/dat535-data/status ~/.config/dat535
+cp collector/systemd/collector.env.example ~/.config/dat535/collector.env   # then edit it
+chmod 600 ~/.config/dat535/collector.env    # holds NTFY_TOPIC and DATEX credentials
+command -v rsync python3 flock              # needed by deploy.sh and the workflows
 sudo apt install python3-websockets         # vehicles.py (10.4 on Ubuntu 24.04)
 ```
 
 Then push to `main` and approve the prod run.
 
-## Operating
+## Everyday commands
 
 ```sh
-systemctl --user status dat535-receiver dat535-vehicles dat535-datex dat535-status dat535-monitor.timer
-journalctl --user -u dat535-receiver -f
-systemctl --user restart dat535-receiver    # after editing the env file
-python3 ~/dat535-collector/peek.py et       # a few real messages, formatted (et, sx, vehicles)
+systemctl --user status 'dat535-*'
+journalctl --user -u dat535-receiver -f              # or -vehicles, -datex, -retention
+systemctl --user restart dat535-datex                # after editing collector.env
+python3 ~/dat535-collector/peek.py et                # a few real messages (et, sx, vehicles)
+python3 ~/dat535-collector/retention.py --dry-run    # what retention would delete now
 ```
 
-Status page from a laptop without a tunnel: `ssh -L 8751:127.0.0.1:8751 ubuntu@<vm>`, open
+`peek.py <feed>` prints random data messages from the hour being written, heartbeats skipped:
+one ET journey or SX situation as indented XML, or a few vehicles as JSON. `--file
+<hour=HH.jsonl.gz>` reads a closed hour instead.
+
+Status page without the tunnel: `ssh -L 8751:127.0.0.1:8751 ubuntu@<vm>`, then open
 `http://localhost:8751`.
 
-`vehicles.py` subscribes to Entur's Vehicle Positions GraphQL API and lands every message in
-`<landing>/vehicles/` (same line format and hourly files as the receiver). The monitor and
-exporter treat it as a feed like `et` and `sx` (status row `vehicles`, metrics label
-`feed="vehicles"`); Bronze does not read it yet.
+## DATEX credentials
 
-## DATEX
-
-`datex.py` polls Statens vegvesen's DATEX (situations, travel times, road weather, their
-location tables) and lands one line per poll in `<landing>/datex-<feed>/`. Without
-credentials it runs idle (status row `datex` shows IDLE, not a failure). To turn it on, add
-the account from NPRA's two emails to the env file (confidential: never in git):
+Without them `dat535-datex` runs idle and the status page shows `datex` as IDLE (not a
+failure). To turn it on, add the account from NPRA's two emails to `collector.env`
+(confidential: never in git):
 
 ```sh
 DATEX_USERNAME=...
 DATEX_PASSWORD=...
 ```
 
-then:
+then check them and restart:
 
 ```sh
 set -a; . ~/.config/dat535/collector.env; set +a
 python3 ~/dat535-collector/datex.py --check     # one GET per feed: HTTP 200 and sizes, or why not
 systemctl --user restart dat535-datex
-journalctl --user -u dat535-datex -f
 ```
 
-The monitor checks each feed (status rows `datex-<feed>`, section POLLING · DATEX) and the
-exporter adds `dat535_datex_*` metrics; the dashboard has a DATEX row.
+The monitor then checks each feed (rows `datex-<feed>`, section POLLING · DATEX); Grafana has
+a DATEX row. A rejected login pauses all feeds for 15 min and shows as FAILED.
 
-`peek.py <feed>` prints a few random data messages from the hour being written, heartbeats
-skipped: one ET journey or SX situation as indented XML, or a few vehicles as JSON.
-`--file <hour=HH.jsonl.gz>` reads a closed hour instead (its first messages).
+## Retention
 
-A tunnel may expose port 8750 (receiver) and 8751 (status page) on separate, fixed
-hostnames. Never expose the landing directory.
+`retention.py` keeps `/data` from filling up: stale dev output first, then old prod Bronze
+(rebuildable from landing), and only above 92 % the oldest ET landing days. Every deletion is
+logged to `/data/dat535/retention-ledger.jsonl`. Policy and reasoning: [system/storage.md](../docs/system/storage.md).
 
 ## Tunnel
 
 `dat535-tunnel.service` holds a reverse SSH tunnel from the VM to a public host, where Caddy
-serves `siri-dat535.dany.no` -> `127.0.0.1:8750` and `status-dat535.dany.no` -> `:8751`. The VM
-is shared, so the key is treated as readable by anyone on it: on the public host it belongs
-to a `nologin` user that may only listen on those two loopback ports (no shell, no `-L`, no
-other ports). Every login runs a forced command that ends the user's older sessions, which
-the unit does before each start: sshd never notices a silently dead tunnel while its
+serves `siri-dat535.dany.no` -> `127.0.0.1:8750` and `status-dat535.dany.no` -> `:8751`. Never
+expose anything else (landing data, Prometheus, the exporter).
+
+The VM is shared, so the key is treated as readable by anyone on it: on the public host it
+belongs to a `nologin` user that may only listen on those two loopback ports (no shell, no
+`-L`, no other ports). Every login runs a forced command that ends the user's older sessions,
+which the unit does before each start: sshd never notices a silently dead tunnel while its
 ports see traffic, and the stale session would hold them (observed: 41 min).
 
 One-time setup on the VM:
