@@ -22,6 +22,7 @@ layer carries the most weight, then Bronze, then Gold.
 | `docs/entur/identifiers.md` | Joining real-time to schedule/stops, defining keys and grain in Silver |
 | `entur-ai-docs/` | Entur's BigQuery SIRI-ET catalog (generated, don't edit): reference for Silver design and cross-checking results, not pipeline input |
 | `docs/switchboard-style.md` | Building the monitor's status page (read-only) |
+| `docs/problems.md` | After hitting and fixing a non-trivial problem: add an entry (raw material for the report) |
 
 Items marked **UNVERIFIED** in the docs are research gaps, not facts. Verify against the
 source (or real data) before building on them, then update the doc.
