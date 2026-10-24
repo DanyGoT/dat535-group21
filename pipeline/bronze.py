@@ -40,6 +40,10 @@ FEEDS = ("et", "sx")
 HOURS = [f"{h:02d}" for h in range(24)]
 CLOSED = re.compile(r"^hour=(\d{2})\.jsonl(\.gz)?$")
 OPEN = re.compile(r"^hour=(\d{2})\.jsonl\.part$")
+# Spark 3.5's JSON reader (Jackson 2.15) caps strings at 20,000,000 characters and marks longer
+# lines corrupt. Real payloads are longer: ET pushes of 21.6M and 22.8M characters on
+# 2026-10-22, every DATEX situation snapshot (~28.6M). The reader option lifts the cap.
+MAX_STRING_LEN = 2**31 - 1
 
 
 def utcnow():
@@ -128,6 +132,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .option("mode", "PERMISSIVE") \
         .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
         .option("encoding", "UTF-8") \
+        .option("maxStringLen", MAX_STRING_LEN) \
         .json([str(f) for f in files])
 
     status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
