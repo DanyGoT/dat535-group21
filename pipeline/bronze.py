@@ -70,15 +70,16 @@ def parse_hours(text):
     return hours
 
 
-def scan_day(landing, feed, day, hours=HOURS):
+def scan_day(landing, feed, day, hours=HOURS, prefix="siri-"):
     """Closed files of one feed and UTC day, plus which hours are missing or still open.
 
-    Only `hours` are looked at; files of other hours are ignored.
+    Only `hours` are looked at; files of other hours are ignored. The feed's landing directory
+    is <prefix><feed>.
 
     Returns (files sorted by hour, missing hours, open hours). Raises if an hour has both a
-    .jsonl and a .jsonl.gz, which the receiver never produces: a human must look at it.
+    .jsonl and a .jsonl.gz, which the collectors never produce: a human must look at it.
     """
-    folder = Path(landing) / f"siri-{feed}" / f"date={day}"
+    folder = Path(landing) / f"{prefix}{feed}" / f"date={day}"
     closed, open_hours = {}, []
     if folder.is_dir():
         for path in sorted(folder.iterdir()):
@@ -176,11 +177,12 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
             "bad_rows": {k: v for k, v in counts.items() if k != "ok"}}
 
 
-def write_run_record(out_root, day, rid, record):
-    """Driver-side JSON, one file per run; atomic rename so readers never see half a file."""
+def write_run_record(out_root, day, rid, record, name=None):
+    """Driver-side JSON, one file per run (<name or run id>.json); atomic rename so readers
+    never see half a file."""
     folder = Path(out_root) / "_runs" / f"date={day}"
     folder.mkdir(parents=True, exist_ok=True)
-    final = folder / f"{rid}.json"
+    final = folder / f"{name or rid}.json"
     tmp = final.with_name(final.name + ".tmp")
     tmp.write_text(json.dumps(record, indent=1) + "\n")
     os.replace(tmp, final)
