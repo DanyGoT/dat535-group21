@@ -2,8 +2,8 @@
 
     <landing>/<name>/date=YYYY-MM-DD/hour=HH.jsonl.part  (gzipped to .jsonl.gz when the hour ends)
 
-<name> is the dataset: siri-et, siri-sx (receiver.py), vehicles (vehicles.py). Dates and
-hours are UTC. Closed files are never touched again. Standard library only.
+<name> is the dataset: siri-et, siri-sx (receiver.py), vehicles (vehicles.py), datex-<feed>
+(datex.py). Dates and hours are UTC. Closed files are never touched again. Standard library only.
 """
 
 import gzip

@@ -77,7 +77,7 @@ unit_changes=$(rsync -rci "$SRC"/systemd/dat535-* "$UNITS/")
 [[ -n "$code_changes$unit_changes" ]] && printf '%s\n' "$code_changes" "$unit_changes" | sed '/^$/d'
 
 systemctl --user daemon-reload
-SERVICES=(dat535-tunnel dat535-receiver dat535-vehicles dat535-status dat535-exporter dat535-prometheus dat535-grafana)
+SERVICES=(dat535-tunnel dat535-receiver dat535-vehicles dat535-datex dat535-status dat535-exporter dat535-prometheus dat535-grafana)
 systemctl --user enable "${SERVICES[@]/%/.service}" dat535-monitor.timer
 
 changed() { grep -q -- "$1" <<<"$code_changes"$'\n'"$unit_changes"$'\n'"$tool_changes"; }
@@ -94,6 +94,7 @@ restart_if dat535-tunnel.service 'dat535-tunnel.service'
 # The collectors share their landing writer, hourly.py.
 restart_if dat535-receiver.service 'receiver.py\|hourly.py\|dat535-receiver.service'
 restart_if dat535-vehicles.service 'vehicles.py\|hourly.py\|dat535-vehicles.service'
+restart_if dat535-datex.service 'datex.py\|hourly.py\|dat535-datex.service'
 restart_if dat535-status.service 'serve_status.py\|dat535-status.service'
 # exporter.py imports from monitor.py.
 restart_if dat535-exporter.service 'exporter.py\|monitor.py\|dat535-exporter.service'

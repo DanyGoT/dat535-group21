@@ -1,0 +1,18 @@
+[Unit]
+Description=DAT535 Statens vegvesen DATEX II poller
+After=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=10
+
+[Service]
+EnvironmentFile=%h/.config/dat535/collector.env
+# Its own runtime directory: systemd removes a unit's RuntimeDirectory when the unit stops,
+# so sharing dat535/ with the receiver would delete receiver.json under a running receiver.
+RuntimeDirectory=dat535-datex
+Environment=DATEX_STATE_FILE=%t/dat535-datex/datex.json
+ExecStart=/usr/bin/python3 %h/dat535-collector/datex.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
