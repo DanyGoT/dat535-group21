@@ -144,21 +144,22 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .withColumn("_bronze_status", status) \
         .withColumn("_bronze_ingested_at", lit(ingested_at)) \
         .withColumn("_bronze_run_id", lit(rid)) \
-        .withColumn("date", lit(str(day))) \
         .select("received_at", "endpoint", "payload", "feed", "hour",
                 "_bronze_payload_sha256", "_bronze_payload_bytes", "_bronze_status", "_bronze_raw_line",
-                "_bronze_source_file", "_bronze_ingested_at", "_bronze_run_id", "date")
+                "_bronze_source_file", "_bronze_ingested_at", "_bronze_run_id")
 
     # No cache and no coalesce: a day of ET is ~200 GB of raw lines. Gzip is not splittable,
     # so Spark reads one task per hour file and writes about one Parquet file per hour.
-    target = Path(out_root) / f"siri-{feed}"
+    # Writes straight into the day's directory instead of partitionBy("date"): partitionBy sorts
+    # by the partition column first, which spills the whole day to local disk. Readers of the
+    # feed root still get `date` from the directory name.
+    partition = Path(out_root) / f"siri-{feed}" / f"date={day}"
     bronze.write \
         .mode("overwrite") \
-        .partitionBy("date") \
-        .parquet(str(target))
+        .parquet(str(partition))
 
     # Count from the written Parquet: reads only the _bronze_status column instead of re-parsing.
-    written = spark.read.parquet(str(target / f"date={day}"))
+    written = spark.read.parquet(str(partition))
     counts = {r["_bronze_status"]: r["count"] for r in written.groupBy("_bronze_status").count().collect()}
     return {"rows": sum(counts.values()),
             "bad_rows": {k: v for k, v in counts.items() if k != "ok"}}
