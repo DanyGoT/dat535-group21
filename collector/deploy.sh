@@ -91,9 +91,9 @@ restart_if() {  # restart_if UNIT PATTERN: restart when PATTERN matches a change
 }
 
 restart_if dat535-tunnel.service 'dat535-tunnel.service'
-restart_if dat535-receiver.service 'receiver.py\|dat535-receiver.service'
-# vehicles.py imports its writer from receiver.py.
-restart_if dat535-vehicles.service 'vehicles.py\|receiver.py\|dat535-vehicles.service'
+# The collectors share their landing writer, hourly.py.
+restart_if dat535-receiver.service 'receiver.py\|hourly.py\|dat535-receiver.service'
+restart_if dat535-vehicles.service 'vehicles.py\|hourly.py\|dat535-vehicles.service'
 restart_if dat535-status.service 'serve_status.py\|dat535-status.service'
 # exporter.py imports from monitor.py.
 restart_if dat535-exporter.service 'exporter.py\|monitor.py\|dat535-exporter.service'

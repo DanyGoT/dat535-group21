@@ -7,8 +7,8 @@ unchanged, as one JSON line to the hourly landing file:
 
     <landing>/vehicles/date=YYYY-MM-DD/hour=HH.jsonl.part  (gzipped to .jsonl.gz when the hour ends)
 
-Same line format ({"received_at", "endpoint", "payload"}) and hourly files as receiver.py,
-whose writer it reuses. Protocol pings are answered, not stored. Reconnects with backoff when
+Same line format ({"received_at", "endpoint", "payload"}) and hourly files (hourly.py) as
+receiver.py. Protocol pings are answered, not stored. Reconnects with backoff when
 the connection drops, errors or goes silent; every new subscription starts with a snapshot of
 all current vehicles, so expect duplicates after a reconnect.
 
@@ -24,15 +24,13 @@ import asyncio
 import json
 import logging
 import os
-import queue
 import signal
-import threading
 import time
 from pathlib import Path
 
 import websockets
 
-from receiver import HourlyWriter, iso, utcnow
+from hourly import HourlyWriter, iso, utcnow
 
 log = logging.getLogger("vehicles")
 
@@ -80,21 +78,6 @@ QUERY = """subscription {
 
 class ProtocolError(Exception):
     """The server broke the graphql-transport-ws protocol or reported an error."""
-
-
-class Writer(HourlyWriter):
-    """HourlyWriter for <root>/<name>/ instead of <root>/siri-<feed>/."""
-
-    def __init__(self, root, name):
-        self.dir = Path(root) / name
-        self.lock = threading.Lock()
-        self.key = None
-        self.fh = None
-        self.pending = queue.Queue()
-        threading.Thread(target=self._compressor, daemon=True).start()
-        now = utcnow()
-        self.finalize_stale(now)
-        self.adopt_current(now)
 
 
 async def session(url, client_name, writer, silence_s=SILENCE_LIMIT_S):
@@ -169,7 +152,7 @@ def main():
     client_name = os.environ.get("ET_CLIENT_NAME", "uis-dat535group21-collector")
     url = os.environ.get("VEHICLES_URL",
                          "wss://api.entur.io/realtime/v2/vehicles/subscriptions")
-    writer = Writer(landing, FEED)
+    writer = HourlyWriter(landing, FEED)
     log.info("collecting %s into %s (websockets %s)", url, writer.dir, websockets.__version__)
     try:
         asyncio.run(main_async(url, client_name, writer))

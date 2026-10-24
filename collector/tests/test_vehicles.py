@@ -40,7 +40,7 @@ class SessionTest(unittest.TestCase):
             await script(ws, seen)
 
         async def go(d):
-            writer = vehicles.Writer(d, vehicles.FEED)
+            writer = vehicles.HourlyWriter(d, vehicles.FEED)
             async with websockets.serve(handler, "127.0.0.1", 0,
                                         subprotocols=[vehicles.SUBPROTOCOL]) as srv:
                 port = srv.sockets[0].getsockname()[1]
@@ -94,7 +94,7 @@ class SessionTest(unittest.TestCase):
 
     def test_closed_hour_is_gzipped(self):
         with tempfile.TemporaryDirectory() as d:
-            w = vehicles.Writer(d, vehicles.FEED)
+            w = vehicles.HourlyWriter(d, vehicles.FEED)
             from datetime import datetime, timezone
             w.append("a\n", datetime(2026, 10, 15, 10, 59, tzinfo=timezone.utc))
             w.rotate(datetime(2026, 10, 15, 11, 0, tzinfo=timezone.utc))
