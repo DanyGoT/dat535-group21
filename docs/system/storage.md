@@ -35,7 +35,7 @@ volumes every day (so it errs early) and small Silver and Gold.
 ## When it fills: delete by hand, cheapest loss first
 
 Nothing deletes data automatically: we want to know what we give up. Delete whole day
-directories, in this order, and note what you removed in [problems.md](../problems.md).
+directories, in this order, and note what you removed in [report/problems.md](../report/problems.md).
 
 | Order | What | Frees | What is lost |
 | ----- | ---- | ----: | ------------ |
