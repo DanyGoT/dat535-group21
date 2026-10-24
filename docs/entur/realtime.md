@@ -1,129 +1,123 @@
-# Entur real-time (SIRI)
+# Entur real-time: SIRI and vehicle positions
 
-Source: https://developer.entur.no/open-data/realtime.md
-Base URL: `https://api.entur.io/realtime/v1`
+What we collect from Entur in real time, how each channel behaves, and what the messages
+contain. Sources: https://developer.entur.no/open-data/realtime.md, Entur's SIRI hub
+`entur/anshar` (code read 2026-10-15), and our own data. Limits and licence: [entur/sources.md](sources.md).
 
-## Feeds we use
+## What we collect
 
-- **SIRI ET (Estimated Timetable)** — primary. Covers delays, cancellations, additional
-  departures and skipped stops. Holds the **current operating day only**. As a vehicle passes
-  stops, calls move from `EstimatedCall` to `RecordedCall`.
-  (https://entur.atlassian.net/wiki/spaces/PUBLIC/pages/637370373/General+information+SIRI)
-- **SIRI SX (Situation Exchange)** — optional disruption/alert context.
-- Not used: SIRI VM (vehicle positions); GTFS-RT, which has no national feed and partial
-  coverage per codespace (e.g. BNR only ET, SJN only SX, VYX lacks ET/SX/trip updates).
+| Feed | What it carries | Channel | Collector | Daily volume |
+| ---- | --------------- | ------- | --------- | ------------ |
+| **SIRI ET** (Estimated Timetable) | planned, expected and recorded times per call; cancellations; extra journeys | SIRI 2.0 pub/sub (push) | `receiver.py` | ~8.5 GB gzipped |
+| **SIRI SX** (Situation Exchange) | disruption messages for lines and stops | SIRI 2.0 pub/sub (push) | `receiver.py` | ~2 MB |
+| **Vehicle positions** | location, delay, occupancy, next stop per vehicle | GraphQL subscription (websocket) | `vehicles.py` | ~1.27 GB |
 
-## Access modes
+Not used: SIRI VM (vehicle positions as SIRI; the GraphQL API is richer) and GTFS-RT (no
+national feed; partial per codespace, e.g. BNR only ET, SJN only SX).
 
-### Publish/subscribe (SIRI 2.0 XML) — chosen for collection
+## SIRI ET in one paragraph
 
-- `POST /subscribe`: Entur pushes updates to an HTTP endpoint we host.
-- Needs a reachable always-on receiver (see `../system/architecture.md`).
+ET holds the **current operating day only**. Each push restates whole journeys
+(`EstimatedVehicleJourney`) that changed; as a vehicle passes a stop, its call moves from
+`EstimatedCall` to `RecordedCall`. A call is restated on every change, about 57 times on
+average ([pipeline/silver.md](../pipeline/silver.md)), so the raw stream is very redundant and Silver keeps the final state.
 
-Verified 2026-10-15 against `entur/anshar` (Entur's SIRI hub that serves `/subscribe`):
-`Usage.md`, `Subscription-lifecycle.md` and the outbound code (`routes/outbound/`,
-`ServerSubscriptionManager`, `HeartbeatRoute`, `CamelRouteManager`; master at 2026-10-15).
-The developer portal itself documents none of this. Config values below are the repo's
-`application.properties` defaults; production may override them (**UNVERIFIED** for prod).
+## Pub/sub: how the subscription works
 
-**Request.** `POST https://api.entur.io/realtime/v1/subscribe` (or `/subscribe/<codespace>`),
-body a SIRI 2.0 `SubscriptionRequest`. One request per data type (ET and SX are separate
-subscriptions, each with its own `SubscriptionIdentifier`; the address may be shared).
-`?useOriginalId=true` is accepted here too — we keep the default. Shape (from
-`Subscription-lifecycle.md`):
+Verified in `entur/anshar` (`Usage.md`, `Subscription-lifecycle.md`, the outbound routes and
+`ServerSubscriptionManager`); the developer portal documents none of it. Values are the code's
+defaults; production may override them (**UNVERIFIED**).
+
+**Subscribe.** `POST https://api.entur.io/realtime/v1/subscribe` (or `/subscribe/<codespace>`)
+with a SIRI 2.0 `SubscriptionRequest`. One subscription per data type, each with its own
+`SubscriptionIdentifier`. Our request (built in `receiver.py`):
 
 ```xml
 <Siri version="2.0" xmlns="http://www.siri.org.uk/siri">
   <SubscriptionRequest>
     <RequestTimestamp>…</RequestTimestamp>
-    <Address>https://our-host/path</Address>           <!-- or ConsumerAddress; required -->
-    <RequestorRef>…</RequestorRef>
+    <Address>https://our-host/siri/et</Address>        <!-- required -->
+    <RequestorRef>uis-dat535group21-collector</RequestorRef>
     <MessageIdentifier>uuid</MessageIdentifier>
     <SubscriptionContext><HeartbeatInterval>PT60S</HeartbeatInterval></SubscriptionContext>
-    <EstimatedTimetableSubscriptionRequest>            <!-- or SituationExchangeSubscriptionRequest -->
+    <EstimatedTimetableSubscriptionRequest>         <!-- or SituationExchangeSubscriptionRequest -->
       <SubscriberRef>…</SubscriberRef>
-      <SubscriptionIdentifier>our-unique-id</SubscriptionIdentifier>
-      <InitialTerminationTime>…</InitialTerminationTime>   <!-- required, must be in the future -->
-      <EstimatedTimetableRequest version="2.0">
-        <RequestTimestamp>…</RequestTimestamp>
-        <PreviewInterval>PT10H</PreviewInterval>
-      </EstimatedTimetableRequest>
+      <SubscriptionIdentifier>uis-dat535group21-collector-et</SubscriptionIdentifier>
+      <InitialTerminationTime>…</InitialTerminationTime>   <!-- required, in the future -->
+      <EstimatedTimetableRequest version="2.0"><RequestTimestamp>…</RequestTimestamp></EstimatedTimetableRequest>
       <ChangeBeforeUpdates>PT10S</ChangeBeforeUpdates>
     </EstimatedTimetableSubscriptionRequest>
   </SubscriptionRequest>
 </Siri>
 ```
 
-- Synchronous reply: `SubscriptionResponse` with `ResponseStatus/Status` true/false and an
-  error text (e.g. "ConsumerAddress must be set.", "InitialTerminationTime has already passed.").
-- Reusing a `SubscriptionIdentifier` of a different type is rejected.
+| Topic | Behaviour | What the receiver does |
+| ----- | --------- | ---------------------- |
+| Reply | `SubscriptionResponse` with `Status` true/false and an error text | logs and retries no sooner than 5 min |
+| Duration | no maximum `InitialTerminationTime`; terminated once it passes | asks for 7 days, renews every 24 h |
+| Initial data | right after accepting: everything current (ET: running, about to start, or changed; SX: all open messages), split into several POSTs (`MoreData`) | stores it like any push: **expect duplicates after every (re)subscribe** |
+| Pushes | `HTTP POST`, `Content-Type: application/xml`, extra `subscriptionId` header; any 2xx accepted | appends, then answers 200 |
+| Heartbeat | `HeartbeatNotification` to the same address, interval clamped to 30–60 s | stores it (coverage evidence); 3 missed = dead, re-subscribe |
+| Failures | 15 s timeout per POST, one retry; after 5 failures in a row, backoff (10→60 s); cancelled after max(3 × heartbeat, 5 min) | answers fast; accepts `HEAD` |
+| Re-accept | for 30 min after a cancellation, the same id is accepted only if a `HEAD` to our address connects | answers `HEAD` with 200 |
+| Terminate | `TerminateSubscriptionRequest` (`RequestorRef` + `SubscriptionRef`) | sends it on shutdown |
 
-**Duration.** No maximum `InitialTerminationTime` in the code. The hub checks every 2 s and
-terminates the subscription once that time passes (and posts a `TerminateSubscriptionResponse`
-to our address). Renewal = send a new `SubscriptionRequest` before then.
+Keep `useOriginalId` at its default (false): Entur then remaps ids to match the timetable, and
+mixing settings would break joins ([entur/identifiers.md](identifiers.md)).
 
-**Delivery.** Right after accepting, Entur pushes an initial `ServiceDelivery` with all
-current data (ET: journeys running, about to start, or with known changes; SX: all open
-messages), then a `ServiceDelivery` per change. Large deliveries are split into several POSTs
-(`MoreData`). Each push is `HTTP POST` to our address, `Content-Type: application/xml`, with an
-extra `subscriptionId` header. We must answer 2xx; the body is discarded.
+## Other SIRI channels (not used for collection)
 
-**Heartbeat.** `HeartbeatNotification` POSTed to the same address. Requested interval is
-clamped to **30–60 s**. It is the *client's* job to notice silence and re-subscribe.
+- **Request/response:** `POST /services` (or `/services/<codespace>`). Reusing a `RequestorRef`
+  returns only changes since the last call; `MoreData=true` means ask again.
+- **SIRI Lite:** `GET /rest/et|sx|vm`, **4 requests/min**. Without `requestorId` the full
+  dataset each time; with one (a UUID), changes since the last call (session ~5 min).
+  `maxSize` defaults to 1500; `datasetId=<codespace>` filters. Since ET holds the whole
+  current day, one full fetch can **recover a same-day receiver outage**; earlier days cannot
+  be recovered. Response format (XML vs JSON): **UNVERIFIED**.
 
-**Failures.** Each POST times out after 15 s (connect 5 s) and is retried once on transient
-errors. Any non-2xx counts as a failure. After 5 consecutive 5xx/connection failures,
-deliveries pause with backoff (10→60 s). If failures persist past the grace period
-(max(3 × heartbeat, 5 min)), the subscription is **cancelled**. For 30 min afterwards, a new
-`SubscriptionRequest` with the same id is only accepted if a `HEAD` probe to our address
-connects (any HTTP status is fine).
+## Vehicle positions (GraphQL)
 
-**Termination.** `TerminateSubscriptionRequest` with `RequestorRef` + `SubscriptionRef`;
-Entur replies with `TerminateSubscriptionResponse`. Re-subscribing resends all initial data.
+https://developer.entur.no/apis/graphql/vehicle-positions, verified 2026-10-17.
 
-Consequences for the receiver: answer 2xx fast (append, then reply), accept `HEAD`, treat
->3 missed heartbeats as a dead subscription and re-subscribe, renew well before
-`InitialTerminationTime`, and expect duplicate data after every (re)subscribe.
+- Subscription: `wss://api.entur.io/realtime/v2/vehicles/subscriptions`, subprotocol
+  `graphql-transport-ws` (the docs say "graphql-ws"). Queries:
+  `POST https://api.entur.io/realtime/v2/vehicles/graphql`. `ET-Client-Name` required.
+- `subscription { vehicles { ... } }` without a filter = all of Norway. The server batches
+  updates (`bufferSize` 20, `bufferTime` 250 ms). Every new subscription starts with a
+  snapshot of all current vehicles.
+- **Ruter (RUT) publishes no positions**: `vehicles(codespaceId: "RUT")` is empty. Oslo is
+  covered by ET only.
+- Introspection works per type (`__type(name: ...)`); a full `__schema` dump is refused.
+- Rate limits and history: not documented (**UNVERIFIED**).
 
-### Request/response (SIRI 2.0 XML)
+First closed hour (2026-10-17 12:20–13:00 UTC, a Saturday): ~150 updates/s from 1,706
+vehicles in 22 codespaces; 0.2 % exact repeats; received 5 s after `lastUpdated` at the median
+(p99 24 s); 39 min = 369 MB raw, 39 MB gzipped. Field coverage: location, delay, line,
+serviceJourney, occupancyStatus ~100 %; monitoredCall 92 %; progressBetweenStops 69 %;
+datedServiceJourney 44 %; speed 10 %.
 
-- `POST /services`, or per codespace `/services/<codespace>` (e.g. `/services/RUT`).
-- Reusing the same `RequestorRef` returns only changes since the last call.
-- `MoreData=true` → request again immediately for the next page.
+## What the messages contain
 
-### SIRI Lite (HTTP GET) — fallback / same-day recovery
+Verified on our data:
 
-- `/rest/et`, `/rest/sx`, `/rest/vm`. **4 requests/min.**
-- Without `requestorId`: full dataset each call.
-- With `requestorId` (UUID): the first call starts a session (~5 min timeout); later calls
-  return changes only.
-- `maxSize` defaults to 1500; `MoreData=true` means more is available.
-- `datasetId=<codespace>` filters by codespace; `excludedDatasetIds` works for ET/VM only.
-- Since ET holds the whole current operating day, one full fetch can recover a same-day
-  receiver outage. Earlier days cannot be recovered.
+| Fact | Evidence |
+| ---- | -------- |
+| Modes in ET: bus 70 %, ferry 18 %, rail 11 %, tram 0.4 % of journey versions | 2026-10-22 08 UTC |
+| Modes in vehicle positions: bus 93 %, ferry 4 %, coach 2 %, rail 1 %, tram 0.3 % of updates | same hour |
+| Cancellations exist per journey (`EstimatedVehicleJourney/Cancellation`) and per call (`Cancellation`) | 59 journey-level `true` in 2026-10-22 06 UTC |
+| Extra journeys: `ExtraJourney=true`, id in `EstimatedVehicleJourneyCode`, no `FramedVehicleJourneyRef` | 69 in the same hour |
+| Some ET calls carry `Occupancy` (`seatsAvailable`, `standingAvailable`); which operators is not yet counted | 2026-10-22 08 UTC |
+| Pushes reach 22.8M characters (Spark's JSON reader needs `maxStringLen`) | 2026-10-22, prod Bronze |
 
-## Parameters to keep fixed across all collection
+From Entur's BigQuery docs ([entur-ai-docs/realtime_siri_et/README.md](../../entur-ai-docs/realtime_siri_et/README.md)), same stream:
 
-- `useOriginalId`: default (false) remaps IDs to match the static data — **keep the default**,
-  otherwise joins to NeTEx break. Never mix settings within the dataset.
-- Response format of SIRI Lite (XML vs JSON): **UNVERIFIED**.
-
-## Message content — to verify on real data
-
-**UNVERIFIED** — check against Håndbok N801 / real payloads before designing the Silver schema:
-
-- How cancellations are encoded (journey-level vs call-level flags).
-- How extra/additional journeys are marked and identified.
-- How missing recorded times appear (e.g. a stop passed without a `RecordedCall`).
-
-Hints from Entur's BigQuery docs (`entur-ai-docs/realtime_siri_et/README.md`), derived from
-the same stream:
-
-- Flags exposed there: `journeyCancellation`, `stopCancellation`, `extraJourney`, `extraCall`,
-  `estimated` (estimated rather than recorded).
-- Some operators fill missing actual times with the aimed times, which pulls delay
-  aggregates toward zero.
+- Delay = actual − aimed. `RecordedAtTime` is when the message was published, not an arrival
+  or departure time.
+- **Some operators fill missing actual times with the aimed times**, which pulls delay
+  averages toward zero. Check per operator before trusting punctuality numbers.
 - Train data used to come only from Bane NOR (`BNR`); train companies later got their own
-  streams. Split older data by `serviceJourneyId`/`lineRef`.
-- Delay = actual − aimed. `RecordedAtTime` is publish time, not arrival/departure.
-- Per-operator quality over time: https://data-quality.entur.no/SIRI_ET
+  streams.
+- Per-operator data quality over time: https://data-quality.entur.no/SIRI_ET
+
+Still **UNVERIFIED**: whether every operator sets the journey-level cancellation flag, and how
+a stop passed without a `RecordedCall` shows up.

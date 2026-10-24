@@ -1,37 +1,45 @@
 # Identifiers and joins
 
-Sources: https://entur.atlassian.net/wiki/spaces/PUBLIC/pages/637370373/General+information+SIRI
-and https://developer.entur.no/open-data/realtime.md. Inferences are marked.
+How real-time records find their planned journey, stop and line. Sources:
+https://entur.atlassian.net/wiki/spaces/PUBLIC/pages/637370373/General+information+SIRI,
+https://developer.entur.no/open-data/realtime.md and our own data (dates given). Modelling
+rules built on these keys: [pipeline/silver.md](../pipeline/silver.md).
 
-## Join keys
+## Keys
 
-| Real-time (SIRI ET) | Scheduled / reference | Notes |
-| ------------------- | --------------------- | ----- |
-| `DatedVehicleJourneyRef` | NeTEx `ServiceJourney` id | Must be equal (Entur requirement) |
-| `FramedVehicleJourneyRef` → `DatedFrameRef` | operating date | ISO date, local time |
-| stop refs (`StopPointRef`) | NSR Quay / StopPlace ids | NSR ids are mandatory in SIRI |
-| `LineRef` | NeTEx `Line` id | Inference: same id scheme |
+| Real-time (SIRI ET) | Plan / reference | Notes |
+| ------------------- | ---------------- | ----- |
+| `FramedVehicleJourneyRef/DataFrameRef` | operating date | local date; never derive it from a timestamp |
+| `FramedVehicleJourneyRef/DatedVehicleJourneyRef` | NeTEx `ServiceJourney` id | equal by Entur's rules |
+| call `Order` | `StopPointInJourneyPattern/@order` | position in the journey; the stop key (verified, [pipeline/silver.md](../pipeline/silver.md)) |
+| `StopPointRef` | NSR **Quay**, via `ScheduledStopPoint` → `PassengerStopAssignment` | the Stop Place is the Quay's `stopPlaceRef` |
+| `LineRef` | NeTEx `Line` id | same scheme (inferred) |
 
-**Journey key = (ServiceJourney id, operating date).** A ServiceJourney runs on many days,
-so the id alone is not unique.
+- **Journey key = (operating date, ServiceJourney id).** A ServiceJourney runs on many days.
+- **Stop call key = journey key + `Order`.** Some journeys visit the same quay twice.
+- Entur's BigQuery uses the same grain: `operatingDate + datedServiceJourneyId + sequenceNr`,
+  with `datedServiceJourneyId = <operatingDate>:<serviceJourneyId>`.
 
-## Gotchas
+## Ids
 
-- **Operating day ≠ calendar day.** Late-night trips belong to the previous operating day.
-  Never derive the operating date from a timestamp — use `DatedFrameRef`.
-- **ID remapping:** Entur remaps real-time ids to match the static data by default.
-  `useOriginalId=true` returns source-system ids that won't join. Keep the default.
-- **Codespaces:** ids are prefixed by operator/authority codespace (e.g. `RUT`, `BNR`, `SJN`).
-  Entur's BigQuery docs (`entur-ai-docs/`) show `RUT:ServiceJourney:17-154797-20890925`,
-  `AKT:Line:100` and `NSR:Quay:105273`. **UNVERIFIED** in our raw XML — check real data.
-- **GTFS vs NeTEx:** whether GTFS `trip_id` equals the NeTEx ServiceJourney id is
-  **UNVERIFIED**. Use NeTEx for joins.
-- **Schedule retention:** the static export keeps ≤48 h of past data. Join each operating day
-  against the NeTEx archived on (or just before) that day, not the latest download.
-- `DatedServiceJourney` exists in NeTEx; whether Entur's feeds use it is **UNVERIFIED**.
-  Entur's BigQuery tables build `datedServiceJourneyId` as `<operatingDate>:<serviceJourneyId>`
-  (e.g. `2021-09-09:RUT:ServiceJourney:...`) and key rows on
-  `operatingDate + datedServiceJourneyId + sequenceNr`. That is a model for our Silver grain,
-  not a SIRI field.
-- **Stop refs are Quays.** `StopPointRef` is an NSR Quay id; reach the Stop Place via the
-  Quay's `stopPlaceRef`.
+- Pattern `<codespace>:<Type>:<id>`, e.g. `SKY:ServiceJourney:30-208197-20940239` (in SIRI ET
+  and NeTEx, 2026-10-22), `NSR:Quay:105273`. The codespace is the operator or authority
+  (`RUT`, `SKY`, `VYG`, …).
+- **Keep `useOriginalId` at its default.** Entur remaps real-time ids to the timetable's;
+  `useOriginalId=true` returns source-system ids that won't join.
+- **VYG trains** send `DatedVehicleJourneyRef = VYG:DatedServiceJourney:…` and no
+  `FramedVehicleJourneyRef`. NeTEx maps a `DatedServiceJourney` to `ServiceJourneyRef` +
+  `OperatingDayRef`, which gives the normal key. SKY has no `DatedServiceJourney` and uses
+  `DayType` instead (2026-10-22/23).
+- **Extra journeys** carry `EstimatedVehicleJourneyCode` and no `FramedVehicleJourneyRef`
+  ([entur/realtime.md](realtime.md)); they have no planned counterpart.
+- GTFS `trip_id` = NeTEx ServiceJourney id? **UNVERIFIED**; join on NeTEx.
+
+## Time
+
+- **Operating day ≠ calendar day.** Night journeys belong to the day they started:
+  `DataFrameRef` keeps the start day for calls after midnight. NeTEx times are local
+  time-of-day plus `DayOffset`.
+- **Join each day to the plan archived that day**, not the latest download: the export keeps
+  ≤ 48 h of past days, often less ([entur/sources.md](sources.md)).
+- Our landing partitions are UTC ([system/architecture.md](../system/architecture.md)); an operating day spans two UTC dates.
