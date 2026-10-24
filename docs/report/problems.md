@@ -20,6 +20,51 @@ Entry template:
 
 ---
 
+## 2026-10-24 — Bronze Parquet was 2.6× larger than the gzipped input
+
+- **Area:** Bronze, VM
+- **Symptom:** A day of ET took ~8.5 GB in landing (gzip) but ~22 GB in prod Bronze. At that
+  rate the 984 GB data volume would have been full by mid-November.
+- **Evidence:** `du` on `/data/dat535/prod/bronze/siri-et/date=2026-10-19..22`: 19.9–24.1 GB per
+  day. One hour (`siri-et/date=2026-10-22/hour=08`, 589 MB gzipped) written three ways on the VM:
+  snappy 1,621 MB in 126 s, gzip 626 MB, zstd 558 MB in 129 s.
+- **Cause:** Bronze stores each push as one string of up to ~16M characters. Snappy is built for
+  speed and barely compresses large XML; zstd finds the repetition.
+- **Fix:** `spark.sql.parquet.compression.codec=zstd` in `create_spark`.
+- **Trade-off:** none measured: same write time, ~14 GB/day less.
+- **Lesson:** a default that is right for typical tables (small columns) can be wrong for ours
+  (huge strings). Measure the layer's size against its input.
+
+## 2026-10-24 — Reading Bronze payloads killed the Spark driver
+
+- **Area:** Bronze, Silver, VM
+- **Symptom:** Summing `length(payload)` over one hour of Bronze ET ended with the driver JVM gone
+  (`Java heap space`, then `Connection refused` from py4j).
+- **Evidence:** Same hour as above, `local[4]`, `spark.driver.memory=3g`. Default
+  `columnarReaderBatchSize` (4096): crashed. 256: 23 s; 64: 21 s. The hour holds 207,380 pushes,
+  10.8 G characters, the largest 15.9 M.
+- **Cause:** The vectorized Parquet reader decodes 4096 rows per batch. With multi-MB strings
+  and four tasks at once, the batches alone exceed the heap.
+- **Fix:** `spark.sql.parquet.columnarReaderBatchSize=256` in `create_spark`, so Silver inherits it.
+- **Trade-off:** none measurable at this size.
+- **Lesson:** Silver will read every payload; size reader batches by bytes, not rows.
+
+## 2026-10-24 — The largest ET pushes were marked corrupt
+
+- **Area:** Bronze
+- **Symptom:** Every prod Bronze run reported 1–2 `corrupt` ET rows.
+- **Evidence:** The two on 2026-10-22 (hour 21) had raw lines of 21,557,914 and 22,773,516
+  characters. Locally, Spark 3.5.0 read a 19,999,000-character string and marked a
+  20,000,100-character one corrupt.
+- **Cause:** Spark 3.5's JSON reader uses Jackson 2.15, which caps strings at 20,000,000
+  characters by default. Overriding Jackson's global default did nothing; Spark builds its own
+  constraints from the reader option `maxStringLen`.
+- **Fix:** `.option("maxStringLen", 2**31 - 1)` on every JSON read of landing, with a regression
+  test. A DATEX situation snapshot (~28.6 M characters) would otherwise always be corrupt.
+- **Trade-off:** none. Rerun old days to reclassify their rows.
+- **Lesson:** "corrupt" rows deserve a look even when there are only two: they were the
+  biggest messages, likely full snapshots after a re-subscribe.
+
 ## 2026-10-24 — Bronze ran out of disk on the root volume
 
 - **Area:** Bronze, VM
@@ -71,3 +116,18 @@ Entry template:
 - **Lesson:** Parquet's memory control counts rows before it counts bytes, so a column of
   uniformly huge values defeats it. Run a new source's Bronze on a full real day before it is
   scheduled, not only the dev workflow's single hour.
+## 2026-10-23 — DATEX did not behave as its specification suggested
+
+- **Area:** collector (DATEX)
+- **Symptom:** The poller was designed around conditional GET (`If-Modified-Since`, 304) and
+  gzip, as NPRA's spec describes for "some" services.
+- **Evidence:** One GET per feed from the VM: no `Last-Modified` and no `Content-Encoding` on any
+  of the five feeds; a situation snapshot is 28.6 MB. Two GETs 20 s apart returned
+  byte-identical travel time and weather snapshots.
+- **Cause:** The spec is generic; our services support neither.
+- **Fix:** Fixed intervals per feed from measured sizes and NPRA's cadence; change detected by
+  hashing the body (identical bytes = no change). A fake-server test also found that
+  `http.client`'s `read(n)` returns short instead of raising when a server closes early, so
+  the poller now checks `Content-Length` itself.
+- **Trade-off:** every poll downloads the full snapshot: ~8.8 GB/day, nearly all situations.
+- **Lesson:** verify a source against real responses before designing around its documentation.
