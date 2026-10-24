@@ -15,7 +15,7 @@ import threading
 import time
 import unittest
 import unittest.mock
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -241,6 +241,7 @@ class MonitorTest(unittest.TestCase):
 
     def run_monitor(self):
         env = dict(os.environ, DAT535_LANDING_DIR=str(self.landing), RECEIVER_STATE_FILE=str(self.state),
+                   DATEX_STATE_FILE=str(self.tmp / "datex.json"),
                    MONITOR_FEEDS=self.feeds, MONITOR_STATUS_DIR=str(self.tmp / "status"),
                    MONITOR_DISK_MAX_PCT="100", NTFY_TOPIC="topic",
                    NTFY_SERVER=f"http://127.0.0.1:{self.ntfy.server_address[1]}")
@@ -298,12 +299,76 @@ class MonitorTest(unittest.TestCase):
         self.assertIn('<span class="name">vehicles</span>', (self.tmp / "status" / "index.html").read_text())
 
     def test_default_feeds(self):
-        env = {k: v for k, v in os.environ.items() if k not in ("MONITOR_FEEDS", "RECEIVER_FEEDS")}
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("MONITOR_FEEDS", "RECEIVER_FEEDS", "DATEX_FEEDS")}
         with unittest.mock.patch.dict(os.environ, env, clear=True):
             import monitor
-            self.assertEqual(monitor.feeds_from_env(), ["et", "sx", "vehicles"])
+            datex = ["datex-situation", "datex-traveltime", "datex-weather",
+                     "datex-traveltime-locations", "datex-weather-sites"]
+            self.assertEqual(monitor.feeds_from_env(), ["et", "sx", "vehicles"] + datex)
             os.environ["RECEIVER_FEEDS"] = "et"
-            self.assertEqual(monitor.feeds_from_env(), ["et", "vehicles"])
+            os.environ["DATEX_FEEDS"] = "situation"
+            self.assertEqual(monitor.feeds_from_env(), ["et", "vehicles", "datex-situation"])
+            self.assertEqual(monitor.landing_dir("datex-situation"), "datex-situation")
+            self.assertEqual(monitor.landing_dir("sx"), "siri-sx")
+
+    def datex(self, polling=True, error=None, **feeds):
+        """Write the DATEX poller's state file; feeds: name -> overrides of a healthy feed."""
+        now = datetime.now(timezone.utc)
+        ago = lambda s: (now - timedelta(seconds=s)).isoformat().replace("+00:00", "Z")
+        healthy = {"interval_s": 300, "stale_after_s": None, "last_ok": ago(30), "last_change": ago(30),
+                   "last_bytes": 1000, "errors": 0, "last_error": None, "last_error_at": None,
+                   "polls": {"changed": 1, "unchanged": 0, "error": 0}}
+        state = {"pid": os.getpid(), "started_at": ago(3600), "polling": polling, "error": error,
+                 "feeds": {f: {**healthy, **{k: (ago(v) if k.startswith("last_") and isinstance(v, int)
+                                                  else v) for k, v in o.items()}}
+                           for f, o in feeds.items()}}
+        (self.tmp / "datex.json").write_text(json.dumps(state))
+        for f in feeds:
+            part = self.landing / f"datex-{f}" / f"date={now:%Y-%m-%d}" / f"hour={now:%H}.jsonl.part"
+            part.parent.mkdir(parents=True, exist_ok=True)
+            part.write_text("x\n")
+
+    def test_datex_idle_without_credentials(self):
+        self.feeds = "et,datex-situation"
+        self.datex(polling=False, error="DATEX_USERNAME and DATEX_PASSWORD not set")
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        status = json.loads((self.tmp / "status" / "status.json").read_text())
+        self.assertNotIn("feed:datex-situation", status["checks"])
+        page = (self.tmp / "status" / "index.html").read_text()
+        self.assertIn('<section class="row idle">', page)
+        self.assertIn("not set: polling nothing", page)
+
+    def test_datex_feeds(self):
+        self.feeds = "et,datex-situation,datex-traveltime"
+        self.datex(situation={}, traveltime={"interval_s": 150, "stale_after_s": 1800})
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        page = (self.tmp / "status" / "index.html").read_text()
+        self.assertIn("POLLING · DATEX", page)
+        self.assertIn("every 2m30s", page.replace("every 150s", "every 2m30s"))
+        self.assertIn('<span class="name">datex-situation</span>', page)
+
+        self.part.write_text("x\ny\nz\n")     # keep et healthy
+        self.datex(situation={"last_ok": 1200, "errors": 3, "last_error": "HTTP 503 Service Unavailable"},
+                   traveltime={"interval_s": 150, "stale_after_s": 1800, "last_change": 7200})
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("datex-situation: no successful poll for 20m: HTTP 503", r.stdout)
+        self.assertIn("datex-traveltime: NPRA has published nothing new for 2h 0m", r.stdout)
+
+    def test_datex_rejected_login_and_not_running(self):
+        self.feeds = "et,datex-situation"
+        self.datex(error="credentials rejected, all feeds paused: HTTP 401 Unauthorized",
+                   situation={"last_ok": 1200})
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("datex: credentials rejected", r.stdout)
+        (self.tmp / "datex.json").unlink()
+        r = self.run_monitor()
+        self.assertIn("datex poller not running", r.stdout)
+        self.assertIn("datex-situation: no successful poll yet", r.stdout)
 
     def test_stale_part(self):
         old = time.time() - 600
@@ -369,8 +434,17 @@ class ExporterTest(unittest.TestCase):
                 "checks": {"receiver": {"ok": True}, "disk": {"ok": False}}}))
 
             import exporter
-            text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx", "vehicles"],
-                                      str(d / "status")).collect()
+            dx = d / "landing" / "datex-situation" / "date=2026-10-15"
+            dx.mkdir(parents=True)
+            (dx / "hour=01.jsonl.gz").write_bytes(b"x" * 13)
+            datex_state = d / "datex.json"
+            datex_state.write_text(json.dumps({
+                "pid": os.getpid(), "started_at": "2026-10-15T00:00:00Z", "polling": True,
+                "feeds": {"situation": {"interval_s": 300, "last_ok": "2026-10-15T03:00:00Z",
+                                        "last_change": None, "last_bytes": 28614925, "errors": 2,
+                                        "polls": {"changed": 5, "unchanged": 1, "error": 2}}}}))
+            text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx", "vehicles", "datex-situation"],
+                                      str(d / "status"), str(datex_state)).collect()
 
         m = {}
         for line in text.splitlines():
@@ -398,6 +472,14 @@ class ExporterTest(unittest.TestCase):
         self.assertEqual(m["dat535_monitor_ok"], 0)
         self.assertEqual(m['dat535_monitor_check_ok{check="disk"}'], 0)
         self.assertIn('dat535_filesystem_free_bytes{volume="landing"}', m)
+        self.assertEqual(m['dat535_landing_closed_bytes{feed="datex-situation"}'], 13)
+        self.assertEqual(m["dat535_datex_up"], 1)
+        self.assertEqual(m["dat535_datex_polling"], 1)
+        self.assertEqual(m['dat535_datex_polls_total{feed="datex-situation",result="changed"}'], 5)
+        self.assertEqual(m['dat535_datex_consecutive_errors{feed="datex-situation"}'], 2)
+        self.assertEqual(m['dat535_datex_snapshot_bytes{feed="datex-situation"}'], 28614925)
+        self.assertEqual(m['dat535_datex_last_ok_timestamp_seconds{feed="datex-situation"}'], at(3, 0).timestamp())
+        self.assertNotIn('dat535_datex_last_change_timestamp_seconds{feed="datex-situation"}', m)
 
 
 class FakeGrafana(BaseHTTPRequestHandler):

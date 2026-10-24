@@ -4,6 +4,7 @@ Description=DAT535 metrics exporter (read-only, localhost only)
 [Service]
 EnvironmentFile=%h/.config/dat535/collector.env
 Environment=RECEIVER_STATE_FILE=%t/dat535/receiver.json
+Environment=DATEX_STATE_FILE=%t/dat535-datex/datex.json
 ExecStart=/usr/bin/python3 %h/dat535-collector/exporter.py
 Restart=always
 RestartSec=5

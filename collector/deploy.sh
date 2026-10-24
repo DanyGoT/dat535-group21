@@ -96,8 +96,8 @@ restart_if dat535-receiver.service 'receiver.py\|hourly.py\|dat535-receiver.serv
 restart_if dat535-vehicles.service 'vehicles.py\|hourly.py\|dat535-vehicles.service'
 restart_if dat535-datex.service 'datex.py\|hourly.py\|dat535-datex.service'
 restart_if dat535-status.service 'serve_status.py\|dat535-status.service'
-# exporter.py imports from monitor.py.
-restart_if dat535-exporter.service 'exporter.py\|monitor.py\|dat535-exporter.service'
+# exporter.py imports from monitor.py, which imports datex.py's feed list.
+restart_if dat535-exporter.service 'exporter.py\|monitor.py\|datex.py\|hourly.py\|dat535-exporter.service'
 restart_if dat535-prometheus.service 'observability/prometheus.yml\|dat535-prometheus.service\|^prometheus$'
 # Dashboard JSON is re-read by Grafana every 30 s; no restart needed for it.
 restart_if dat535-grafana.service \
