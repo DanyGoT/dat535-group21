@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 COLLECTOR = HERE.parent
 sys.path.insert(0, str(COLLECTOR))
 
+import hourly  # noqa: E402
 import receiver  # noqa: E402
 
 ET_PUSH = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -68,7 +69,7 @@ def serve(handler):
 class WriterTest(unittest.TestCase):
     def test_hourly_rotation_and_stale_finalize(self):
         with tempfile.TemporaryDirectory() as d:
-            w = receiver.HourlyWriter(d, "et")
+            w = hourly.HourlyWriter(d, "siri-et")
             w.append("a\n", at(10, 59))
             w.append("b\n", at(10, 59))
             base = Path(d) / "siri-et" / "date=2026-10-15"
@@ -82,7 +83,7 @@ class WriterTest(unittest.TestCase):
             w.close()  # shutdown keeps .part
             self.assertTrue((base / "hour=11.jsonl.part").exists())
             # Restart later: stale .part from an earlier hour gets compressed
-            w2 = receiver.HourlyWriter(d, "et")
+            w2 = hourly.HourlyWriter(d, "siri-et")
             w2.finalize_stale(at(12, 0))
             w2.pending.join()
             self.assertEqual(gzip.decompress((base / "hour=11.jsonl.gz").read_bytes()), b"c\n")
@@ -91,11 +92,11 @@ class WriterTest(unittest.TestCase):
     def test_restart_within_hour_without_pushes(self):
         # Restart mid-hour, then silence: the adopted .part must still close at hour end.
         with tempfile.TemporaryDirectory() as d:
-            w = receiver.HourlyWriter(d, "et")
+            w = hourly.HourlyWriter(d, "siri-et")
             w.append("a\n", at(12, 10))
             w.close()
             base = Path(d) / "siri-et" / "date=2026-10-15"
-            w2 = receiver.HourlyWriter(d, "et")
+            w2 = hourly.HourlyWriter(d, "siri-et")
             w2.adopt_current(at(12, 37))
             w2.rotate(at(13, 0))
             w2.pending.join()
@@ -110,7 +111,7 @@ class WriterTest(unittest.TestCase):
             (base / "hour=08.jsonl.part").write_text("new\n")
             (base / "hour=09.jsonl.gz").write_bytes(gzip.compress(b"old\n"))
             (base / "hour=09.jsonl.part").write_text("new\n")
-            receiver.HourlyWriter(d, "et").pending.join()
+            hourly.HourlyWriter(d, "siri-et").pending.join()
             self.assertEqual((base / "hour=08.jsonl").read_text(), "old\n")
             self.assertTrue((base / "hour=08.jsonl.part").exists())
             self.assertEqual(gzip.decompress((base / "hour=09.jsonl.gz").read_bytes()), b"old\n")
@@ -123,14 +124,14 @@ class WriterTest(unittest.TestCase):
             base.mkdir(parents=True)
             (base / "hour=09.jsonl.gz").write_bytes(gzip.compress(b"same\n"))
             (base / "hour=09.jsonl.part").write_text("same\n")
-            receiver.HourlyWriter(d, "et").pending.join()
+            hourly.HourlyWriter(d, "siri-et").pending.join()
             self.assertEqual(sorted(p.name for p in base.iterdir()), ["hour=09.jsonl.gz"])
 
 
 class ReceiverHttpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        receiver.Handler.writers = {"et": receiver.HourlyWriter(self.tmp.name, "et")}
+        receiver.Handler.writers = {"et": hourly.HourlyWriter(self.tmp.name, "siri-et")}
         receiver.Handler.subs = None
         self.srv = serve(receiver.Handler)
         self.port = self.srv.server_address[1]
