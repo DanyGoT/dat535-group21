@@ -5,4 +5,5 @@ Description=DAT535 collection monitor (read-only)
 Type=oneshot
 EnvironmentFile=%h/.config/dat535/collector.env
 Environment=RECEIVER_STATE_FILE=%t/dat535/receiver.json
+Environment=DATEX_STATE_FILE=%t/dat535-datex/datex.json
 ExecStart=/usr/bin/python3 %h/dat535-collector/monitor.py

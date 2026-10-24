@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Read-only collection monitor.
 
-Checks the receiver and the landing zone (SIRI feeds and vehicle positions), writes a static status page
-(index.html + status.json) and sends an ntfy push on state change only (OK<->FAIL).
+Checks the receiver, the DATEX poller and the landing zone (SIRI feeds, vehicle positions,
+DATEX), writes a static status page (index.html + status.json) and sends an ntfy push on
+state change only (OK<->FAIL).
 Never writes to the landing zone. Exit code 1 plus a one-line reason on failure.
 
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
     RECEIVER_STATE_FILE     written by the receiver (default: ./run/receiver.json)
-    MONITOR_FEEDS           feeds to check (default: the receiver's RECEIVER_FEEDS plus vehicles)
+    DATEX_STATE_FILE        written by the DATEX poller (default: ./run/datex.json)
+    MONITOR_FEEDS           feeds to check (default: the receiver's RECEIVER_FEEDS, vehicles and
+                            datex-<feed> for each of the poller's DATEX_FEEDS)
     RECEIVER_FEEDS          the receiver's SIRI feeds (default: et,sx)
+    DATEX_FEEDS             the DATEX poller's feeds (default: all of datex.FEEDS)
     MONITOR_STATUS_DIR      output directory, the only thing ever served (default: ./status)
     MONITOR_MAX_PART_AGE_MIN  .part must be modified within this many minutes (default: 5)
     MONITOR_DISK_MAX_PCT    landing volume usage limit in percent (default: 90)
@@ -28,6 +32,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+from datex import FEEDS as DATEX_FEEDS
 
 try:
     from zoneinfo import ZoneInfo
@@ -71,17 +77,25 @@ def check_receiver(state_file):
 
 
 VEHICLES = "vehicles"
+SIRI_FEEDS = ("et", "sx")       # receiver.py's FEED_PATHS
+DATEX_PREFIX = "datex-"
 
 
 def feeds_from_env():
-    """Feeds to check or report: MONITOR_FEEDS, else the receiver's SIRI feeds plus vehicles."""
-    raw = os.environ.get("MONITOR_FEEDS") or os.environ.get("RECEIVER_FEEDS", "et,sx") + "," + VEHICLES
+    """Feeds to check or report: MONITOR_FEEDS, else the receiver's SIRI feeds, vehicles and
+    datex-<feed> for each DATEX feed."""
+    raw = os.environ.get("MONITOR_FEEDS")
+    if not raw:
+        datex = os.environ.get("DATEX_FEEDS", ",".join(DATEX_FEEDS))
+        raw = ",".join([os.environ.get("RECEIVER_FEEDS", "et,sx"), VEHICLES]
+                       + [DATEX_PREFIX + f.strip() for f in datex.split(",") if f.strip()])
     return [f.strip() for f in raw.split(",") if f.strip()]
 
 
 def landing_dir(feed):
-    """Landing directory of a feed: siri-<feed> from receiver.py, vehicles from vehicles.py."""
-    return VEHICLES if feed == VEHICLES else f"siri-{feed}"
+    """Landing directory of a feed: siri-<feed> for the receiver's SIRI feeds; any other feed is
+    its own directory (vehicles from vehicles.py, datex-<feed> from datex.py)."""
+    return f"siri-{feed}" if feed in SIRI_FEEDS else feed
 
 
 def newest_file(landing, feed):
@@ -107,6 +121,59 @@ def check_feed(landing, feed, prev, now, max_age_min):
         what = "pushes" if feed != VEHICLES else "positions"
         res.update(ok=False, reason=f"{feed}: no {what} received for {fmt_age(age)} (last write to {rel})",
                    short=f"{feed}: no data for {fmt_age(age)}")
+    return res
+
+
+def check_datex(state_file):
+    """The DATEX poller: running, and polling with credentials NPRA accepts. Without credentials
+    it is idle, which is a choice rather than a failure: no check fails, its feeds are skipped."""
+    try:
+        state = json.loads(Path(state_file).read_text())
+    except FileNotFoundError:
+        return {"ok": False, "reason": "datex poller not running (no state file)",
+                "short": "datex not running"}, None
+    except (OSError, ValueError) as e:
+        return {"ok": False, "reason": f"datex state unreadable: {e}",
+                "short": "datex state unreadable"}, None
+    if not pid_alive(int(state.get("pid", 0))):
+        return {"ok": False, "reason": f"datex pid {state.get('pid')} not alive",
+                "short": "datex not running"}, state
+    if not state.get("polling"):
+        return {"ok": True, "reason": None, "short": None, "alive": True, "idle": state.get("error")}, state
+    if state.get("error"):
+        return {"ok": False, "reason": f"datex: {state['error']}", "short": "datex: login rejected",
+                "alive": True}, state
+    return {"ok": True, "reason": None, "short": None, "alive": True}, state
+
+
+def check_datex_feed(landing, feed, s, started, now, max_age_min):
+    """One polled DATEX feed. Every poll writes a line, so its last successful poll and the
+    newest landing write must both be recent for its poll interval; and where NPRA promises a
+    cadence (stale_after_s), the snapshot must keep changing."""
+    res = {"ok": True, "reason": None, "short": None, "file": None, "size": None, "age_s": None}
+    path = newest_file(landing, feed)
+    if path:
+        st = path.stat()
+        res.update(file=f"{path.parent.name}/{path.name}", size=st.st_size,
+                   age_s=round(now.timestamp() - st.st_mtime))
+    limit = max(max_age_min * 60, 2 * (s.get("interval_s") or 60) + 60)    # one missed poll is fine
+    last_ok, last_change = parse_iso(s.get("last_ok")), parse_iso(s.get("last_change"))
+    if last_ok is None and started and (now - started).total_seconds() < limit:
+        return res                                                          # just started
+    ok_age = (now - last_ok).total_seconds() if last_ok else None
+    if ok_age is None or ok_age > limit:
+        why = f": {s['last_error']}" if s.get("errors") else ""
+        since = f"for {fmt_age(ok_age)}" if ok_age is not None else "yet"
+        res.update(ok=False, reason=f"{feed}: no successful poll {since}{why}",
+                   short=f"{feed}: no data {since}")
+    elif res["age_s"] is None or res["age_s"] > limit:
+        res.update(ok=False, reason=f"{feed}: polls are not reaching the landing zone"
+                                    + (f" (last write {fmt_age(res['age_s'])} ago)" if path else ""),
+                   short=f"{feed}: not writing")
+    elif s.get("stale_after_s") and last_change and (now - last_change).total_seconds() > s["stale_after_s"]:
+        age = (now - last_change).total_seconds()
+        res.update(ok=False, reason=f"{feed}: NPRA has published nothing new for {fmt_age(age)}"
+                                    f" (every poll returns the same snapshot)", short=f"{feed}: source stale for {fmt_age(age)}")
     return res
 
 
@@ -251,9 +318,9 @@ setTimeout(() => location.replace("/"), 120000);
 """
 
 
-def row(state_word, ok, name, nums, desc):
+def row(state_word, ok, name, nums, desc, cls=None):
     e = html.escape
-    return (f'<section class="row {"active" if ok else "failed"}">\n'
+    return (f'<section class="row {cls or ("active" if ok else "failed")}">\n'
             f'  <div class="top">\n'
             f'    <span class="st">{e(state_word)}</span>\n'
             f'    <span><span class="name">{e(name)}</span></span>\n'
@@ -290,6 +357,17 @@ def render(status, host):
     up = fmt_age((now - started).total_seconds()) if rc["ok"] and started else ""
     out.append(row("RUNNING" if rc["ok"] else "STOPPED", rc["ok"], "receiver", up,
                    rc["reason"] or f"pid {rs.get('pid')}"))
+
+    if "datex" in checks:
+        dc = checks["datex"]
+        ds = status.get("datex") or {}
+        started = parse_iso(ds.get("started_at"))
+        up = fmt_age((now - started).total_seconds()) if dc.get("alive") and started else ""
+        if dc.get("idle"):
+            out.append(row("IDLE", True, "datex", up, f"{dc['idle']}: polling nothing", cls="idle"))
+        else:
+            word = "RUNNING" if dc["ok"] else "FAILED" if dc.get("alive") else "STOPPED"
+            out.append(row(word, dc["ok"], "datex", up, dc["reason"] or f"pid {ds.get('pid')}"))
 
     for key, c in checks.items():
         if not key.startswith("feed:"):
@@ -350,6 +428,31 @@ def render(status, host):
                        f' ({e(err)}); pushes resumed since</span>\n')
     out.append("  </div>\n")
 
+    ds = status.get("datex") or {}
+    if ds.get("polling"):
+        out.append('  <h2>POLLING · DATEX</h2>\n  <div class="kv">\n')
+        for feed, s in (ds.get("feeds") or {}).items():
+            iv = s.get("interval_s") or 0
+            every = f"{iv // 3600}h" if iv % 3600 == 0 else f"{iv // 60}m" if iv % 60 == 0 else f"{iv}s"
+            last_ok, change = parse_iso(s.get("last_ok")), parse_iso(s.get("last_change"))
+            parts = [f"every {every}",
+                     f"last ok {fmt_age((now - last_ok).total_seconds())} ago" if last_ok else "no successful poll yet"]
+            if change:
+                parts.append(f"changed {fmt_age((now - change).total_seconds())} ago")
+            if s.get("last_bytes"):
+                parts.append(fmt_bytes(s["last_bytes"]))
+            cls = ' class="warn"' if s.get("errors") else ""
+            out.append(f'    <span class="mute">{e(feed)}</span><span{cls}>{e(" · ".join(parts))}</span>\n')
+            err, at = s.get("last_error"), parse_iso(s.get("last_error_at"))
+            if s.get("errors"):
+                out.append(f'    <span class="mute"></span><span class="warn">{e(err)}'
+                           f' ({s["errors"]} in a row)</span>\n')
+            elif err:
+                when = f"{at.astimezone(LOCAL_TZ):%H:%M} " if at else ""
+                out.append(f'    <span class="mute"></span><span class="mute">failed {e(when)}({e(err)});'
+                           f' polls succeed since</span>\n')
+        out.append("  </div>\n")
+
     out.append('  <h2>INFO</h2>\n  <div class="kv">\n'
                f'    <span class="mute">state</span><span class="{"ok" if status["ok"] else "error"}">'
                f'{"OK" if status["ok"] else "FAIL"}</span>\n'
@@ -368,6 +471,7 @@ def write_atomic(path, text):
 def main():
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
     state_file = os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json")
+    datex_state_file = os.environ.get("DATEX_STATE_FILE", "run/datex.json")
     feeds = feeds_from_env()
     status_dir = Path(os.environ.get("MONITOR_STATUS_DIR", "status"))
     max_age = float(os.environ.get("MONITOR_MAX_PART_AGE_MIN", "5"))
@@ -387,9 +491,18 @@ def main():
     now = datetime.now(timezone.utc)
     checks = {}
     checks["receiver"], receiver_state = check_receiver(state_file)
+    datex_state = None
+    if any(f.startswith(DATEX_PREFIX) for f in feeds):
+        checks["datex"], datex_state = check_datex(datex_state_file)
     prev_checks = prev.get("checks", {})
     for f in feeds:
-        checks[f"feed:{f}"] = check_feed(landing, f, prev_checks.get(f"feed:{f}"), now, max_age)
+        key = f"feed:{f}"
+        if not f.startswith(DATEX_PREFIX):
+            checks[key] = check_feed(landing, f, prev_checks.get(key), now, max_age)
+        elif not checks["datex"].get("idle"):
+            ds = datex_state or {}
+            checks[key] = check_datex_feed(landing, f, (ds.get("feeds") or {}).get(f[len(DATEX_PREFIX):]) or {},
+                                           parse_iso(ds.get("started_at")), now, max_age)
     checks["disk"] = check_disk(landing, disk_max)
 
     ok = all(c["ok"] for c in checks.values())
@@ -415,7 +528,9 @@ def main():
     status = {"ok": ok, "reason": reason or None, "since": since, "checked_at": checked_at,
               "notified_ok": notified, "checks": checks,
               "receiver": {k: receiver_state.get(k) for k in ("pid", "started_at", "subscribing", "feeds")}
-              if receiver_state else None}
+              if receiver_state else None,
+              "datex": {k: datex_state.get(k) for k in ("pid", "started_at", "polling", "error", "feeds")}
+              if datex_state else None}
     write_atomic(status_file, json.dumps(status, indent=1))
     write_atomic(status_dir / "index.html", render(status, host))
 

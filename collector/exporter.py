@@ -2,14 +2,15 @@
 """Read-only Prometheus exporter for the collector.
 
 Serves GET /metrics in the Prometheus text format. Every scrape looks at the landing
-zone (file sizes and names only, never contents), the receiver's state file, the
-monitor's status.json and disk usage. Never writes anything. Bind to localhost only:
+zone (file sizes and names only, never contents), the receiver's and the DATEX poller's
+state files, the monitor's status.json and disk usage. Never writes anything. Bind to localhost only:
 Prometheus scrapes it, nothing else should.
 
 Environment:
     DAT535_LANDING_DIR      landing root (default: ./landing)
     RECEIVER_STATE_FILE     written by the receiver (default: ./run/receiver.json)
-    MONITOR_FEEDS           feeds to report (default: the receiver's RECEIVER_FEEDS plus vehicles)
+    DATEX_STATE_FILE        written by the DATEX poller (default: ./run/datex.json)
+    MONITOR_FEEDS           feeds to report (default: see monitor.feeds_from_env)
     MONITOR_STATUS_DIR      where the monitor writes status.json (default: ./status)
     EXPORTER_BIND           default: 127.0.0.1
     EXPORTER_PORT           default: 8752
@@ -25,7 +26,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from monitor import feeds_from_env, landing_dir, parse_iso, pid_alive
+from monitor import DATEX_PREFIX, feeds_from_env, landing_dir, parse_iso, pid_alive
 
 HOUR_FILE = re.compile(r"hour=(\d{2})\.jsonl(\.gz|\.part)?$")
 DATE_DIR = re.compile(r"date=(\d{4}-\d{2}-\d{2})$")
@@ -45,6 +46,15 @@ HELP = {
     "dat535_subscription_last_push_timestamp_seconds": ("gauge", "Last push (data or heartbeat) from Entur."),
     "dat535_subscription_expiry_timestamp_seconds": ("gauge", "When the current subscription terminates at Entur."),
     "dat535_subscription_error": ("gauge", "1 if the last subscribe attempt failed."),
+    "dat535_datex_up": ("gauge", "1 if the DATEX poller process is alive."),
+    "dat535_datex_polling": ("gauge", "1 if the DATEX poller has credentials and polls (0 = idle)."),
+    "dat535_datex_start_timestamp_seconds": ("gauge", "When the DATEX poller process started."),
+    "dat535_datex_polls_total": ("counter", "DATEX polls since the poller started, by result (changed, unchanged, error)."),
+    "dat535_datex_last_ok_timestamp_seconds": ("gauge", "Last successful DATEX poll."),
+    "dat535_datex_last_change_timestamp_seconds": ("gauge", "Last DATEX poll that returned a new snapshot."),
+    "dat535_datex_poll_interval_seconds": ("gauge", "Configured DATEX poll interval."),
+    "dat535_datex_consecutive_errors": ("gauge", "DATEX polls failed in a row (0 = last poll succeeded)."),
+    "dat535_datex_snapshot_bytes": ("gauge", "Size of the last new DATEX snapshot (decoded)."),
     "dat535_monitor_ok": ("gauge", "1 if all monitor checks passed on the last run."),
     "dat535_monitor_check_ok": ("gauge", "1 if this monitor check passed on the last run."),
     "dat535_monitor_last_run_timestamp_seconds": ("gauge", "When the monitor last ran."),
@@ -129,6 +139,32 @@ def collect_receiver(state_file, out):
         out.append(("dat535_subscription_error", lab, int(bool(s.get("last_error")))))
 
 
+def collect_datex(state_file, out):
+    try:
+        state = json.loads(Path(state_file).read_text())
+    except (OSError, ValueError):
+        out.append(("dat535_datex_up", {}, 0))
+        return
+    out.append(("dat535_datex_up", {}, int(pid_alive(int(state.get("pid", 0))))))
+    out.append(("dat535_datex_polling", {}, int(bool(state.get("polling")))))
+    started = parse_iso(state.get("started_at"))
+    if started:
+        out.append(("dat535_datex_start_timestamp_seconds", {}, started.timestamp()))
+    for feed, s in (state.get("feeds") or {}).items():
+        lab = {"feed": f"datex-{feed}"}     # same label value as the landing metrics
+        for result, n in (s.get("polls") or {}).items():
+            out.append(("dat535_datex_polls_total", {**lab, "result": result}, n))
+        for key, name in (("last_ok", "dat535_datex_last_ok_timestamp_seconds"),
+                          ("last_change", "dat535_datex_last_change_timestamp_seconds")):
+            t = parse_iso(s.get(key))
+            if t:
+                out.append((name, lab, t.timestamp()))
+        out.append(("dat535_datex_poll_interval_seconds", lab, s.get("interval_s") or 0))
+        out.append(("dat535_datex_consecutive_errors", lab, s.get("errors") or 0))
+        if s.get("last_bytes") is not None:
+            out.append(("dat535_datex_snapshot_bytes", lab, s["last_bytes"]))
+
+
 def collect_monitor(status_dir, out):
     try:
         status = json.loads((Path(status_dir) / "status.json").read_text())
@@ -175,9 +211,10 @@ def render(samples):
 
 
 class Collector:
-    def __init__(self, landing, state_file, feeds, status_dir):
+    def __init__(self, landing, state_file, feeds, status_dir, datex_state_file=None):
         self.landing = landing
         self.state_file = state_file
+        self.datex_state_file = datex_state_file
         self.feeds = feeds
         self.status_dir = status_dir
         self.volumes = {"landing": landing, "home": str(Path.home())}
@@ -186,6 +223,8 @@ class Collector:
         start = time.monotonic()
         out = []
         steps = [lambda f=f: collect_landing(self.landing, f, out) for f in self.feeds]
+        if self.datex_state_file and any(f.startswith(DATEX_PREFIX) for f in self.feeds):
+            steps.append(lambda: collect_datex(self.datex_state_file, out))
         steps += [lambda: collect_receiver(self.state_file, out),
                   lambda: collect_monitor(self.status_dir, out),
                   lambda: collect_disk(self.volumes, out)]
@@ -221,7 +260,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     Handler.collector = Collector(os.environ.get("DAT535_LANDING_DIR", "landing"),
                                   os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"),
-                                  feeds_from_env(), os.environ.get("MONITOR_STATUS_DIR", "status"))
+                                  feeds_from_env(), os.environ.get("MONITOR_STATUS_DIR", "status"),
+                                  os.environ.get("DATEX_STATE_FILE", "run/datex.json"))
     bind = os.environ.get("EXPORTER_BIND", "127.0.0.1")
     port = int(os.environ.get("EXPORTER_PORT", "8752"))
     server = ThreadingHTTPServer((bind, port), Handler)
