@@ -31,6 +31,7 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 | [`docs/entur/`](docs/entur/) | [sources](docs/entur/sources.md): every Entur source, limits, licence · [realtime](docs/entur/realtime.md): SIRI pub/sub and vehicle positions · [identifiers](docs/entur/identifiers.md): ids and join keys |
 | [`docs/datex/`](docs/datex/) | [sources](docs/datex/sources.md): access, feeds, collection, costs · [content](docs/datex/content.md): what the payloads contain, pitfalls |
 | [`docs/external/`](docs/external/) | [sources](docs/external/sources.md): weather, traffic and other enrichment |
+| [`docs/report/`](docs/report/) | [problems](docs/report/problems.md): problems we hit, with evidence, for the report's reflection |
 | [`collector/`](collector/README.md) | operating the VM: units, setup, commands, credentials, tunnel |
 
 ## Repository
