@@ -99,12 +99,18 @@ def create_spark(app_name="DAT535-Bronze"):
     from pyspark.sql import SparkSession
     # Local mode runs everything in the driver JVM; the 1g default is too small for
     # payloads of up to ~15 MB per line across several parallel tasks.
+    # zstd, not snappy: one ET hour (2026-10-22 08 UTC, 589 MB gzipped) became 1,621 MB of
+    # snappy Parquet but 558 MB of zstd, written in the same time (126 s vs 129 s). Snappy
+    # barely compresses multi-MB XML strings; zstd beats even the landing gzip.
+    # Reader batch 256, not 4096: reading that hour's payloads back with the default batch
+    # killed a 3 GB driver (4 tasks x 4096 rows of up to 15.9M characters); 256 read it in 23 s.
     builder: SparkSession.Builder = SparkSession.builder # pyright: ignore[reportAssignmentType]
     spark = builder \
         .appName(app_name) \
         .config("spark.driver.memory", os.environ.get("SPARK_DRIVER_MEMORY", "4g")) \
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
-        .config("spark.sql.parquet.compression.codec", "snappy") \
+        .config("spark.sql.parquet.compression.codec", "zstd") \
+        .config("spark.sql.parquet.columnarReaderBatchSize", "256") \
         .config("spark.sql.session.timeZone", "UTC") \
         .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
