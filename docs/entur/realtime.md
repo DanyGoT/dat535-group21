@@ -18,7 +18,7 @@ Base URL: `https://api.entur.io/realtime/v1`
 ### Publish/subscribe (SIRI 2.0 XML) — chosen for collection
 
 - `POST /subscribe`: Entur pushes updates to an HTTP endpoint we host.
-- Needs a reachable always-on receiver (see `../architecture.md`).
+- Needs a reachable always-on receiver (see `../system/architecture.md`).
 
 Verified 2026-10-15 against `entur/anshar` (Entur's SIRI hub that serves `/subscribe`):
 `Usage.md`, `Subscription-lifecycle.md` and the outbound code (`routes/outbound/`,

@@ -16,12 +16,12 @@ layer carries the most weight, then Bronze, then Gold.
 
 | File | Read when |
 | ---- | --------- |
-| `docs/architecture.md` | Working on the receiver, monitor, landing zone, batch jobs, or anything crossing components |
+| `docs/system/architecture.md` | Working on the receiver, monitor, landing zone, batch jobs, or anything crossing components |
 | `docs/entur/sources.md` | Fetching any Entur data: URLs, formats, refresh, rate limits, licence |
 | `docs/entur/realtime.md` | Working with SIRI ET/SX: pub/sub vs polling, message content |
 | `docs/entur/identifiers.md` | Joining real-time to schedule/stops, defining keys and grain in Silver |
 | `entur-ai-docs/` | Entur's BigQuery SIRI-ET catalog (generated, don't edit): reference for Silver design and cross-checking results, not pipeline input |
-| `docs/switchboard-style.md` | Building the monitor's status page (read-only) |
+| `docs/system/switchboard-style.md` | Building the monitor's status page (read-only) |
 | `docs/problems.md` | After hitting and fixing a non-trivial problem: add an entry (raw material for the report) |
 
 Items marked **UNVERIFIED** in the docs are research gaps, not facts. Verify against the
@@ -35,7 +35,7 @@ source (or real data) before building on them, then update the doc.
   `dev` branch → `.github/workflows/dat535-dev.yml`; `main` → `dat535-prod.yml` (manual approval).
 - Pipeline code reads `DAT535_ENV` (`dev`/`prod`) and `DAT535_OUTPUT_DIR` from the environment.
 - The receiver and monitor are long-running infrastructure outside GitHub Actions
-  (see `docs/architecture.md`).
+  (see `docs/system/architecture.md`).
 
 ## Rules
 

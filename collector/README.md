@@ -1,7 +1,7 @@
 # Collector
 
 Receiver, vehicle positions collector, DATEX poller, monitor and status page. Design:
-`docs/architecture.md`; Entur subscription details: `docs/entur/realtime.md`; DATEX: `docs/datex/sources.md`.
+`docs/system/architecture.md`; Entur subscription details: `docs/entur/realtime.md`; DATEX: `docs/datex/sources.md`.
 
 Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` on the VM, as
 systemd user units. Nothing is cloned on the VM.
