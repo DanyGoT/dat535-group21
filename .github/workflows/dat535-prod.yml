@@ -75,7 +75,8 @@ jobs:
         run: |
           source ~/spark-env/bin/activate
           mkdir -p "$DAT535_OUTPUT_DIR"
-          python pipeline/bronze.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
+          # One Spark job at a time on the 8 GB VM (dev and prod share it): wait, never overlap.
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
 
       - name: Upload Bronze run records
         # Only the small run records; the Parquet data stays on the VM.
