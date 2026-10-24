@@ -1,7 +1,7 @@
 # Collector
 
-Receiver, vehicle positions collector, monitor and status page. Design:
-`docs/architecture.md`; Entur subscription details: `docs/entur/realtime.md`.
+Receiver, vehicle positions collector, DATEX poller, monitor and status page. Design:
+`docs/architecture.md`; Entur subscription details: `docs/entur/realtime.md`; DATEX: `docs/datex/sources.md`.
 
 Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` on the VM, as
 systemd user units. Nothing is cloned on the VM.
@@ -24,7 +24,7 @@ Then push to `main` and approve the prod run.
 ## Operating
 
 ```sh
-systemctl --user status dat535-receiver dat535-vehicles dat535-status dat535-monitor.timer
+systemctl --user status dat535-receiver dat535-vehicles dat535-datex dat535-status dat535-monitor.timer
 journalctl --user -u dat535-receiver -f
 systemctl --user restart dat535-receiver    # after editing the env file
 python3 ~/dat535-collector/peek.py et       # a few real messages, formatted (et, sx, vehicles)
@@ -37,6 +37,30 @@ Status page from a laptop without a tunnel: `ssh -L 8751:127.0.0.1:8751 ubuntu@<
 `<landing>/vehicles/` (same line format and hourly files as the receiver). The monitor and
 exporter treat it as a feed like `et` and `sx` (status row `vehicles`, metrics label
 `feed="vehicles"`); Bronze does not read it yet.
+
+## DATEX
+
+`datex.py` polls Statens vegvesen's DATEX (situations, travel times, road weather, their
+location tables) and lands one line per poll in `<landing>/datex-<feed>/`. Without
+credentials it runs idle (status row `datex` shows IDLE, not a failure). To turn it on, add
+the account from NPRA's two emails to the env file (confidential: never in git):
+
+```sh
+DATEX_USERNAME=...
+DATEX_PASSWORD=...
+```
+
+then:
+
+```sh
+set -a; . ~/.config/dat535/collector.env; set +a
+python3 ~/dat535-collector/datex.py --check     # one GET per feed: HTTP 200 and sizes, or why not
+systemctl --user restart dat535-datex
+journalctl --user -u dat535-datex -f
+```
+
+The monitor checks each feed (status rows `datex-<feed>`, section POLLING · DATEX) and the
+exporter adds `dat535_datex_*` metrics; the dashboard has a DATEX row.
 
 `peek.py <feed>` prints a few random data messages from the hour being written, heartbeats
 skipped: one ET journey or SX situation as indented XML, or a few vehicles as JSON.
@@ -89,4 +113,4 @@ Match all
 
 ## Tests
 
-`python3 -m unittest discover -s collector/tests` (localhost only, never Entur).
+`python3 -m unittest discover -s collector/tests` (localhost only, never Entur or NPRA).
