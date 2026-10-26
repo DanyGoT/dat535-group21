@@ -13,7 +13,7 @@ yet (2026-10-24).
 | 2 | Punctuality scorecard | public dashboard, transport authority | Which operators and lines run on time, and how often do they cancel? | NeTEx (planned denominator) |
 | 3 | Delay hotspots | transit planners | Between which stops does a line lose time, and when? | NSR (coordinates) |
 | 4 | Road incident impact | NPRA, municipalities | How many bus-minutes did this road work or accident cost? | DATEX situations, NSR or vehicle positions |
-| 5 | Weather sensitivity | operators, winter planning | Which lines and modes break down on ice, snow or wind (ferries)? | DATEX weather + weather sites |
+| 5 | Weather sensitivity | operators, winter planning | Which lines and modes break down on ice, snow or wind (ferries)? | DATEX weather + weather sites; Frost for ferries |
 | 6 | Countdown accuracy | Entur, info displays | How far off is the predicted departure 5 / 10 / 20 min ahead? | none (all ET versions are in Bronze) |
 | 7 | Disruption communication | customer information | Was this cancellation announced, and how early? | SX |
 | 8 | Transfer reliability | journey planner | Will I make my connection at this hub? | NSR (stop places) |
@@ -100,6 +100,9 @@ Delay and cancellation rates by road surface condition, temperature band, precip
 wind, per mode, region and line: which lines are fragile in winter, and for ferries, at what
 wind speed cancellations start. Grain: line × weather bucket × month. Each quay maps to its
 nearest road weather station (a small mapping table; the join must not change row counts).
+Measured: DATEX road stations are a median 5.5 km from buses but 14 km from ferries and
+inland, so the ferry half needs coastal stations from MET's Frost
+([datex/content.md](../datex/content.md)).
 
 ## 6. Countdown accuracy
 
