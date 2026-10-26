@@ -17,11 +17,11 @@ run Spark without the VM running out of memory. Measured 2026-10-24/26 unless no
 | Dataset | Landing (gzip) | Bronze (Parquet) | Notes |
 | ------- | -------------: | ---------------: | ----- |
 | SIRI ET | 8.4–9.0 GB weekdays, 3.4–4.6 GB weekends | ~8.1 GB zstd (was ~22 GB snappy) | 85 % of everything |
-| vehicle positions | 1.25–1.27 GB | not ingested yet | |
+| vehicle positions | 1.25–1.34 GB weekdays, ~0.64 GB Sundays | ~1.0 GB zstd (0.38 GB Sunday) | Bronze takes about a minute a day |
 | DATEX | ~0.8 GB | ~0.53 GB | nearly all situations, see [datex/sources.md](../datex/sources.md) |
 | NeTEx + NSR | 0.32 GB (280 + 41 MB zips) | not in Bronze yet | one download a day, see [entur/sources.md](../entur/sources.md) |
 | SIRI SX | 1–2 MB | 2–4 MB | |
-| **total** | **~10.9 GB** | **~8.7 GB** | ~19.5 GB/day, weekdays |
+| **total** | **~10.9 GB** | **~9.7 GB** | ~20.5 GB/day, weekdays |
 
 Bronze ET was 2.6× its own gzipped input: snappy barely compresses multi-MB XML strings. On one
 real hour (2026-10-22 08 UTC, 589 MB gzipped), snappy wrote 1,621 MB and **zstd 558 MB**, in
@@ -29,8 +29,8 @@ the same time (126 s vs 129 s). Bronze now writes zstd.
 
 ## Runway
 
-2026-10-26: 299 GB used of 984 GB. At ~19.5 GB/day the monitor's disk alert (90 %) fires around
-**2026-11-25**. Grafana's **Disk full in** panel shows the live forecast. Assumes weekday
+2026-10-26: 299 GB used of 984 GB. At ~20.5 GB/day the monitor's disk alert (90 %) fires around
+**2026-11-24**. Grafana's **Disk full in** panel shows the live forecast. Assumes weekday
 volumes every day (so it errs early) and small Silver and Gold.
 
 ## When it fills: delete by hand, cheapest loss first
@@ -42,7 +42,7 @@ directories, in this order, and note what you removed in [report/problems.md](..
 | ----- | ---- | ----: | ------------ |
 | 1 | `dev/` outputs older than a week | 36 GB today (full-day dev runs of 2026-10-15/16) | nothing: test output |
 | 2 | rerun old prod Bronze days with zstd (workflow_dispatch, one date each) | ~14 GB per pre-zstd day (2026-10-15…22: ~95 GB) | nothing |
-| 3 | prod Bronze days older than Silver needs (keep the last week) | ~8 GB per day | nothing: rerun Bronze from landing |
+| 3 | prod Bronze days older than Silver needs (keep the last week) | ~9.7 GB per day | nothing: rerun Bronze from landing |
 | 4 | the oldest **ET** landing days | ~8.5 GB per day | raw messages; Entur's BigQuery still has the processed ET history ([entur/sources.md](../entur/sources.md)) |
 | never | DATEX, SX, NeTEx and NSR landing | | small, and no archive exists anywhere |
 
