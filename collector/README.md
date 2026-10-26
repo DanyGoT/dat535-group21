@@ -17,9 +17,14 @@ Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` as
 | `dat535-status` | status page and `/grafana/` proxy (`serve_status.py`) | nothing |
 | `dat535-exporter`, `-prometheus`, `-grafana` | metrics and dashboard | nothing |
 | `dat535-monitor.timer` | checks every 2 min, status page, ntfy (`monitor.py`) | — |
+| `dat535-static.timer` | NeTEx and NSR archive once a day at 04:15 UTC (`static.py`) | — |
 
 `deploy.sh` restarts a unit only when its own files changed. The three collectors share
-`hourly.py`: changing it restarts all three.
+`hourly.py`: changing it restarts all three. Each deploy also starts `dat535-static.service`
+once; it does nothing if today is already archived.
+
+**Never download NeTEx or NSR by hand from the VM**, not even with `curl`: Entur allows one
+download per file per 24 h and may block the IP. Read `landing/netex/` and `landing/nsr/`.
 
 ## One-time VM setup
 
@@ -42,6 +47,8 @@ Then push to `main` and approve the prod run.
 systemctl --user status 'dat535-*'
 journalctl --user -u dat535-receiver -f              # or -vehicles, -datex
 systemctl --user restart dat535-datex                # after editing collector.env
+systemctl --user list-timers 'dat535-*'              # next monitor run and archive
+journalctl --user -u dat535-static                   # what the daily archive did
 python3 ~/dat535-collector/peek.py et                # a few real messages (et, sx, vehicles)
 du -sh /data/dat535/{landing/*,dev,prod}             # where the disk goes
 ```
@@ -52,6 +59,23 @@ one ET journey or SX situation as indented XML, or a few vehicles as JSON. `--fi
 
 Status page without the tunnel: `ssh -L 8751:127.0.0.1:8751 ubuntu@<vm>`, then open
 `http://localhost:8751`.
+
+## Off campus
+
+The VM's address answers SSH only from the UiS network. Off campus, use Tailscale: the VM
+runs `tailscaled` as node `dat535-vm` (100.65.145.61) in one member's tailnet, started with
+`--accept-dns=false --accept-routes=false`, so the VM's own DNS and routes are untouched.
+Collectors, tunnel and receiver don't use it.
+
+```sh
+# ~/.ssh/config
+Host dat535-ts
+    HostName 100.65.145.61
+    User ubuntu
+```
+
+To get in, ask the tailnet owner to share the node with you. To remove it:
+`sudo systemctl disable --now tailscaled`.
 
 ## DATEX credentials
 

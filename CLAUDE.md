@@ -30,7 +30,7 @@ layer carries the most weight, then Bronze, then Gold.
 | `docs/datex/content.md` | Parsing DATEX payloads: structure, situation records, pitfalls, Silver notes |
 | `docs/external/sources.md` | Weather, road traffic or other non-Entur enrichment |
 | `docs/report/problems.md` | After hitting and fixing a non-trivial problem: add an entry (raw material for the report) |
-| `collector/README.md` | Operating the VM: units, setup, credentials, tunnel |
+| `collector/README.md` | Operating the VM: units, setup, credentials, tunnel, off-campus access |
 
 Items marked **UNVERIFIED** in the docs are research gaps, not facts. Verify against the
 source (or real data) before building on them, then update the doc.
@@ -46,13 +46,17 @@ source (or real data) before building on them, then update the doc.
   `dev` branch → `.github/workflows/dat535-dev.yml`; `main` → `dat535-prod.yml` (manual approval).
 - Pipeline code reads `DAT535_ENV` (`dev`/`prod`) and `DAT535_OUTPUT_DIR` from the environment.
 - The collectors and monitor are long-running infrastructure outside GitHub
-  Actions (see `docs/system/architecture.md`). SSH to the VM worked only from the UiS network
-  (2026-10-23/24); off campus it times out.
+  Actions (see `docs/system/architecture.md`). They run on the VM's `/usr/bin/python3`, which
+  is **Python 3.11**: no syntax newer than 3.11 in `collector/`.
+- SSH to the VM's address works only from the UiS network; off campus use Tailscale
+  (`collector/README.md`, "Off campus").
 
 ## Rules
 
 - **Respect Entur's and NPRA's limits** — never hammer endpoints in tests or loops. Every
   Entur request sends the `ET-Client-Name` header. Details in `docs/entur/sources.md`, `docs/datex/sources.md`.
+  NeTEx and NSR are downloaded once a day by `collector/static.py`; never download them by
+  hand from the VM (one download per 24 h, or the IP may be blocked). Read `landing/netex/`.
 - **Landing/raw data is immutable.** Only the collectors write to it; no code modifies or
   deletes it. When the disk fills, a person deletes whole old days in the order in
   `docs/system/storage.md`. Batch jobs read only closed files (never `*.part`).
