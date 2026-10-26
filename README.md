@@ -13,7 +13,7 @@ Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 | Part | State |
 | ---- | ----- |
 | SIRI ET/SX and vehicle position collection | running on the VM since 2026-10-15 / 10-17 |
-| DATEX collection | built and tested against NPRA; deploy with credentials (`collector/README.md`) |
+| DATEX collection | built and tested against NPRA; credentials are on the VM, starts with the next deploy |
 | NeTEx and NSR daily archive | **not built**; most Gold products need it |
 | Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
 | Bronze (SIRI, DATEX) | SIRI daily at 03:00 UTC; DATEX added |
