@@ -22,10 +22,13 @@ import bronze  # noqa: E402
 
 DAY = date(2026, 10, 15)
 ET_XML = '<?xml version="1.0"?>\n<Siri version="2.0"><!-- æøå --></Siri>\n'
+# One message of the vehicle positions subscription, as vehicles.py lands it (shortened).
+VEHICLE_MSG = json.dumps({"id": "1", "type": "next", "payload": {"data": {"vehicles": [
+    {"vehicleId": "4075", "lastUpdated": "2026-10-15T04:59:49Z", "line": {"lineRef": "KOL:Line:8_1103"}}]}}})
 
 
 def line(feed, payload=ET_XML, received_at="2026-10-15T05:00:01.000Z"):
-    # Same shape as the receiver's lines (json.dumps(..., ensure_ascii=False)).
+    # Same shape as the receiver's and vehicles.py's lines (json.dumps(..., ensure_ascii=False)).
     return json.dumps({"received_at": received_at, "endpoint": feed, "payload": payload},
                       ensure_ascii=False) + "\n"
 
@@ -40,7 +43,7 @@ class LandingCase(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def put(self, feed, name, text, day=DAY):
-        path = self.landing / f"siri-{feed}" / f"date={day}" / name
+        path = self.landing / bronze.DATASETS[feed] / f"date={day}" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         if name.endswith(".gz"):
             with gzip.open(path, "wt", encoding="utf-8") as fh:
@@ -56,7 +59,7 @@ class ScanDayTest(LandingCase):
         legacy = self.put("et", "hour=04.jsonl", line("et"))
         self.put("et", "hour=06.jsonl.gz.tmp", "")
         self.put("et", "hour=07.jsonl.part", line("et"))
-        files, missing, open_hours = bronze.scan_day(self.landing, "et", DAY)
+        files, missing, open_hours = bronze.scan_day(self.landing, "siri-et", DAY)
         self.assertEqual(files, [legacy, gz])
         self.assertEqual(open_hours, ["07"])
         self.assertEqual(len(missing), 22)
@@ -64,20 +67,20 @@ class ScanDayTest(LandingCase):
         self.assertNotIn("05", missing)
 
     def test_missing_day(self):
-        files, missing, open_hours = bronze.scan_day(self.landing, "sx", DAY)
+        files, missing, open_hours = bronze.scan_day(self.landing, "siri-sx", DAY)
         self.assertEqual((files, len(missing), open_hours), ([], 24, []))
 
     def test_two_closed_files_for_one_hour(self):
         self.put("et", "hour=05.jsonl", line("et"))
         self.put("et", "hour=05.jsonl.gz", line("et"))
         with self.assertRaises(RuntimeError):
-            bronze.scan_day(self.landing, "et", DAY)
+            bronze.scan_day(self.landing, "siri-et", DAY)
 
     def test_some_hours(self):
         self.put("et", "hour=04.jsonl", line("et"))
         gz = self.put("et", "hour=05.jsonl.gz", line("et"))
         self.put("et", "hour=07.jsonl.part", line("et"))
-        files, missing, open_hours = bronze.scan_day(self.landing, "et", DAY, ["05", "06", "07"])
+        files, missing, open_hours = bronze.scan_day(self.landing, "siri-et", DAY, ["05", "06", "07"])
         self.assertEqual((files, missing, open_hours), ([gz], ["06", "07"], ["07"]))
 
 
@@ -116,7 +119,7 @@ class IngestTest(LandingCase):
         self.put("sx", "hour=05.jsonl.gz", line("sx"))
 
     def read(self, feed):
-        return self.spark.read.parquet(str(self.out / "bronze" / f"siri-{feed}"))
+        return self.spark.read.parquet(str(self.out / "bronze" / bronze.DATASETS[feed]))
 
     def test_ingest(self):
         record = bronze.run(self.landing, self.out, DAY, spark=self.spark)
@@ -140,6 +143,15 @@ class IngestTest(LandingCase):
         self.assertEqual(corrupt[0]["_bronze_raw_line"], "{not json")
         self.assertTrue(all(r["_bronze_source_file"].endswith((".jsonl", ".jsonl.gz")) for r in rows))
         self.assertTrue(all(r["_bronze_run_id"] == record["run_id"] for r in rows))
+
+    def test_vehicles(self):
+        self.put("vehicles", "hour=05.jsonl.gz", line("vehicles", payload=VEHICLE_MSG) + line("et"))
+        record = bronze.run(self.landing, self.out, DAY, feeds=["vehicles"], spark=self.spark)
+        entry = record["feeds"]["vehicles"]
+        self.assertEqual((entry["files"], entry["rows"], entry["bad_rows"]), (1, 2, {"wrong_endpoint": 1}))
+        self.assertTrue((self.out / "bronze" / "vehicles" / f"date={DAY}").is_dir())
+        ok = [r for r in self.read("vehicles").collect() if r["_bronze_status"] == "ok"]
+        self.assertEqual([(r["feed"], r["hour"], r["payload"]) for r in ok], [("vehicles", "05", VEHICLE_MSG)])
 
     def test_rerun_replaces_only_that_day(self):
         other = date(2026, 10, 14)
@@ -176,7 +188,7 @@ class IngestTest(LandingCase):
 
     def test_day_without_data_is_skipped(self):
         record = bronze.run(self.landing, self.out, date(2026, 10, 1), spark=self.spark)
-        self.assertTrue(record["feeds"]["et"]["skipped"])
+        self.assertTrue(all(record["feeds"][f]["skipped"] for f in ("et", "sx", "vehicles")))
         self.assertFalse((self.out / "bronze" / "siri-et").exists())
 
 

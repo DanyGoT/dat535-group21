@@ -153,7 +153,7 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
     if hours != HOURS:
         record["hours"] = list(hours)
     for feed in feeds:
-        files, missing, open_hours = scan_day(landing, feed, day, hours, prefix=PREFIX)
+        files, missing, open_hours = scan_day(landing, f"{PREFIX}{feed}", day, hours)
         entry = {"files": len(files), "missing_hours": missing, "open_hours": open_hours}
         if open_hours:
             log.warning("%s%s %s: hours still open %s; rerun once they close", PREFIX, feed, day, open_hours)

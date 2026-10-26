@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Bronze: closed hourly SIRI landing files -> one compacted Parquet dataset per feed and day.
+"""Bronze: closed hourly SIRI and vehicle-position landing files -> one compacted Parquet
+dataset per feed and day.
 
-Reads   $DAT535_LANDING_DIR/siri-<feed>/date=D/hour=HH.jsonl.gz  (and legacy hour=HH.jsonl)
-Writes  $DAT535_OUTPUT_DIR/bronze/siri-<feed>/date=D/*.parquet
+Reads   $DAT535_LANDING_DIR/<dataset>/date=D/hour=HH.jsonl.gz  (and legacy hour=HH.jsonl)
+Writes  $DAT535_OUTPUT_DIR/bronze/<dataset>/date=D/*.parquet
         $DAT535_OUTPUT_DIR/bronze/_runs/date=D/<run_id>.json   (one record per run)
 
-The raw XML payload is kept unchanged as a string; parsing it is Silver's job. Lines that
-are not valid JSON, or lack a field, are kept with `_bronze_status` set, never dropped.
+<dataset> is siri-et, siri-sx or vehicles (DATASETS). The raw payload (SIRI XML, or the
+vehicle subscription's JSON message) is kept unchanged as a string; parsing it is Silver's
+job. Lines that are not valid JSON, or lack a field, are kept with `_bronze_status` set,
+never dropped.
 Rerunning a date replaces that date only, so reruns and late reruns are safe.
 `--hours` limits a run to some hours of the day (the dev workflow's small run); the date's
 partition then holds only those hours.
@@ -15,7 +18,7 @@ Landing is read-only here: open (*.part) and in-progress (*.tmp) files are never
 Usage:
     python pipeline/bronze.py                    # yesterday (UTC)
     python pipeline/bronze.py --date 2026-10-15
-    python pipeline/bronze.py --date 2026-10-15 --feeds et
+    python pipeline/bronze.py --date 2026-10-15 --feeds et,vehicles
     python pipeline/bronze.py --hours 08         # yesterday, 08:00-09:00 UTC only
 """
 
@@ -36,7 +39,10 @@ if find_spec("findspark") is not None:
 
 log = logging.getLogger("bronze")
 
-FEEDS = ("et", "sx")
+FEEDS = ("et", "sx", "vehicles")
+# Landing and Bronze directory of each feed: receiver.py writes siri-et and siri-sx,
+# vehicles.py writes vehicles.
+DATASETS = {"et": "siri-et", "sx": "siri-sx", "vehicles": "vehicles"}
 HOURS = [f"{h:02d}" for h in range(24)]
 CLOSED = re.compile(r"^hour=(\d{2})\.jsonl(\.gz)?$")
 OPEN = re.compile(r"^hour=(\d{2})\.jsonl\.part$")
@@ -70,16 +76,16 @@ def parse_hours(text):
     return hours
 
 
-def scan_day(landing, feed, day, hours=HOURS, prefix="siri-"):
-    """Closed files of one feed and UTC day, plus which hours are missing or still open.
+def scan_day(landing, dataset, day, hours=HOURS):
+    """Closed files of one landing dataset (e.g. siri-et) and UTC day, plus which hours are
+    missing or still open.
 
-    Only `hours` are looked at; files of other hours are ignored. The feed's landing directory
-    is <prefix><feed>.
+    Only `hours` are looked at; files of other hours are ignored.
 
     Returns (files sorted by hour, missing hours, open hours). Raises if an hour has both a
     .jsonl and a .jsonl.gz, which the collectors never produce: a human must look at it.
     """
-    folder = Path(landing) / f"{prefix}{feed}" / f"date={day}"
+    folder = Path(landing) / dataset / f"date={day}"
     closed, open_hours = {}, []
     if folder.is_dir():
         for path in sorted(folder.iterdir()):
@@ -127,7 +133,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
                                        sha2, when)
     from pyspark.sql.types import StringType, StructField, StructType
 
-    # Explicit schema: the line format is ours (written by the receiver), so no inference.
+    # Explicit schema: the line format is ours (receiver.py, vehicles.py), so no inference.
     schema = StructType([
         StructField("received_at", StringType()),
         StructField("endpoint", StringType()),
@@ -165,7 +171,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
     # Writes straight into the day's directory instead of partitionBy("date"): partitionBy sorts
     # by the partition column first, which spills the whole day to local disk. Readers of the
     # feed root still get `date` from the directory name.
-    partition = Path(out_root) / f"siri-{feed}" / f"date={day}"
+    partition = Path(out_root) / DATASETS[feed] / f"date={day}"
     bronze.write \
         .mode("overwrite") \
         .parquet(str(partition))
@@ -200,19 +206,20 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
     if hours != HOURS:
         record["hours"] = list(hours)
     for feed in feeds:
-        files, missing, open_hours = scan_day(landing, feed, day, hours)
+        dataset = DATASETS[feed]
+        files, missing, open_hours = scan_day(landing, dataset, day, hours)
         entry = {"files": len(files), "missing_hours": missing, "open_hours": open_hours}
         if open_hours:
-            log.warning("siri-%s %s: hours still open %s; rerun once they close", feed, day, open_hours)
+            log.warning("%s %s: hours still open %s; rerun once they close", dataset, day, open_hours)
         if not files:
-            log.warning("siri-%s %s: no closed files, skipped", feed, day)
+            log.warning("%s %s: no closed files, skipped", dataset, day)
             entry.update(rows=0, bad_rows={}, skipped=True)
         else:
             if spark is None:
                 spark = create_spark()
             entry.update(ingest_feed(spark, files, feed, day, out_root, rid, iso(started)))
-            log.info("siri-%s %s: %d files, %d rows, bad %s, missing hours %s",
-                     feed, day, len(files), entry["rows"], entry["bad_rows"], missing or "none")
+            log.info("%s %s: %d files, %d rows, bad %s, missing hours %s",
+                     dataset, day, len(files), entry["rows"], entry["bad_rows"], missing or "none")
         record["feeds"][feed] = entry
     record["finished_at"] = iso(utcnow())
     path = write_run_record(out_root, day, rid, record)
@@ -228,7 +235,7 @@ def main(argv=None):
                    default=(utcnow() - timedelta(days=1)).date(),
                    help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
     p.add_argument("--feeds", default=",".join(FEEDS),
-                   help="comma-separated feeds (default: et,sx)")
+                   help="comma-separated feeds (default: et,sx,vehicles)")
     p.add_argument("--hours", type=parse_hours, default=HOURS,
                    help="comma-separated UTC hours, e.g. 08,09 (default: the whole day)")
     args = p.parse_args(argv)
