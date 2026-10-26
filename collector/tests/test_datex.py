@@ -44,6 +44,7 @@ class FakeNPRA(BaseHTTPRequestHandler):
     status = None               # force this status (with an empty body)
     headers_out = {}
     truncate = False
+    stall = 0                   # with `status`: send part of an error body, then go quiet this long
     requests = []
 
     def log_message(self, format, *args):
@@ -54,6 +55,15 @@ class FakeNPRA(BaseHTTPRequestHandler):
         cls.requests.append((self.path, dict(self.headers)))
         if self.headers.get("Authorization") != AUTH:
             return self.reply(401, b"Unauthorized")
+        if cls.status and cls.stall:
+            self.send_response(cls.status)
+            self.send_header("Content-Length", "1000")
+            self.end_headers()
+            self.wfile.write(b"Service temporarily")
+            self.wfile.flush()
+            time.sleep(cls.stall)
+            self.close_connection = True
+            return
         if cls.status:
             return self.reply(cls.status, b"", cls.headers_out)
         ims = self.headers.get("If-Modified-Since")
@@ -207,8 +217,14 @@ class PollTest(DatexCase):
         self.assertEqual(self.poller(fake(status=503), feed="traveltime").poll(), 150)
 
     def test_retry_after_is_honoured(self):
-        p = self.poller(fake(status=429, headers_out={"Retry-After": "700"}))
-        self.assertEqual(p.poll(), 700)
+        p = self.poller(fake(status=429, headers_out={"Retry-After": "3600"}))
+        self.assertEqual(p.poll(), 3600)        # longer than our own backoff cap: the server decides
+
+    def test_stalled_error_body_keeps_the_status(self):
+        url = self.start(fake(status=503, stall=2)) + "/GetSituation/pullsnapshotdata"
+        r = datex.fetch(url, AUTH, "test-client", None, lambda text: None, timeout=0.5)
+        self.assertEqual(r.status, 503)
+        self.assertTrue(r.error.startswith("HTTP 503"))
 
     def test_rejected_credentials_pause_every_feed(self):
         pause = datex.AuthPause()

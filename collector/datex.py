@@ -169,8 +169,10 @@ def fetch(url, auth, client_name, if_modified_since, sink, timeout=TIMEOUT_S):
             decoder.decode(b"", final=True)     # truncated UTF-8 sequence at the end
             return Response(status, last_modified, None, size, digest.hexdigest(), encoding)
     except urllib.error.HTTPError as e:
-        try:
+        try:    # the body is only a hint: a stalled or cut-off one must not lose the status
             detail = "" if e.code == 304 else " ".join(e.read(300).decode("utf-8", "replace").split())
+        except (http.client.HTTPException, OSError, ValueError):
+            detail = ""
         finally:
             e.close()
         if e.code == 304:
@@ -255,8 +257,8 @@ class Poller:
         else:
             self.errors += 1
             delay = min(self.spec.interval_s * 2 ** (self.errors - 1), MAX_BACKOFF_S)
-            if r.retry_after:
-                delay = max(delay, min(r.retry_after, MAX_BACKOFF_S))
+            if r.retry_after:   # the server's own wait is a minimum, not capped like our backoff
+                delay = max(delay, r.retry_after)
             if r.status in (401, 403):
                 delay = AUTH_PAUSE_S
                 self.pause.until = time.monotonic() + delay
