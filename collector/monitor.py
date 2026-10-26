@@ -16,7 +16,7 @@ Environment:
     DATEX_FEEDS             the DATEX poller's feeds (default: all of datex.FEEDS)
     MONITOR_STATUS_DIR      output directory, the only thing ever served (default: ./status)
     MONITOR_MAX_PART_AGE_MIN  .part must be modified within this many minutes (default: 5)
-    MONITOR_DISK_MAX_PCT    landing volume usage limit in percent (default: 90)
+    MONITOR_DISK_MAX_PCT    usage limit in percent for the landing volume and / (default: 90)
     NTFY_TOPIC              ntfy topic; unset = no notifications. Long and random: it is the secret.
     NTFY_SERVER             default: https://ntfy.sh
     STATUS_PUBLIC_URL       optional public address of the status page; tapping a notification opens it
@@ -186,13 +186,13 @@ def fail_body(checks):
     return "\n".join(lines)
 
 
-def check_disk(landing, max_pct):
-    u = shutil.disk_usage(landing)
+def check_disk(path, max_pct, name="disk"):
+    u = shutil.disk_usage(path)
     pct = 100 * u.used / u.total
     res = {"ok": pct < max_pct, "reason": None, "short": None, "used_pct": round(pct, 1), "free_bytes": u.free}
     if not res["ok"]:
-        res["reason"] = f"disk {pct:.1f}% used (limit {max_pct}%)"
-        res["short"] = f"disk {pct:.0f}% full"
+        res["reason"] = f"{name} {pct:.1f}% used (limit {max_pct}%)"
+        res["short"] = f"{name} {pct:.0f}% full"
     return res
 
 
@@ -377,10 +377,12 @@ def render(status, host):
         out.append(row("RUNNING" if c["ok"] else "FAILED", c["ok"], landing_dir(feed), nums,
                        c["reason"] or c["file"] or "no landing file yet"))
 
-    d = checks["disk"]
-    out.append(row("OK" if d["ok"] else "FAILED", d["ok"], "disk",
-                   f"{d['used_pct']}% · {fmt_bytes(d['free_bytes'])} free",
-                   d["reason"] or "landing volume"))
+    for key, desc in (("disk", "data volume: landing, Bronze, Silver, Gold"),
+                      ("root-disk", "root volume: /tmp (Spark spill), Prometheus, the runner")):
+        d = checks.get(key)
+        if d:
+            out.append(row("OK" if d["ok"] else "FAILED", d["ok"], key,
+                           f"{d['used_pct']}% · {fmt_bytes(d['free_bytes'])} free", d["reason"] or desc))
 
     out.append('<div class="health">\n')
     if n_fail:
@@ -504,6 +506,8 @@ def main():
             checks[key] = check_datex_feed(landing, f, (ds.get("feeds") or {}).get(f[len(DATEX_PREFIX):]) or {},
                                            parse_iso(ds.get("started_at")), now, max_age)
     checks["disk"] = check_disk(landing, disk_max)
+    # Spark spills to /tmp on the small root volume; a full one failed Bronze on 2026-10-24.
+    checks["root-disk"] = check_disk("/", disk_max, "root disk")
 
     ok = all(c["ok"] for c in checks.values())
     reason = "; ".join(c["reason"] for c in checks.values() if not c["ok"])

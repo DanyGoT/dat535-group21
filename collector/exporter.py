@@ -3,7 +3,7 @@
 
 Serves GET /metrics in the Prometheus text format. Every scrape looks at the landing
 zone (file sizes and names only, never contents), the receiver's and the DATEX poller's
-state files, the monitor's status.json and disk usage. Never writes anything. Bind to localhost only:
+state files, the monitor's status.json, disk and memory usage. Never writes anything. Bind to localhost only:
 Prometheus scrapes it, nothing else should.
 
 Environment:
@@ -58,6 +58,9 @@ HELP = {
     "dat535_monitor_ok": ("gauge", "1 if all monitor checks passed on the last run."),
     "dat535_monitor_check_ok": ("gauge", "1 if this monitor check passed on the last run."),
     "dat535_monitor_last_run_timestamp_seconds": ("gauge", "When the monitor last ran."),
+    "dat535_memory_total_bytes": ("gauge", "Physical memory (MemTotal)."),
+    "dat535_memory_available_bytes": ("gauge", "Memory available to new processes without swapping (MemAvailable)."),
+    "dat535_swap_used_bytes": ("gauge", "Swap in use (SwapTotal - SwapFree)."),
     "dat535_filesystem_size_bytes": ("gauge", "Size of the filesystem holding this volume."),
     "dat535_filesystem_free_bytes": ("gauge", "Free bytes on the filesystem holding this volume."),
     "dat535_exporter_scrape_duration_seconds": ("gauge", "Time spent collecting these metrics."),
@@ -178,6 +181,17 @@ def collect_monitor(status_dir, out):
         out.append(("dat535_monitor_last_run_timestamp_seconds", {}, t.timestamp()))
 
 
+def collect_memory(out, meminfo="/proc/meminfo"):
+    kb = {}
+    with open(meminfo) as fh:
+        for line in fh:
+            key, _, rest = line.partition(":")
+            kb[key] = int(rest.split()[0])
+    out.append(("dat535_memory_total_bytes", {}, kb["MemTotal"] * 1024))
+    out.append(("dat535_memory_available_bytes", {}, kb["MemAvailable"] * 1024))
+    out.append(("dat535_swap_used_bytes", {}, (kb.get("SwapTotal", 0) - kb.get("SwapFree", 0)) * 1024))
+
+
 def collect_disk(volumes, out):
     for volume, path in volumes.items():
         try:
@@ -227,6 +241,7 @@ class Collector:
             steps.append(lambda: collect_datex(self.datex_state_file, out))
         steps += [lambda: collect_receiver(self.state_file, out),
                   lambda: collect_monitor(self.status_dir, out),
+                  lambda: collect_memory(out),
                   lambda: collect_disk(self.volumes, out)]
         for step in steps:
             try:

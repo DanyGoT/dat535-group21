@@ -516,6 +516,8 @@ class ExporterTest(unittest.TestCase):
         self.assertEqual(m['dat535_datex_snapshot_bytes{feed="datex-situation"}'], 28614925)
         self.assertEqual(m['dat535_datex_last_ok_timestamp_seconds{feed="datex-situation"}'], at(3, 0).timestamp())
         self.assertNotIn('dat535_datex_last_change_timestamp_seconds{feed="datex-situation"}', m)
+        self.assertGreater(m["dat535_memory_available_bytes"], 0)
+        self.assertGreaterEqual(m["dat535_swap_used_bytes"], 0)
 
 
 class FakeGrafana(BaseHTTPRequestHandler):
