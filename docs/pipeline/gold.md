@@ -51,10 +51,13 @@ there is one: active road works on the route, icy roads.
 | line, operator, mode, direction, stop position in journey | Silver stop calls |
 | hour of week, day type, school holiday | calendar (computed) |
 | historical delay at this stop and hour (profile above) | Gold #1 profile |
-| delay of the same journey at earlier stops (for "live" lookups) | Silver stop calls |
+| delay of the same journey at earlier stops, as known at lookup time (for "live" lookups) | Silver `call_prediction` (ET versions received by then), never final `stop_call` states |
 | active road situations within X m of the route, by type | DATEX situations + NSR coordinates |
 | road surface condition, temperature, precipitation, wind at nearest station | DATEX weather + weather sites |
 | congestion index on matching road sections | DATEX travel times (while NPRA keeps them) |
+
+**No leakage:** a feature may only use what was known at the lookup time. `stop_call` holds
+final states, which include what happened after the lookup: they are labels, not features.
 
 **Semantics to fix once** (Gold, not Silver): on time = less than 3 min late at departure
 (arrival for the last stop); cancelled = journey or call cancelled; denominator = planned
@@ -63,7 +66,9 @@ calls (NeTEx), with "no real-time" as its own outcome, never counted as on time.
 **Validation.** Split by time (train on earlier weeks, test on the next), never randomly:
 neighbouring departures leak. Report calibration (do 30 % risks come true 30 % of the
 time?), Brier score and AUC per mode. Two baselines: the profile table, and Entur's own
-live estimate at the same lead time (our ET versions, or BigQuery `siri_et_estimated_times`).
+live estimate as it stood at the lookup time, a fixed time before the *planned* departure
+(rebuilt from our ET versions). BigQuery `siri_et_estimated_times` counts its lead time back
+from the *actual* departure, which nobody knows in advance; it fits #6, not this baseline.
 
 **Limits.** Depth = weeks we have collected. Some operators copy aimed into actual times,
 which hides delay ([entur/realtime.md](../entur/realtime.md)). For departures days ahead we only have current
@@ -74,9 +79,11 @@ for forecast features.
 
 Per operator, line and mode, per day and week: share on time, share cancelled, mean and p90
 delay, and **coverage** (planned journeys that ever appeared in real-time; 0–8 % never do,
-[pipeline/silver.md](silver.md)). Grain: operator × line × mode × operating day. Small, easy to validate: the
-same numbers can be computed from Entur's BigQuery `realtime_siri_et_last_recorded` for the
-same day, which tests our Silver end to end.
+[pipeline/silver.md](silver.md)). Grain: operator × line × mode × operating day. Small, easy to validate: for
+calls that appear in ET, the same numbers can be computed from Entur's BigQuery
+`realtime_siri_et_last_recorded` for the same day, which tests our Silver end to end.
+BigQuery is ET only, so coverage and rates over planned journeys are checked against the
+archived NeTEx instead.
 
 ## 3. Delay hotspots
 
