@@ -1,7 +1,7 @@
 # Collector
 
-Everything that runs all the time on the VM: the collectors, the monitor, metrics, the status
-page and retention. How it fits together: [system/architecture.md](../docs/system/architecture.md). Capacity: [system/storage.md](../docs/system/storage.md).
+Everything that runs all the time on the VM: the collectors, the monitor, metrics and the
+status page. How it fits together: [system/architecture.md](../docs/system/architecture.md). Capacity: [system/storage.md](../docs/system/storage.md).
 
 Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` as systemd
 **user** units. Nothing is cloned on the VM; edit here, push, approve the prod run.
@@ -17,7 +17,6 @@ Deployed by the prod workflow (`collector/deploy.sh`) to `~/dat535-collector` as
 | `dat535-status` | status page and `/grafana/` proxy (`serve_status.py`) | nothing |
 | `dat535-exporter`, `-prometheus`, `-grafana` | metrics and dashboard | nothing |
 | `dat535-monitor.timer` | checks every 2 min, status page, ntfy (`monitor.py`) | — |
-| `dat535-retention.timer` | hourly storage retention (`retention.py`) | — |
 
 `deploy.sh` restarts a unit only when its own files changed. The three collectors share
 `hourly.py`: changing it restarts all three.
@@ -41,10 +40,10 @@ Then push to `main` and approve the prod run.
 
 ```sh
 systemctl --user status 'dat535-*'
-journalctl --user -u dat535-receiver -f              # or -vehicles, -datex, -retention
+journalctl --user -u dat535-receiver -f              # or -vehicles, -datex
 systemctl --user restart dat535-datex                # after editing collector.env
 python3 ~/dat535-collector/peek.py et                # a few real messages (et, sx, vehicles)
-python3 ~/dat535-collector/retention.py --dry-run    # what retention would delete now
+du -sh /data/dat535/{landing/*,dev,prod}             # where the disk goes
 ```
 
 `peek.py <feed>` prints random data messages from the hour being written, heartbeats skipped:
@@ -76,11 +75,10 @@ systemctl --user restart dat535-datex
 The monitor then checks each feed (rows `datex-<feed>`, section POLLING · DATEX); Grafana has
 a DATEX row. A rejected login pauses all feeds for 15 min and shows as FAILED.
 
-## Retention
+## Disk cleanup
 
-`retention.py` keeps `/data` from filling up: stale dev output first, then old prod Bronze
-(rebuildable from landing), and only above 92 % the oldest ET landing days. Every deletion is
-logged to `/data/dat535/retention-ledger.jsonl`. Policy and reasoning: [system/storage.md](../docs/system/storage.md).
+Nothing deletes data automatically. The monitor alerts at 90 % on `/data` and on `/`; then
+delete by hand, cheapest loss first: [system/storage.md](../docs/system/storage.md).
 
 ## Tunnel
 

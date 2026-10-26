@@ -26,7 +26,7 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 
 | Folder | Docs |
 | ------ | ---- |
-| [`docs/system/`](docs/system/) | [architecture](docs/system/architecture.md): components, landing zone, pipeline, monitoring · [storage](docs/system/storage.md): VM capacity, volumes, runway, retention, Spark memory rules · [switchboard-style](docs/system/switchboard-style.md): look of the status page |
+| [`docs/system/`](docs/system/) | [architecture](docs/system/architecture.md): components, landing zone, pipeline, monitoring · [storage](docs/system/storage.md): VM capacity, volumes, runway, manual cleanup, Spark memory rules · [switchboard-style](docs/system/switchboard-style.md): look of the status page |
 | [`docs/pipeline/`](docs/pipeline/) | [methodology](docs/pipeline/methodology.md): how we decide, layer by layer · [silver](docs/pipeline/silver.md): grain, keys, joins, dedup, proposed tables · [gold](docs/pipeline/gold.md): use cases, the prediction product |
 | [`docs/entur/`](docs/entur/) | [sources](docs/entur/sources.md): every Entur source, limits, licence · [realtime](docs/entur/realtime.md): SIRI pub/sub and vehicle positions · [identifiers](docs/entur/identifiers.md): ids and join keys |
 | [`docs/datex/`](docs/datex/) | [sources](docs/datex/sources.md): access, feeds, collection, costs · [content](docs/datex/content.md): what the payloads contain, pitfalls |
@@ -38,7 +38,7 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 
 | Path | Contents |
 | ---- | -------- |
-| `collector/` | always-on collectors, monitor, exporter, retention, systemd units, Grafana dashboard |
+| `collector/` | always-on collectors, monitor, exporter, systemd units, Grafana dashboard |
 | `pipeline/` | Spark jobs (`bronze.py`, `bronze_datex.py`) and their tests |
 | `.github/workflows/` | `dat535-dev.yml` (push/PR to `dev`), `dat535-prod.yml` (deploy on `main` with approval, Bronze daily) |
 | `notebooks/` | exploration (`peek.ipynb`) |

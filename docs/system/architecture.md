@@ -13,7 +13,6 @@ Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex,
                                                    │
   monitor.py   (reads) ◀───────────────────────────┤──▶ status page + ntfy on OK↔FAIL
   exporter.py  (reads) ◀───────────────────────────┤──▶ Prometheus ──▶ Grafana (/grafana/)
-  retention.py (deletes whole days, by policy) ────┤
                                                    ▼
   Spark (GitHub Actions, 03:00 UTC): Bronze ──▶ Silver ──▶ Gold      /data/dat535/{prod,dev}
 ```
@@ -29,7 +28,6 @@ Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex,
 | Monitor + status page | `collector/monitor.py`, `serve_status.py` | timer (2 min), `dat535-status` | running |
 | Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
 | Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
-| Retention | `collector/retention.py` | timer (hourly) | new |
 | Bronze | `pipeline/bronze.py` (SIRI), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (DATEX) |
 | Silver, Gold | — | — | not built ([pipeline/silver.md](../pipeline/silver.md), [pipeline/gold.md](../pipeline/gold.md)) |
 
@@ -85,8 +83,9 @@ The contract between the collectors and Spark.
 - **Hourly files:** few enough for Spark to list, small enough to rerun one day or read while
   the collectors write. Gzip is not splittable; one task per hour is fine at this size.
 - Payloads can exceed 20M characters: every Spark JSON read needs `maxStringLen` ([system/storage.md](storage.md)).
-- **Immutable.** Only the collectors write here, and files are never modified. The one
-  exception is `retention.py`, which may delete whole old days as a last resort ([system/storage.md](storage.md)).
+- **Immutable.** Only the collectors write here, and nothing modifies or deletes files
+  automatically. When the disk fills, a person deletes whole old days, cheapest loss first
+  ([system/storage.md](storage.md)).
 
 ## Batch pipeline
 
@@ -119,7 +118,7 @@ It writes the status page ([system/switchboard-style.md](switchboard-style.md)) 
 only (OK→FAIL, FAIL→OK).
 
 **Metrics.** The exporter turns file names and sizes (never contents), the state files, the
-monitor result, the retention ledger, disk and memory into Prometheus metrics. Prometheus
+monitor result, disk and memory into Prometheus metrics. Prometheus
 scrapes every 30 s and keeps a year. Grafana shows one dashboard (`DAT535 Collector`),
 provisioned from the repo and read-only (anonymous viewers, no login). Prometheus also
 accepts OTLP pushes on localhost, so Spark jobs can report metrics later.
@@ -146,7 +145,8 @@ Prometheus or the exporter, and no controls.
 - Push notifications: ntfy.sh; the topic name is the secret.
 - DATEX credentials only in `~/.config/dat535/collector.env` (NPRA's terms make them
   confidential); sent over https only, redirects not followed.
-- Bronze Parquet is zstd; storage is managed by tiered retention ([system/storage.md](storage.md)).
+- Bronze Parquet is zstd. Nothing deletes data automatically: when the disk fills we delete
+  by hand, knowing what we lose ([system/storage.md](storage.md)).
 
 ## Open decisions
 
