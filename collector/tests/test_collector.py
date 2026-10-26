@@ -340,6 +340,17 @@ class MonitorTest(unittest.TestCase):
         self.assertIn('<section class="row idle">', page)
         self.assertIn("not set: polling nothing", page)
 
+    def test_datex_first_poll_pending(self):
+        # Just started: no landing file and no poll yet. Healthy, and the page must still render.
+        self.feeds = "et,datex-weather-sites"
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        (self.tmp / "datex.json").write_text(json.dumps({
+            "pid": os.getpid(), "started_at": now, "polling": True, "error": None,
+            "feeds": {"weather-sites": {"interval_s": 21600, "last_ok": None, "errors": 0}}}))
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("no landing file yet", (self.tmp / "status" / "index.html").read_text())
+
     def test_datex_feeds(self):
         self.feeds = "et,datex-situation,datex-traveltime"
         self.datex(situation={}, traveltime={"interval_s": 150, "stale_after_s": 1800})

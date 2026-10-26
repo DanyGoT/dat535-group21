@@ -375,7 +375,7 @@ def render(status, host):
         feed = key[5:]
         nums = (f"{fmt_bytes(c['size'])} · {fmt_age(c['age_s'])} ago" if c["file"] else "")
         out.append(row("RUNNING" if c["ok"] else "FAILED", c["ok"], landing_dir(feed), nums,
-                       c["reason"] or c["file"]))
+                       c["reason"] or c["file"] or "no landing file yet"))
 
     d = checks["disk"]
     out.append(row("OK" if d["ok"] else "FAILED", d["ok"], "disk",
