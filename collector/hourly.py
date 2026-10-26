@@ -34,6 +34,11 @@ class HourlyWriter:
     When the hour ends the .part is closed and handed to a background thread, which
     gzips it to hour=HH.jsonl.gz (via .gz.tmp, then an atomic rename) and removes the
     .part. Compression never blocks incoming lines.
+
+    Hours only move forward. Callers read the clock before taking the lock, so a reading
+    from before the hour can arrive after another thread opened the next one: such a line
+    goes into the open hour, and rotate() leaves it open. Reopening or closing an hour out
+    of order would leave a .part that can never be finalized next to its .gz.
     """
 
     def __init__(self, root, name):
@@ -91,12 +96,12 @@ class HourlyWriter:
 
     def rotate(self, now):
         with self.lock:
-            if self.key is not None and self.key != self._key(now):
+            if self.key is not None and self.key < self._key(now):
                 self._close()
 
     def _file(self, now):
         key = self._key(now)
-        if self.key != key:
+        if self.key is None or self.key < key:
             self._close()
             part = self._part(key)
             part.parent.mkdir(parents=True, exist_ok=True)

@@ -103,6 +103,22 @@ class WriterTest(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in base.iterdir()), ["hour=12.jsonl.gz"])
             self.assertEqual(gzip.decompress((base / "hour=12.jsonl.gz").read_bytes()), b"a\n")
 
+    def test_late_clock_reading_keeps_the_open_hour(self):
+        # Two threads: one opened hour 11, then one holding a reading from 10:59 gets the lock.
+        with tempfile.TemporaryDirectory() as d:
+            w = hourly.HourlyWriter(d, "siri-et")
+            w.append("a\n", at(10, 59))
+            w.append("b\n", at(11, 0))
+            w.rotate(at(10, 59))
+            w.append("c\n", at(10, 59))
+            w.append("d\n", at(11, 5))
+            w.rotate(at(12, 0))
+            w.pending.join()
+            base = Path(d) / "siri-et" / "date=2026-10-15"
+            self.assertEqual(sorted(p.name for p in base.iterdir()), ["hour=10.jsonl.gz", "hour=11.jsonl.gz"])
+            self.assertEqual(gzip.decompress((base / "hour=10.jsonl.gz").read_bytes()), b"a\n")
+            self.assertEqual(gzip.decompress((base / "hour=11.jsonl.gz").read_bytes()), b"b\nc\nd\n")
+
     def test_never_overwrites_closed_file(self):
         with tempfile.TemporaryDirectory() as d:
             base = Path(d) / "siri-et" / "date=2026-10-15"
