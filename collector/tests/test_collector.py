@@ -250,6 +250,7 @@ class MonitorTest(unittest.TestCase):
         Recorder.reply = b"{}"
         self.ntfy = serve(Recorder)
         self.feeds = "et"
+        self.static = ""
 
     def tearDown(self):
         self.ntfy.shutdown()
@@ -257,7 +258,7 @@ class MonitorTest(unittest.TestCase):
 
     def run_monitor(self):
         env = dict(os.environ, DAT535_LANDING_DIR=str(self.landing), RECEIVER_STATE_FILE=str(self.state),
-                   DATEX_STATE_FILE=str(self.tmp / "datex.json"),
+                   DATEX_STATE_FILE=str(self.tmp / "datex.json"), MONITOR_STATIC=self.static,
                    MONITOR_FEEDS=self.feeds, MONITOR_STATUS_DIR=str(self.tmp / "status"),
                    MONITOR_DISK_MAX_PCT="100", NTFY_TOPIC="topic",
                    NTFY_SERVER=f"http://127.0.0.1:{self.ntfy.server_address[1]}")
@@ -355,6 +356,28 @@ class MonitorTest(unittest.TestCase):
         page = (self.tmp / "status" / "index.html").read_text()
         self.assertIn('<section class="row idle">', page)
         self.assertIn("not set: polling nothing", page)
+
+    def test_static_archive(self):
+        self.static = "netex,nsr"
+        now = datetime.now(timezone.utc)
+        for d, ago_h in (("netex", 2), ("nsr", 40)):
+            day = self.landing / d / f"date={now:%Y-%m-%d}"
+            day.mkdir(parents=True)
+            f = day / "file.zip"
+            f.write_bytes(b"PK")
+            (day / "file.zip.meta.json").write_text("{}")
+            (day / "next.zip.part").write_bytes(b"P")      # a download in progress never counts
+            t = time.time() - ago_h * 3600
+            os.utime(f, (t, t))
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("nsr: last archived 40h 0m ago", r.stdout)
+        self.assertNotIn("netex:", r.stdout)
+        page = (self.tmp / "status" / "index.html").read_text()
+        self.assertIn('<span class="name">netex</span>', page)
+        shutil.rmtree(self.landing / "nsr")
+        r = self.run_monitor()
+        self.assertIn("nsr: nothing archived yet", r.stdout)
 
     def test_datex_first_poll_pending(self):
         # Just started: no landing file and no poll yet. Healthy, and the page must still render.
@@ -479,8 +502,13 @@ class ExporterTest(unittest.TestCase):
                 "feeds": {"situation": {"interval_s": 300, "last_ok": "2026-10-15T03:00:00Z",
                                         "last_change": None, "last_bytes": 28614925, "errors": 2,
                                         "polls": {"changed": 5, "unchanged": 1, "error": 2}}}}))
+            for day in ("2026-10-26", "2026-10-27"):
+                nx = d / "landing" / "netex" / f"date={day}"
+                nx.mkdir(parents=True)
+                (nx / "rb_norway-aggregated-netex.zip").write_bytes(b"x" * 17)
+            (nx / "rb_norway-aggregated-netex.zip.meta.json").write_text("{}")
             text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx", "vehicles", "datex-situation"],
-                                      str(d / "status"), str(datex_state)).collect()
+                                      str(d / "status"), str(datex_state), ["netex", "nsr"]).collect()
 
         m = {}
         for line in text.splitlines():
@@ -518,6 +546,10 @@ class ExporterTest(unittest.TestCase):
         self.assertNotIn('dat535_datex_last_change_timestamp_seconds{feed="datex-situation"}', m)
         self.assertGreater(m["dat535_memory_available_bytes"], 0)
         self.assertGreaterEqual(m["dat535_swap_used_bytes"], 0)
+        self.assertEqual(m['dat535_static_days{dataset="netex"}'], 2)
+        self.assertEqual(m['dat535_static_last_archive_bytes{dataset="netex"}'], 17)
+        self.assertEqual(m['dat535_static_days{dataset="nsr"}'], 0)
+        self.assertNotIn('dat535_static_last_archive_timestamp_seconds{dataset="nsr"}', m)
 
 
 class FakeGrafana(BaseHTTPRequestHandler):

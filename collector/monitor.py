@@ -14,6 +14,8 @@ Environment:
                             datex-<feed> for each of the poller's DATEX_FEEDS)
     RECEIVER_FEEDS          the receiver's SIRI feeds (default: et,sx)
     DATEX_FEEDS             the DATEX poller's feeds (default: all of datex.FEEDS)
+    MONITOR_STATIC          daily downloads to check (default: netex,nsr; empty = none)
+    MONITOR_STATIC_MAX_AGE_H  newest archived file must be younger than this (default: 30)
     MONITOR_STATUS_DIR      output directory, the only thing ever served (default: ./status)
     MONITOR_MAX_PART_AGE_MIN  .part must be modified within this many minutes (default: 5)
     MONITOR_DISK_MAX_PCT    usage limit in percent for the landing volume and / (default: 90)
@@ -174,6 +176,39 @@ def check_datex_feed(landing, feed, s, started, now, max_age_min):
         age = (now - last_change).total_seconds()
         res.update(ok=False, reason=f"{feed}: NPRA has published nothing new for {fmt_age(age)}"
                                     f" (every poll returns the same snapshot)", short=f"{feed}: source stale for {fmt_age(age)}")
+    return res
+
+
+def static_from_env():
+    """Daily downloads of static.py to check: MONITOR_STATIC, else NeTEx and NSR."""
+    raw = os.environ.get("MONITOR_STATIC", "netex,nsr")
+    return [d.strip() for d in raw.split(",") if d.strip()]
+
+
+def newest_static(landing, dataset):
+    """Newest complete archived file of a daily download: <dataset>/date=*/<file>, without the
+    .part being downloaded and the .meta.json next to it."""
+    for day in sorted((Path(landing) / dataset).glob("date=*"), reverse=True):
+        files = [p for p in day.iterdir()
+                 if p.is_file() and not p.name.endswith((".part", ".json", ".tmp"))]
+        if files:
+            return max(files, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def check_static(landing, dataset, now, max_age_h):
+    """A daily download (static.py): its newest file must be from the last max_age_h hours."""
+    res = {"ok": True, "reason": None, "short": None, "file": None, "size": None, "age_s": None}
+    path = newest_static(landing, dataset)
+    if path is None:
+        res.update(ok=False, reason=f"{dataset}: nothing archived yet", short=f"{dataset}: not archived yet")
+        return res
+    st = path.stat()
+    age = now.timestamp() - st.st_mtime
+    res.update(file=f"{path.parent.name}/{path.name}", size=st.st_size, age_s=round(age))
+    if age > max_age_h * 3600:
+        res.update(ok=False, reason=f"{dataset}: last archived {fmt_age(age)} ago ({res['file']})",
+                   short=f"{dataset}: not archived for {fmt_age(age)}")
     return res
 
 
@@ -377,6 +412,12 @@ def render(status, host):
         out.append(row("RUNNING" if c["ok"] else "FAILED", c["ok"], landing_dir(feed), nums,
                        c["reason"] or c["file"] or "no landing file yet"))
 
+    for key, c in checks.items():
+        if key.startswith("static:"):
+            nums = (f"{fmt_bytes(c['size'])} · {fmt_age(c['age_s'])} ago" if c["file"] else "")
+            out.append(row("OK" if c["ok"] else "FAILED", c["ok"], key[7:], nums,
+                           c["reason"] or f"daily archive, {c['file']}"))
+
     for key, desc in (("disk", "data volume: landing, Bronze, Silver, Gold"),
                       ("root-disk", "root volume: /tmp (Spark spill), Prometheus, the runner")):
         d = checks.get(key)
@@ -505,6 +546,9 @@ def main():
             ds = datex_state or {}
             checks[key] = check_datex_feed(landing, f, (ds.get("feeds") or {}).get(f[len(DATEX_PREFIX):]) or {},
                                            parse_iso(ds.get("started_at")), now, max_age)
+    static_max_age = float(os.environ.get("MONITOR_STATIC_MAX_AGE_H", "30"))
+    for d in static_from_env():
+        checks[f"static:{d}"] = check_static(landing, d, now, static_max_age)
     checks["disk"] = check_disk(landing, disk_max)
     # Spark spills to /tmp on the small root volume; a full one failed Bronze on 2026-10-24.
     checks["root-disk"] = check_disk("/", disk_max, "root disk")

@@ -11,6 +11,7 @@ Environment:
     RECEIVER_STATE_FILE     written by the receiver (default: ./run/receiver.json)
     DATEX_STATE_FILE        written by the DATEX poller (default: ./run/datex.json)
     MONITOR_FEEDS           feeds to report (default: see monitor.feeds_from_env)
+    MONITOR_STATIC          daily downloads to report (default: see monitor.static_from_env)
     MONITOR_STATUS_DIR      where the monitor writes status.json (default: ./status)
     EXPORTER_BIND           default: 127.0.0.1
     EXPORTER_PORT           default: 8752
@@ -26,7 +27,8 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from monitor import DATEX_PREFIX, feeds_from_env, landing_dir, parse_iso, pid_alive
+from monitor import (DATEX_PREFIX, feeds_from_env, landing_dir, newest_static, parse_iso, pid_alive,
+                     static_from_env)
 
 HOUR_FILE = re.compile(r"hour=(\d{2})\.jsonl(\.gz|\.part)?$")
 DATE_DIR = re.compile(r"date=(\d{4}-\d{2}-\d{2})$")
@@ -58,6 +60,9 @@ HELP = {
     "dat535_monitor_ok": ("gauge", "1 if all monitor checks passed on the last run."),
     "dat535_monitor_check_ok": ("gauge", "1 if this monitor check passed on the last run."),
     "dat535_monitor_last_run_timestamp_seconds": ("gauge", "When the monitor last ran."),
+    "dat535_static_last_archive_timestamp_seconds": ("gauge", "When the newest daily file (NeTEx, NSR) was archived."),
+    "dat535_static_last_archive_bytes": ("gauge", "Size of the newest daily file."),
+    "dat535_static_days": ("gauge", "Days with an archived file."),
     "dat535_memory_total_bytes": ("gauge", "Physical memory (MemTotal)."),
     "dat535_memory_available_bytes": ("gauge", "Memory available to new processes without swapping (MemAvailable)."),
     "dat535_swap_used_bytes": ("gauge", "Swap in use (SwapTotal - SwapFree)."),
@@ -181,6 +186,18 @@ def collect_monitor(status_dir, out):
         out.append(("dat535_monitor_last_run_timestamp_seconds", {}, t.timestamp()))
 
 
+def collect_static(landing, dataset, out):
+    path = newest_static(landing, dataset)
+    lab = {"dataset": dataset}
+    days = sum(1 for d in (Path(landing) / dataset).glob("date=*")
+               if any(not p.name.endswith((".part", ".json", ".tmp")) for p in d.iterdir()))
+    out.append(("dat535_static_days", lab, days))
+    if path:
+        st = path.stat()
+        out.append(("dat535_static_last_archive_timestamp_seconds", lab, st.st_mtime))
+        out.append(("dat535_static_last_archive_bytes", lab, st.st_size))
+
+
 def collect_memory(out, meminfo="/proc/meminfo"):
     kb = {}
     with open(meminfo) as fh:
@@ -225,11 +242,12 @@ def render(samples):
 
 
 class Collector:
-    def __init__(self, landing, state_file, feeds, status_dir, datex_state_file=None):
+    def __init__(self, landing, state_file, feeds, status_dir, datex_state_file=None, static=()):
         self.landing = landing
         self.state_file = state_file
         self.datex_state_file = datex_state_file
         self.feeds = feeds
+        self.static = static
         self.status_dir = status_dir
         self.volumes = {"landing": landing, "home": str(Path.home())}
 
@@ -237,6 +255,7 @@ class Collector:
         start = time.monotonic()
         out = []
         steps = [lambda f=f: collect_landing(self.landing, f, out) for f in self.feeds]
+        steps += [lambda d=d: collect_static(self.landing, d, out) for d in self.static]
         if self.datex_state_file and any(f.startswith(DATEX_PREFIX) for f in self.feeds):
             steps.append(lambda: collect_datex(self.datex_state_file, out))
         steps += [lambda: collect_receiver(self.state_file, out),
@@ -276,7 +295,7 @@ def main():
     Handler.collector = Collector(os.environ.get("DAT535_LANDING_DIR", "landing"),
                                   os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"),
                                   feeds_from_env(), os.environ.get("MONITOR_STATUS_DIR", "status"),
-                                  os.environ.get("DATEX_STATE_FILE", "run/datex.json"))
+                                  os.environ.get("DATEX_STATE_FILE", "run/datex.json"), static_from_env())
     bind = os.environ.get("EXPORTER_BIND", "127.0.0.1")
     port = int(os.environ.get("EXPORTER_PORT", "8752"))
     server = ThreadingHTTPServer((bind, port), Handler)
