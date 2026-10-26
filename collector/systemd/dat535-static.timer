@@ -1,0 +1,11 @@
+[Unit]
+Description=Archive Entur NeTEx and NSR once a day, before the day's traffic starts
+
+[Timer]
+# A fixed time, no random delay: downloads stay ~24 h apart (static.py skips anything closer).
+OnCalendar=*-*-* 04:15:00 UTC
+# Missed while the VM was down: run at boot instead of waiting a day.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
