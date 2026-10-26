@@ -28,7 +28,7 @@ Entur NeTEx + NSR ── daily download ── static.py ──▶ landing/netex
 | Monitor + status page | `collector/monitor.py`, `serve_status.py` | timer (2 min), `dat535-status` | running |
 | Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
 | Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
-| Bronze | `pipeline/bronze.py` (SIRI), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (DATEX) |
+| Bronze | `pipeline/bronze.py` (SIRI, vehicles), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (vehicles, DATEX) |
 | Silver, Gold | — | — | not built ([pipeline/silver.md](../pipeline/silver.md), [pipeline/gold.md](../pipeline/gold.md)) |
 
 ## Collectors
@@ -101,7 +101,7 @@ The contract between the collectors and Spark.
   to `dev`. Outputs: `/data/dat535/prod` and `/data/dat535/dev`, next to the landing zone.
 - **Bronze**: closed hourly files → zstd Parquet per dataset and day, payload unchanged, plus
   evidence columns (`_bronze_*`: source file, status, payload hash and size, run id) and a run
-  record per run under `bronze/_runs/`. `bronze.py` reads SIRI; `bronze_datex.py` reads DATEX
+  record per run under `bronze/_runs/`. `bronze.py` reads SIRI and vehicle positions; `bronze_datex.py` reads DATEX
   and also reports polls by outcome, distinct snapshots and the longest gap. Rerunning a day
   replaces that day only.
 - **Silver**: one table per grain, keys and join rules in [pipeline/silver.md](../pipeline/silver.md); candidate tables for
