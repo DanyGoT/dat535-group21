@@ -366,6 +366,15 @@ class MonitorTest(unittest.TestCase):
         r = self.run_monitor()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("no landing file yet", (self.tmp / "status" / "index.html").read_text())
+        # A failed first poll ends the grace, even though the 6 h interval has not passed.
+        self.part.write_text("x\ny\n")     # keep et healthy
+        (self.tmp / "datex.json").write_text(json.dumps({
+            "pid": os.getpid(), "started_at": now, "polling": True, "error": None,
+            "feeds": {"weather-sites": {"interval_s": 21600, "last_ok": None, "errors": 1,
+                                        "last_error": "HTTP 503 Service Unavailable"}}}))
+        r = self.run_monitor()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("datex-weather-sites: no successful poll yet: HTTP 503", r.stdout)
 
     def test_datex_feeds(self):
         self.feeds = "et,datex-situation,datex-traveltime"

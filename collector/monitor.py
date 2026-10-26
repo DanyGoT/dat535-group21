@@ -158,8 +158,8 @@ def check_datex_feed(landing, feed, s, started, now, max_age_min):
                    age_s=round(now.timestamp() - st.st_mtime))
     limit = max(max_age_min * 60, 2 * (s.get("interval_s") or 60) + 60)    # one missed poll is fine
     last_ok, last_change = parse_iso(s.get("last_ok")), parse_iso(s.get("last_change"))
-    if last_ok is None and started and (now - started).total_seconds() < limit:
-        return res                                                          # just started
+    if last_ok is None and not s.get("errors") and started and (now - started).total_seconds() < limit:
+        return res                                                          # first poll pending
     ok_age = (now - last_ok).total_seconds() if last_ok else None
     if ok_age is None or ok_age > limit:
         why = f": {s['last_error']}" if s.get("errors") else ""
