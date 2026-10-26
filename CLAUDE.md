@@ -17,7 +17,7 @@ layer carries the most weight, then Bronze, then Gold.
 | File | Read when |
 | ---- | --------- |
 | `docs/system/architecture.md` | Working on collectors, monitor, landing zone, batch jobs, or anything crossing components |
-| `docs/system/storage.md` | Anything that stores data or runs Spark on the VM: volumes, runway, retention, memory rules |
+| `docs/system/storage.md` | Anything that stores data or runs Spark on the VM: volumes, runway, manual cleanup, memory rules |
 | `docs/system/switchboard-style.md` | Building the monitor's status page (read-only) |
 | `docs/pipeline/methodology.md` | Before designing or implementing any layer: decision rules for Bronze/Silver/Gold |
 | `docs/pipeline/silver.md` | Any Silver work: grain, keys, RT↔plan join, dedup, pitfalls, proposed tables |
@@ -45,7 +45,7 @@ source (or real data) before building on them, then update the doc.
 - CI/CD: GitHub Actions on a **self-hosted runner** on the VM.
   `dev` branch → `.github/workflows/dat535-dev.yml`; `main` → `dat535-prod.yml` (manual approval).
 - Pipeline code reads `DAT535_ENV` (`dev`/`prod`) and `DAT535_OUTPUT_DIR` from the environment.
-- The collectors, monitor and retention are long-running infrastructure outside GitHub
+- The collectors and monitor are long-running infrastructure outside GitHub
   Actions (see `docs/system/architecture.md`). SSH to the VM worked only from the UiS network
   (2026-10-23/24); off campus it times out.
 
@@ -53,9 +53,9 @@ source (or real data) before building on them, then update the doc.
 
 - **Respect Entur's and NPRA's limits** — never hammer endpoints in tests or loops. Every
   Entur request sends the `ET-Client-Name` header. Details in `docs/entur/sources.md`, `docs/datex/sources.md`.
-- **Landing/raw data is immutable.** Only the collectors write to it, and no file is ever
-  modified. The one exception: `collector/retention.py` may delete whole old days as a last
-  resort (`docs/system/storage.md`). Batch jobs read only closed files (never `*.part`).
+- **Landing/raw data is immutable.** Only the collectors write to it; no code modifies or
+  deletes it. When the disk fills, a person deletes whole old days in the order in
+  `docs/system/storage.md`. Batch jobs read only closed files (never `*.part`).
 - **DATEX credentials are confidential** (NPRA's terms): only in `~/.config/dat535/collector.env`
   on the VM, never in git, docs or logs.
 - `labs/` is course reference material (Spark examples, CI/CD guide). Use it to understand

@@ -24,7 +24,7 @@ serves a purpose. `✓` = in place, `→` = to do. Specifics live in [pipeline/s
 | Payload plus evidence | ✓ `received_at`, source file, payload hash and size, status, run id |
 | Prove complete delivery (a green run isn't proof) | ✓ missing and open hours per run; DATEX: polls by outcome, distinct snapshots, longest gap. → expected vs received journeys (needs the archived plan) |
 | Never lose a line | ✓ unreadable lines kept with `_bronze_status` and the raw line; payloads > 20M characters read in full (`maxStringLen`) |
-| Retain for recovery | ✓ landing is never modified; a rerun replaces only its day; retention deletes rebuildable Bronze before any raw data |
+| Retain for recovery | ✓ landing is never modified by code; a rerun replaces only its day; cleanup is manual, rebuildable Bronze before any raw data |
 | Contract with the source | ✓ field inventories in [entur/](../entur/) and [datex/content.md](../datex/content.md). → detect schema drift (a new or vanished element) |
 
 ## Silver: where trust is built
