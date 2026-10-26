@@ -107,8 +107,9 @@ jobs:
           OUT: ${{ steps.dirs.outputs.output }}
         run: |
           echo "## Bronze run" >> "$GITHUB_STEP_SUMMARY"
-          # This attempt's records: <run id>.json (SIRI) and <run id>.datex.json.
-          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json 2>/dev/null)
+          # This attempt's records: <run id>.json (SIRI) and <run id>.datex.json. `|| true`: the
+          # shell runs with -e, and no record at all must still reach the fallback below.
+          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json 2>/dev/null || true)
           if [ -n "$records" ]; then
             for r in $records; do
               echo "### $(basename "$r")" >> "$GITHUB_STEP_SUMMARY"
