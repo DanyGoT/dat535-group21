@@ -147,10 +147,13 @@ Prometheus or the exporter, and no controls.
   confidential); sent over https only, redirects not followed.
 - Bronze Parquet is zstd. Nothing deletes data automatically: when the disk fills we delete
   by hand, knowing what we lose ([system/storage.md](storage.md)).
+- Silver parses the XML (SIRI, DATEX) with Python's `xml` package inside Spark tasks, not the
+  `spark-xml` package (Spark 3.5 has no native `from_xml`).
+- Every layer writes to `/data/dat535/{prod,dev}/<layer>/`, never to the root disk.
 
 ## Open decisions
 
-- XML parsing in Spark 3.5 (native `from_xml` arrives in Spark 4.0): the `spark-xml` package
-  or Python parsing in `mapPartitions`.
-- Where Silver spills (`spark.local.dir`): root `/tmp` is too small ([system/storage.md](storage.md)).
+- Spark's scratch space for Silver (`spark.local.dir`: temporary shuffle and sort files, not
+  Silver's output). The default `/tmp` sits on the 38 GB root disk; a directory on `/data` is
+  safer but slower (network-mounted). Measure a Silver run's spill first ([system/storage.md](storage.md)).
 - Which Gold products to build beyond #1 ([pipeline/gold.md](../pipeline/gold.md)).
