@@ -43,3 +43,7 @@ rules built on these keys: [pipeline/silver.md](../pipeline/silver.md).
 - **Join each day to the plan archived that day**, not the latest download: the export keeps
   ≤ 48 h of past days, often less ([entur/sources.md](sources.md)).
 - Our landing partitions are UTC ([system/architecture.md](../system/architecture.md)); an operating day spans two UTC dates.
+- **Daylight saving.** Norway is UTC+2 in summer, UTC+1 in winter (switched 2026-10-25 03:00
+  local). That night had 25 local hours: 02:00–03:00 happened twice. Convert local times with
+  their offset or the `Europe/Oslo` zone, never a fixed +1/+2; expect a 23-hour operating day
+  at the spring switch.
