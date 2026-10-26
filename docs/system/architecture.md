@@ -9,7 +9,7 @@ Spark jobs turn it into Medallion layers. Everything runs on one UiS VM ([system
 Entur SIRI ET/SX ──push──────▶ receiver.py ──┐
 Entur vehicles ───websocket──▶ vehicles.py ──┼──▶ landing/<dataset>/date=D/hour=HH.jsonl.gz
 NPRA DATEX ◀─────poll (GET)── datex.py ──────┘     raw, hourly, UTC, never modified
-Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex, landing/nsr
+Entur NeTEx + NSR ── daily download ── static.py ──▶ landing/netex, landing/nsr
                                                    │
   monitor.py   (reads) ◀───────────────────────────┤──▶ status page + ntfy on OK↔FAIL
   exporter.py  (reads) ◀───────────────────────────┤──▶ Prometheus ──▶ Grafana (/grafana/)
@@ -19,12 +19,12 @@ Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex,
 
 ## Components
 
-| Component | Code | Runs as | State (2026-10-24) |
+| Component | Code | Runs as | State (2026-10-26) |
 | --------- | ---- | ------- | ------------------ |
 | SIRI receiver | `collector/receiver.py` | `dat535-receiver.service` | running since 2026-10-15 |
 | Vehicle positions | `collector/vehicles.py` | `dat535-vehicles.service` | running since 2026-10-17 |
 | DATEX poller | `collector/datex.py` | `dat535-datex.service` | ready; credentials on the VM since 2026-10-26, starts with the next deploy |
-| NeTEx + NSR download | — | — | **not built**: needed by most Gold products ([pipeline/gold.md](../pipeline/gold.md)) |
+| NeTEx + NSR archive | `collector/static.py` | `dat535-static.timer` (04:15 UTC) | first day archived 2026-10-26; timer starts with the next deploy |
 | Monitor + status page | `collector/monitor.py`, `serve_status.py` | timer (2 min), `dat535-status` | running |
 | Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
 | Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
@@ -33,7 +33,7 @@ Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex,
 
 ## Collectors
 
-All three follow the same rules:
+The three streaming collectors follow the same rules:
 
 - **Dumb.** No parsing, no filtering. Every message (or poll) becomes one JSON line, with the
   payload unchanged inside it.
@@ -55,6 +55,13 @@ positions there.
 poll, failures included. Without credentials it runs idle (not a failure). Feeds, intervals
 and sizes: [datex/sources.md](../datex/sources.md).
 
+**NeTEx and NSR archive.** Once a day at 04:15 UTC, `static.py` downloads the national
+timetable (280 MB) and the stop register (41 MB) unchanged, with a `.meta.json` next to each
+(Last-Modified, ETag, size, SHA-256). Entur keeps at most ~48 h of past days, so this is the
+only way to have the plan for a day later. It never downloads a file twice within 20 h
+(Entur allows one a day); each export also holds the coming days, so Silver uses the newest
+archive on or before an operating day. Why we need it: [entur/sources.md](../entur/sources.md).
+
 ## Landing zone
 
 The contract between the collectors and Spark.
@@ -65,8 +72,8 @@ The contract between the collectors and Spark.
 ├── siri-sx/...
 ├── vehicles/...
 ├── datex-<feed>/...   situation, traveltime, weather, traveltime-locations, weather-sites
-├── netex/date=YYYY-MM-DD/rb_norway-aggregated-netex.zip    (planned)
-└── nsr/date=YYYY-MM-DD/Current_latest.zip                  (planned)
+├── netex/date=YYYY-MM-DD/rb_norway-aggregated-netex.zip    (+ .meta.json; .part while downloading)
+└── nsr/date=YYYY-MM-DD/Current_latest.zip                  (+ .meta.json)
 ```
 
 | Source | Line |
@@ -112,7 +119,8 @@ The contract between the collectors and Spark.
 3. DATEX poller alive and its login accepted (skipped while idle).
 4. Per DATEX feed: last successful poll and last write within two poll intervals; travel
    times and weather still changing (NPRA still publishing).
-5. Data volume and root volume below `MONITOR_DISK_MAX_PCT` (90 %).
+5. NeTEx and NSR: newest archived file younger than 30 h.
+6. Data volume and root volume below `MONITOR_DISK_MAX_PCT` (90 %).
 
 It writes the status page ([system/switchboard-style.md](switchboard-style.md)) and sends an ntfy push on state change
 only (OK→FAIL, FAIL→OK).

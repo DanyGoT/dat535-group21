@@ -40,8 +40,9 @@ rules built on these keys: [pipeline/silver.md](../pipeline/silver.md).
 - **Operating day ≠ calendar day.** Night journeys belong to the day they started:
   `DataFrameRef` keeps the start day for calls after midnight. NeTEx times are local
   time-of-day plus `DayOffset`.
-- **Join each day to the plan archived that day**, not the latest download: the export keeps
-  ≤ 48 h of past days, often less ([entur/sources.md](sources.md)).
+- **Join each day to the newest plan archived on or before that day** (`landing/netex/`), not
+  the latest download: an export keeps ≤ 48 h of past days, often less, but always the coming
+  days ([entur/sources.md](sources.md)).
 - Our landing partitions are UTC ([system/architecture.md](../system/architecture.md)); an operating day spans two UTC dates.
 - **Daylight saving.** Norway is UTC+2 in summer, UTC+1 in winter (switched 2026-10-25 03:00
   local). That night had 25 local hours: 02:00–03:00 happened twice. Convert local times with

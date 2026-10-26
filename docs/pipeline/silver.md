@@ -8,7 +8,7 @@ rules below hold, the tables are a proposal. Keys and id quirks: [entur/identifi
 
 1. State the grain in one sentence before writing a transformation. One table, one grain.
 2. Reduce real-time to one row per key **before** joining; a join must not change row counts.
-3. Join each operating day to the plan archived that day.
+3. Join each operating day to the newest plan archived on or before that day (`landing/netex/`).
 4. Flag, never drop: a failed rule sets a `dq_issue`; quarantined rows stay countable.
 5. Parse and project to narrow columns before any shuffle. A raw ET day is ~160 GB of text.
 6. Same input, same output: process per operating day, overwrite that partition.

@@ -8,13 +8,13 @@ The main Gold product answers a traveller's question: *will my departure be on t
 
 Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 
-## Status (2026-10-24)
+## Status (2026-10-26)
 
 | Part | State |
 | ---- | ----- |
 | SIRI ET/SX and vehicle position collection | running on the VM since 2026-10-15 / 10-17 |
 | DATEX collection | built and tested against NPRA; credentials are on the VM, starts with the next deploy |
-| NeTEx and NSR daily archive | **not built**; most Gold products need it |
+| NeTEx and NSR daily archive | first day archived 2026-10-26; daily timer starts with the next deploy |
 | Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
 | Bronze (SIRI, DATEX) | SIRI daily at 03:00 UTC; DATEX added |
 | Silver | design in [`docs/pipeline/silver.md`](docs/pipeline/silver.md), not built |

@@ -12,8 +12,8 @@ Researched from 2026-10-15; dates mark when a fact was checked.
 | SIRI ET | real-time times, cancellations, extra journeys | pub/sub push | **collected** ([entur/realtime.md](realtime.md)) |
 | SIRI SX | disruption messages | pub/sub push | **collected** |
 | Vehicle positions | location, delay, occupancy per vehicle | GraphQL websocket | **collected** ([entur/realtime.md](realtime.md)) |
-| NeTEx timetable | planned journeys, lines, operators, stop sequences | daily zip download | **not collected yet**; no history, every missed day is lost |
-| NSR stop register | quays, stop places, coordinates | daily zip download | **not collected yet** |
+| NeTEx timetable | planned journeys, lines, operators, stop sequences | daily zip download | **archived daily** since 2026-10-26 (`collector/static.py`) |
+| NSR stop register | quays, stop places, coordinates | daily zip download | **archived daily** since 2026-10-26 |
 | BigQuery SIRI-ET history | processed ET since 2020 | SQL (own GCP project) | reference only, not pipeline input |
 | GTFS / GTFS-RT | derived subsets of NeTEx / SIRI | download / feed | not used: partial coverage |
 
@@ -30,8 +30,10 @@ aimed and actual times). What we miss without them, measured:
 | NeTEx | line names, operators and modes for many journeys | in one ET hour: `VehicleMode` on 34 % of journeys, `PublishedLineName` 25 %, `OperatorRef` 64 % |
 
 Cost: NeTEx 280 MB and NSR 41 MB a day (2026-10-26), ~4 % of ET's daily volume; one download
-each per day is within Entur's limit. They can't be fetched later (≤ 48 h of past data). So:
-worth archiving daily as raw landing data, read by Bronze like the rest.
+each per day is within Entur's limit. They can't be fetched later (≤ 48 h of past data). So we
+archive both daily as raw landing data ([system/architecture.md](../system/architecture.md)).
+**Never download them by hand from the VM:** a second download within 24 h risks the VM's IP
+being blocked. Read `landing/netex/` and `landing/nsr/` instead.
 
 ## Is real-time redundant with the plan and BigQuery?
 
