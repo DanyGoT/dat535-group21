@@ -17,6 +17,32 @@ Researched from 2026-10-15; dates mark when a fact was checked.
 | BigQuery SIRI-ET history | processed ET since 2020 | SQL (own GCP project) | reference only, not pipeline input |
 | GTFS / GTFS-RT | derived subsets of NeTEx / SIRI | download / feed | not used: partial coverage |
 
+## Do we need the plan (NeTEx, NSR) next to real-time?
+
+The plan and the stop register are not where real-time comes from; they describe what *should*
+happen and where stops *are*. ET alone is enough for delay at the stops it reports (it carries
+aimed and actual times). What we miss without them, measured:
+
+| Without | We miss | Evidence |
+| ------- | ------- | -------- |
+| NSR | **every coordinate**: ET has quay ids but no position, so nothing can be joined to weather, road events or a map | 0 `Latitude` in 176,630 ET calls (2026-10-26 08 UTC); vehicle positions have coordinates but not for Ruter |
+| NeTEx | journeys that never appear in real-time, incl. cancellations planned in advance: punctuality and cancellation rates from ET alone are biased per operator | 0–8 % of planned journeys never seen in ET, VYG 8 % (36 of 60 planned cancellations) ([pipeline/silver.md](../pipeline/silver.md) §4) |
+| NeTEx | line names, operators and modes for many journeys | in one ET hour: `VehicleMode` on 34 % of journeys, `PublishedLineName` 25 %, `OperatorRef` 64 % |
+
+Cost: NeTEx 280 MB and NSR 41 MB a day (2026-10-26), ~4 % of ET's daily volume; one download
+each per day is within Entur's limit. They can't be fetched later (≤ 48 h of past data). So:
+worth archiving daily as raw landing data, read by Bronze like the rest.
+
+## Is real-time redundant with the plan and BigQuery?
+
+No. NeTEx, GTFS and NSR are the plan and the stops, not what happened. BigQuery's
+`realtime_siri_et_last_recorded` is close to our future Silver `stop_call` table (final times
+per call, back to 2020), but it is Entur's processed product: ET only (no SX, no vehicle
+positions), no intermediate predictions except fixed lead times, refreshed once a day, and not
+something we build ourselves (the course grades our Bronze and Silver). It is valuable as a
+cross-check for our Silver, and possibly as years of extra training history for the departure
+risk model ([pipeline/gold.md](../pipeline/gold.md) #1), if we decide to use it.
+
 ## Usage rules
 
 - **`ET-Client-Name` on every request** to every Entur API: `<org>-<application>`, lowercase,
@@ -39,9 +65,9 @@ https://developer.entur.no/open-data/timetable
 - NeTEx (Nordic profile) is the master; GTFS is derived and loses detail. Join on NeTEx
   ([entur/identifiers.md](identifiers.md)).
 
-| File | URL | Size (2026-10-15) |
-| ---- | --- | ----------------: |
-| NeTEx, all of Norway | `https://storage.googleapis.com/marduk-production/outbound/netex/rb_norway-aggregated-netex.zip` | ~275 MB |
+| File | URL | Size |
+| ---- | --- | ---: |
+| NeTEx, all of Norway | `https://storage.googleapis.com/marduk-production/outbound/netex/rb_norway-aggregated-netex.zip` | 280 MB (2026-10-26) |
 | NeTEx, one codespace | `.../outbound/netex/rb_<codespace>-aggregated-netex.zip` (e.g. `rb_sky-…`, 2026-10-22) | ~40 MB (SKY) |
 | GTFS basic | `.../outbound/gtfs/rb_norway-aggregated-gtfs-basic.zip` | ~94 MB |
 | GTFS extended | `.../outbound/gtfs/rb_norway-aggregated-gtfs.zip` | ~523 MB |
@@ -56,7 +82,7 @@ https://developer.entur.no/open-data/timetable
 https://developer.entur.no/open-data/stops, updated daily. Base:
 `https://storage.googleapis.com/marduk-production/tiamat/`
 
-- `Current_latest.zip`: current stops as NeTEx. **Use this.**
+- `Current_latest.zip`: current stops as NeTEx, 41 MB (2026-10-26). **Use this.**
 - Also: `Current_latest-gtfs.zip`, `CurrentAndFuture_latest.zip`, `Full_latest.zip`, regional
   (`03_Oslo_latest.zip`), `RailStations_latest.zip`.
 
