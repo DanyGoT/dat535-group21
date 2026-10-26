@@ -157,8 +157,8 @@ DATEX is ~7 % of what we store per day; SIRI ET is ~85 %.
 
 ## Order of work
 
-1. **Archive NeTEx and NSR daily** ([system/architecture.md](../system/architecture.md), not implemented). #1, #2, #3, #4, #5
-   and #8 all need the plan or quay coordinates, and a day not downloaded is lost for good.
+1. ~~Archive NeTEx and NSR daily~~: done, first day 2026-10-26 ([system/architecture.md](../system/architecture.md)).
+   #1, #2, #3, #4, #5 and #8 all need the plan or quay coordinates.
 2. Silver `stop_call` and `journey`, checked against Entur's BigQuery for the same days.
 3. Gold #2, then the #1 profile, then the #1 model against its baselines.
 4. DATEX Silver (`road_situation`, `road_weather`, reference tables), then #5 or #4.
