@@ -23,7 +23,7 @@ Entur NeTEx + NSR ── daily download (not built yet) ──▶ landing/netex,
 | --------- | ---- | ------- | ------------------ |
 | SIRI receiver | `collector/receiver.py` | `dat535-receiver.service` | running since 2026-10-15 |
 | Vehicle positions | `collector/vehicles.py` | `dat535-vehicles.service` | running since 2026-10-17 |
-| DATEX poller | `collector/datex.py` | `dat535-datex.service` | ready; needs credentials in `collector.env` |
+| DATEX poller | `collector/datex.py` | `dat535-datex.service` | ready; credentials on the VM since 2026-10-26, starts with the next deploy |
 | NeTEx + NSR download | — | — | **not built**: needed by most Gold products ([pipeline/gold.md](../pipeline/gold.md)) |
 | Monitor + status page | `collector/monitor.py`, `serve_status.py` | timer (2 min), `dat535-status` | running |
 | Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
