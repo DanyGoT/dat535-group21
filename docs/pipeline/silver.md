@@ -23,7 +23,8 @@ rules below hold, the tables are a proposal. Keys and id quirks: [entur/identifi
 
 A coarser table is built by aggregating a finer one, not by joining. Vehicle positions carry
 `serviceJourney {id, date}` and `monitoredCall {order}`, so the same journey and stop keys fit
-ET, SX and vehicle positions.
+ET and vehicle positions. SX is different: a situation names the lines, stops or journeys it
+affects and when it is valid, so it links to calls through those, never as a stop call.
 
 ## 2. Tables (proposed)
 
@@ -31,7 +32,7 @@ ET, SX and vehicle positions.
 | ----- | --------- | --- | ---- | ---------------- |
 | `stop_call` | final state of one call | operating date, journey id, order | ET (+ NeTEx plan) | 1–8 |
 | `journey` | one journey on one operating day | operating date, journey id | ET + NeTEx | 1, 2, 7, 8 |
-| `call_prediction` | predicted time of a call at fixed lead times (1, 5, 10, 20, 30 min) | stop call key, lead time | ET versions | 6, 1 |
+| `call_prediction` | latest predicted time of a call as known at a fixed lead time (1, 5, 10, 20, 30 min) before its planned or its actual time | stop call key, reference (planned/actual), lead time | ET versions | 6, 1 |
 | `vehicle_position` | one position report | vehicle id, `lastUpdated` | vehicles | 3, 4, 9 |
 | `sx_situation` | one version of one SX situation | situation number, version | SX | 7 |
 | `road_situation` | one version of one DATEX situation record | record id, version | DATEX situation | 1, 4 |
