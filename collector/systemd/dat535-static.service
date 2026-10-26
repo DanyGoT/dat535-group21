@@ -1,0 +1,14 @@
+[Unit]
+Description=DAT535 daily archive of Entur NeTEx timetable and NSR stops
+After=network-online.target
+# Entur allows one download per file per day: at most two retries, an hour apart.
+StartLimitIntervalSec=1d
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/dat535/collector.env
+ExecStart=/usr/bin/python3 %h/dat535-collector/static.py
+Restart=on-failure
+RestartSec=1h
+Nice=10

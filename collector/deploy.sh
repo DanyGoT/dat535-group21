@@ -78,7 +78,8 @@ unit_changes=$(rsync -rci "$SRC"/systemd/dat535-* "$UNITS/")
 
 systemctl --user daemon-reload
 SERVICES=(dat535-tunnel dat535-receiver dat535-vehicles dat535-datex dat535-status dat535-exporter dat535-prometheus dat535-grafana)
-systemctl --user enable "${SERVICES[@]/%/.service}" dat535-monitor.timer
+TIMERS=(dat535-monitor.timer dat535-static.timer)
+systemctl --user enable "${SERVICES[@]/%/.service}" "${TIMERS[@]}"
 
 changed() { grep -q -- "$1" <<<"$code_changes"$'\n'"$unit_changes"$'\n'"$tool_changes"; }
 restart_if() {  # restart_if UNIT PATTERN: restart when PATTERN matches a change, else just start
@@ -103,9 +104,11 @@ restart_if dat535-prometheus.service 'observability/prometheus.yml\|dat535-prome
 restart_if dat535-grafana.service \
     'observability/grafana/grafana.ini\|observability/grafana/provisioning/\|dat535-grafana.service\|^grafana$'
 
-# The monitor is a oneshot; the timer picks up new code on its next run.
-systemctl --user start dat535-monitor.timer
+# The monitor and the static archive are oneshots; their timers pick up new code on the next run.
+systemctl --user start "${TIMERS[@]}"
+# Archive today's NeTEx and NSR now if they are missing (it never downloads a day twice).
+systemctl --user start --no-block dat535-static.service
 
 sleep 2
-systemctl --user --no-pager status "${SERVICES[@]/%/.service}" dat535-monitor.timer | grep -E '^●|Active:' || true
+systemctl --user --no-pager status "${SERVICES[@]/%/.service}" "${TIMERS[@]}" | grep -E '^●|Active:' || true
 systemctl --user is-active --quiet "${SERVICES[@]/%/.service}"
