@@ -64,6 +64,25 @@ Entry template:
 - **Trade-off:** none. Rerun old days to reclassify their rows.
 - **Lesson:** "corrupt" rows deserve a look even when there are only two: they were the
   biggest messages, likely full snapshots after a re-subscribe.
+## 2026-10-28 — National NeTEx references need scope and native versions
+
+- **Area:** Silver, reference data.
+- **Symptom:** A parser keyed only by calendar-assignment ID rejected FIN; choosing shared
+  calendars from filenames left SKY/RUT references unresolved. An operator join also found
+  multiple versions of the same ID in the national archive.
+- **Evidence:** `netex/date=2026-10-26`: FIN assignment
+  `Cal2026102644412-Jan_Fri_01-X` repeats for different `DayTypeRef` values;
+  `SKY_arbergsdalen_sande.xml` contains a `FlexibleLine`; VIL/VYX fixed lines reference
+  definitions in flexible shared files. `KOL:Operator:312` appears at versions 6 and 1551.
+- **Fix:** Preserve assignment selectors, inspect the XML line type, resolve fallback date
+  rules in their own shared-file scope, and select the highest numeric reference version.
+  Conflicting values at the same version still fail before a fact join.
+- **Validation:** The complete national plan produced 76,186 journeys and 1,855,992 calls;
+  the 1,879 missing quay mappings remained flagged. Offline regressions cover each case.
+  Run record: [Silver sample evidence](evidence/silver-2026-10-26-sample.json).
+- **Trade-off / lesson:** Two-pass line parsing and scoped dictionaries cost extra XML
+  reads, but avoid deleting valid services or silently multiplying facts. Native IDs alone
+  do not always identify an exported child relation.
 
 ## 2026-10-24 — Bronze ran out of disk on the root volume
 

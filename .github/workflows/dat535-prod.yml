@@ -12,6 +12,10 @@ on:
         description: UTC day to (re)run Bronze for, YYYY-MM-DD (empty = yesterday)
         required: false
         default: ''
+      silver_date:
+        description: Norwegian operating day to (re)run Entur Silver for (empty = two days ago; skipped for Bronze-only reruns)
+        required: false
+        default: ''
 
 env:
   DAT535_ENV: prod
@@ -36,7 +40,7 @@ jobs:
       - name: Test pipeline
         run: |
           source ~/spark-env/bin/activate
-          python -m unittest discover -s pipeline/tests -v
+          flock -w 10800 /data/dat535/.spark.lock python -m unittest discover -s pipeline/tests -v
 
       - name: Deploy collector
         # Copies collector/ to ~/dat535-collector and (re)starts the systemd user units.
@@ -44,7 +48,7 @@ jobs:
         run: collector/deploy.sh
 
   bronze:
-    name: Bronze
+    name: Bronze and Entur Silver
     # Daily schedule or manual rerun of one day. No approval: it runs code already on main
     # and only writes its own output directory.
     if: github.event_name != 'push'
@@ -68,6 +72,7 @@ jobs:
           echo "output=$(dirname "$landing")/prod" >> "$GITHUB_OUTPUT"
 
       - name: Run Bronze
+        id: entur_bronze
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
@@ -91,6 +96,28 @@ jobs:
           # One Spark job at a time on the 8 GB VM (dev and prod share it): wait, never overlap.
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze_datex.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
 
+      - name: Run Entur Silver
+        # ET spans adjacent UTC days. Today's Bronze completes the following day
+        # for Silver's default operating day (two days ago). A manual Bronze-only
+        # backfill must not unexpectedly rebuild a different Silver day.
+        if: ${{ !cancelled() && steps.entur_bronze.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == '') }}
+        env:
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+          SILVER_DATE: ${{ github.event.inputs.silver_date }}
+        run: |
+          source ~/spark-env/bin/activate
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py ${SILVER_DATE:+--date "$SILVER_DATE"}
+
+      - name: Upload Silver run records
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: prod-silver-runs-${{ github.run_number }}
+          path: ${{ steps.dirs.outputs.output }}/silver/_runs/
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Upload Bronze run records
         # Only the small run records; the Parquet data stays on the VM.
         if: ${{ !cancelled() }}
@@ -106,10 +133,10 @@ jobs:
         env:
           OUT: ${{ steps.dirs.outputs.output }}
         run: |
-          echo "## Bronze run" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Pipeline run" >> "$GITHUB_STEP_SUMMARY"
           # This attempt's records: <run id>.json (SIRI) and <run id>.datex.json. `|| true`: the
           # shell runs with -e, and no record at all must still reach the fallback below.
-          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json 2>/dev/null || true)
+          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json "$OUT"/silver/_runs/operating_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json 2>/dev/null || true)
           if [ -n "$records" ]; then
             for r in $records; do
               echo "### $(basename "$r")" >> "$GITHUB_STEP_SUMMARY"

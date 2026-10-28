@@ -1,8 +1,10 @@
 # Silver
 
 Silver turns Bronze (every message, as received) into trusted tables with a stated grain,
-keys and quality flags, shared by every Gold product ([pipeline/gold.md](gold.md)). Nothing is built yet; the
-rules below hold, the tables are a proposal. Keys and id quirks: [entur/identifiers.md](../entur/identifiers.md).
+keys and quality flags, shared by every Gold product ([pipeline/gold.md](gold.md)). The Entur
+tables are implemented in [`pipeline/silver.py`](../../pipeline/silver.py); DATEX Silver and
+Gold remain future work. A compact overview of the decisions, code and evidence is in the
+[implementation log](silver-design-log.md). Keys and id quirks: [entur/identifiers.md](../entur/identifiers.md).
 
 ## Rules in brief
 
@@ -26,19 +28,39 @@ A coarser table is built by aggregating a finer one, not by joining. Vehicle pos
 ET and vehicle positions. SX is different: a situation names the lines, stops or journeys it
 affects and when it is valid, so it links to calls through those, never as a stop call.
 
-## 2. Tables (proposed)
+## 2. Tables
+
+Implemented Entur contracts (schema version **1**):
+
+| Table | One row = | Unique key within a partition | Partition |
+| ----- | --------- | ----------------------------- | --------- |
+| `stop_call` | final reported state, or an unreported planned call | `journey_id, call_order` | `operating_date` |
+| `journey` | final journey metadata, including cancellation-only messages and plan-only journeys | `journey_id` | `operating_date` |
+| `call_prediction` | state available at one fixed cutoff for one call event | `journey_id, call_order, event, reference, lead_minutes` | `operating_date` |
+| `vehicle_position` | one vehicle report, reconnect duplicates removed | `codespace, vehicle_id, last_updated_at` | `observation_date` (UTC) |
+| `sx_situation` | one native/content revision observed that UTC day | `participant_id, situation_id, version_key` | `observation_date` (UTC) |
+| `quay`, `stop_place`, `line`, `operator` | an entity in the reference snapshot selected for that operating day | `id` | `operating_date` |
+| `dated_journey` | a dated journey alias mapped to the normal journey key | `dated_journey_id` | `operating_date` |
+| `quarantine` | an unreadable message or a decoded version with an unusable identity | source locator + `entity_json`; deliberately no dedup | run's `operating_date` |
+
+The date is part of every table's full key. An SX revision or vehicle report can be observed
+on more than one UTC day; take the earliest `first_received_at` across SX days to measure
+first observation. Unknown vehicle operating dates stay null: valid positions still belong
+to their **observation** day. Vehicle IDs are scoped by codespace, not assumed national.
+
+Reference tables are **daily as-of snapshots**, not fabricated valid-from/to history. Their
+`snapshot_date` identifies the actual archive used, which may precede the partition date.
+Within an archive, the highest numeric entity version wins; conflicting values at that same
+version fail the run. Dated aliases preserve both IDs for VYG and other dated references.
+
+Future tables, outside this Entur implementation:
 
 | Table | One row = | Key | From | Gold ([pipeline/gold.md](gold.md)) |
 | ----- | --------- | --- | ---- | ---------------- |
-| `stop_call` | final state of one call | operating date, journey id, order | ET (+ NeTEx plan) | 1–8 |
-| `journey` | one journey on one operating day | operating date, journey id | ET + NeTEx | 1, 2, 7, 8 |
-| `call_prediction` | latest predicted time of a call as known at a fixed lead time (1, 5, 10, 20, 30 min) before its planned or its actual time | stop call key, reference (planned/actual), lead time | ET versions | 6, 1 |
-| `vehicle_position` | one position report | vehicle id, `lastUpdated` | vehicles | 3, 4, 9 |
-| `sx_situation` | one version of one SX situation | situation number, version | SX | 7 |
 | `road_situation` | one version of one DATEX situation record | record id, version | DATEX situation | 1, 4 |
 | `road_weather` | one measurement | site, measurement time, quantity | DATEX weather | 1, 5 |
 | `road_travel_time` | one road section's travel time | section, measurement time | DATEX travel time | 1, 3 |
-| `quay`, `stop_place`, `line`, `weather_site`, `road_section` | one entity, valid from–to | id, valid from | NSR, NeTEx, DATEX tables | all |
+| `weather_site`, `road_section` | one reference entity | id, snapshot date | DATEX tables | 1, 3–5 |
 | `quay_weather_site`, `quay_road_situation` | one link (per day for situations) | both ids (+ day) | computed (distance) | 1, 4, 5 |
 
 Keep ids in facts and labels in reference tables; Gold adds the labels.
@@ -96,7 +118,7 @@ Drop repeats by `_bronze_payload_sha256` **before** parsing XML, then keep one r
 `(situationRecord id, version)`, latest `situationRecordVersionTime` first ([datex/content.md](../datex/content.md)).
 
 **Vehicle positions** start with a full snapshot after every reconnect: dedup on
-`(vehicleId, lastUpdated)`.
+`(codespace, vehicleId, lastUpdated)` within the UTC observation day.
 
 ## 6. Pitfalls, each guarded by a check
 
@@ -114,6 +136,86 @@ Drop repeats by `_bronze_payload_sha256` **before** parsing XML, then keep one r
 
 8 GB RAM, one Spark job at a time, small Parquet reader batches for payload columns, and a
 spill directory on `/data` rather than the small root disk. Details and evidence: [system/storage.md](../system/storage.md).
+
+The daily workflow runs Bronze for yesterday, then Silver for **two days ago**. ET reads
+completed Bronze partitions for `D-1, D, D+1`, then filters by the explicit operating day
+(after dated-ID resolution). This conservative window covers pre-midnight reports, overnight
+services and following-day replay. SX and positions read UTC `D` only; their grains are
+observation-based. Updates received beyond the ET window are a remaining backfill limit.
+
+```sh
+# Local example; Java 8/17 and the archived data must already be available.
+DAT535_LANDING_DIR=/path/to/landing DAT535_OUTPUT_DIR=/path/to/dev DAT535_ENV=dev \
+  uv run --python 3.11 --with-requirements requirements-dev.txt \
+  python pipeline/silver.py --date 2026-10-26 --allow-partial
+```
+
+On the VM, use the workflow's **Run Entur Silver** step (same venv as Bronze, under
+`flock /data/dat535/.spark.lock`). Manual production reruns take a separate `silver_date`
+input: it is an operating date, while `bronze_date` is a UTC input date. A Bronze-only
+backfill does not implicitly rerun an unrelated Silver day. Dev processes the one-hour
+Bronze sample with `--allow-partial`; its marker always says `ready=false`.
+
+### Quality, provenance and publication
+
+- Typed UTC timestamps, dates, booleans and numeric fields have explicit schemas. An
+  invalid value becomes null **with a named `dq_issue`**, never a silent correction.
+- Nonempty `dq_issue` arrays remain on the fact/reference rows. Missing keys and unreadable
+  messages live in `quarantine`, with their Bronze file/hash/run locator and decoded evidence.
+  Superseded versions are the intentional reduction; Bronze retains all of them.
+- `has_plan`, `has_realtime` and `realtime_status` distinguish `matched`, `no_realtime` and
+  `realtime_only`. `journey_has_realtime` also distinguishes a cancellation-only journey
+  message from an entirely unseen journey. Missing real-time is an ordinary coverage state.
+- `service_alteration`, journey cancellation and call cancellation stay separate. No
+  punctuality threshold, cancellation rate, risk feature or Gold aggregate is computed.
+- Every partition is staged, checked for unique/non-null keys, and counted before
+  publication. Reference joins cannot multiply facts; the plan/RT full outer join explicitly
+  preserves the union of their keys. Failed reruns preserve the published day.
+
+Outputs are `silver/<table>/<partition>=D/*.parquet` (zstd). Run evidence is
+`silver/_runs/operating_date=D/<run_id>.json`: source hours/status/counts and Bronze run IDs,
+reference dates/SHA-256, version reduction, row counts, issue counts, bytes, elapsed time,
+and actual-equals-aimed counts per operator. `latest.json` is the consumer's readiness gate.
+Only `status=complete, ready=true` denotes complete input coverage and passed contracts;
+individual flagged rows still require the consumer's stated treatment.
+
+Consumers must hold the same VM lock while checking `latest.json` and reading the selected
+partitions. Publication invalidates readiness, replaces the checked partitions, then publishes
+the marker last; an ordinary install failure rolls back. A killed process can leave a
+`publishing` marker and staging files: rerun that day. Do not use individual `_SUCCESS` files
+as a multi-table readiness signal. Other operating dates are never replaced by that rerun.
+
+### Shared semantics
+
+| Field / condition | Meaning |
+| ----------------- | ------- |
+| `planned_*_at` | exact local timetable time + day offset, converted using `Europe/Oslo` |
+| `earliest_departure_at`, `latest_arrival_at`, `is_flexible` | booking/flexible-service windows; never substituted for an exact departure |
+| `aimed_*_at`, `expected_*_at`, `actual_*_at` | separate SIRI fields; missing actuals are never filled from estimates or the plan |
+| `arrival_delay_s`, `departure_delay_s` | actual minus SIRI aimed, in seconds; negative delays remain valid |
+| `quay_id`, `reported_quay_id`, `plan_quay_id` | usable enriched reference, source-reported quay, archived planned quay; a missing report is never relabelled as source data |
+| `quay_changed` | same journey position, different planned and reported quay; retain both |
+| `actual_*_equals_aimed` | source-quality evidence, not proof of punctuality |
+| `mode`, `source_mode` | lowercase NeTEx vocabulary (`ferry` → `water`), with the original RT mode retained |
+| `direction_id`, `direction_type`, `direction_name` | SIRI code, NeTEx type and vehicle API name, respectively; no assumed 1/2 mapping |
+
+Ambiguous/nonexistent local timetable clocks at DST transitions become null with an issue;
+explicit offsets resolve them. Flexible calendar selection uses XML structure, with fallback
+references resolved in their own shared-file scope. Repeated calendar-assignment IDs across
+day types retain each date rule.
+
+`call_prediction` samples arrival and departure separately at 1/5/10/20/30 minutes before
+the archived planned time (ET aimed if absent) or the final actual time. A version is eligible
+only after **both** producer and receiver timestamps; a later actual terminates its estimate
+interval, and a late old replay cannot undo a newer producer state already known. Journey
+cancellation at the cutoff is sampled independently, including messages
+with no calls. No row means no eligible estimate/cancellation state at that cutoff.
+
+The `actual` reference is retrospective and final `stop_call` states are outcomes. They must
+not become pre-departure features. Facts also retain reference availability timestamps when
+collector metadata supplies them: a same-day archive alone cannot prove that the schedule
+was known at an earlier lookup time. Vehicle `speed` is kept as published; its unit remains
+**UNVERIFIED** and is not used in a derived measure.
 
 ## Formats
 

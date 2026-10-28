@@ -19,7 +19,7 @@ Entur NeTEx + NSR ── daily download ── static.py ──▶ landing/netex
 
 ## Components
 
-| Component | Code | Runs as | State (2026-10-26) |
+| Component | Code | Runs as | State |
 | --------- | ---- | ------- | ------------------ |
 | SIRI receiver | `collector/receiver.py` | `dat535-receiver.service` | running since 2026-10-15 |
 | Vehicle positions | `collector/vehicles.py` | `dat535-vehicles.service` | running since 2026-10-17 |
@@ -29,7 +29,8 @@ Entur NeTEx + NSR ── daily download ── static.py ──▶ landing/netex
 | Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
 | Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
 | Bronze | `pipeline/bronze.py` (SIRI, vehicles), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (vehicles, DATEX) |
-| Silver, Gold | — | — | not built ([pipeline/silver.md](../pipeline/silver.md), [pipeline/gold.md](../pipeline/gold.md)) |
+| Entur Silver | `pipeline/silver.py`, `silver_parse.py`, `silver_reference.py` | workflow step | implemented and locally validated 2026-10-28; deployment pending ([contracts](../pipeline/silver.md), [implementation log](../pipeline/silver-design-log.md)) |
+| Gold | — | — | not built ([pipeline/gold.md](../pipeline/gold.md)) |
 
 ## Collectors
 
@@ -104,8 +105,12 @@ The contract between the collectors and Spark.
   record per run under `bronze/_runs/`. `bronze.py` reads SIRI and vehicle positions; `bronze_datex.py` reads DATEX
   and also reports polls by outcome, distinct snapshots and the longest gap. Rerunning a day
   replaces that day only.
-- **Silver**: one table per grain, keys and join rules in [pipeline/silver.md](../pipeline/silver.md); candidate tables for
-  all sources in [pipeline/gold.md](../pipeline/gold.md). Primary focus of the course.
+- **Entur Silver**: archived NeTEx/NSR + Bronze ET/SX/vehicles → typed facts, reference
+  snapshots and quality evidence. After yesterday's Bronze, process the operating day two
+  days ago, reading ET from its three adjacent UTC partitions; SX and positions keep UTC
+  observation-day grains. Stage and check all tables, then publish the readiness marker.
+  Dev's one-hour input is explicitly partial. Contracts: [pipeline/silver.md](../pipeline/silver.md).
+  DATEX Silver remains future work.
 - **Gold**: products for named consumers, [pipeline/gold.md](../pipeline/gold.md).
 - **Spark on this VM**: one job at a time (workflow steps hold a `flock`), zstd, small reader
   batches, no `partitionBy` on constants. Why: [system/storage.md](storage.md).
@@ -161,7 +166,7 @@ Prometheus or the exporter, and no controls.
 
 ## Open decisions
 
-- Spark's scratch space for Silver (`spark.local.dir`: temporary shuffle and sort files, not
-  Silver's output). The default `/tmp` sits on the 38 GB root disk; a directory on `/data` is
-  safer but slower (network-mounted). Measure a Silver run's spill first ([system/storage.md](storage.md)).
+- Full-day Silver performance: its scratch defaults to `/data/dat535/spark-scratch` to protect
+  the root disk. Measure shuffle spill and network-volume latency before tuning the initial
+  partition count ([system/storage.md](storage.md)).
 - Which Gold products to build beyond #1 ([pipeline/gold.md](../pipeline/gold.md)).

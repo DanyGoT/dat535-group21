@@ -68,9 +68,17 @@ jobs share 7.9 GB with the collectors, Grafana, Prometheus, the runner and any n
 | **No `partitionBy` on a constant column.** Write the day directory directly. | it sorts the whole day and spilled to `/tmp` until the root disk filled (2026-10-24) |
 
 **Spill space.** `spark.local.dir` (Spark's temporary shuffle and sort files, not any table's
-output) defaults to `/tmp` on the root volume. Bronze no longer spills. Silver will shuffle;
-`/data` is network-mounted (problem log, 2026-10-24), so spilling there is slow but cannot fill
-the root disk. Measure a Silver run's spill before choosing.
+output) defaults to `/tmp` on the root volume. Bronze no longer spills. Entur Silver explicitly
+uses `<output parent>/spark-scratch` (`/data/dat535/spark-scratch` on the VM), overridable with
+`DAT535_SPARK_LOCAL_DIR`. Its genuine windows/joins can spill; protecting `/` takes priority
+over the network volume's latency. `DAT535_SHUFFLE_PARTITIONS` overrides its initial 32
+partitions. Full-day ET spill and runtime still need measurement; these are starting settings.
+
+Silver also writes narrow parsed versions and checked candidate tables under
+`silver/_staging/<run>/` on the output volume, never full-payload caches in RAM. A successful
+or ordinarily failed run removes only its own staging directory. A killed job can leave
+staging files and a non-ready marker; rerun the operating day, and inspect leftovers manually.
+Consumers use the same lock and the run's `latest.json`, not a table's `_SUCCESS`.
 
 ## The root disk
 

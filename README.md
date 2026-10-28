@@ -8,7 +8,7 @@ The main Gold product answers a traveller's question: *will my departure be on t
 
 Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 
-## Status (2026-10-26)
+## Status
 
 | Part | State |
 | ---- | ----- |
@@ -17,7 +17,7 @@ Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 | NeTEx and NSR daily archive | first day archived 2026-10-26; daily timer starts with the next deploy |
 | Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
 | Bronze (SIRI, vehicles, DATEX) | SIRI daily at 03:00 UTC; vehicles and DATEX added |
-| Silver | design in [`docs/pipeline/silver.md`](docs/pipeline/silver.md), not built |
+| Silver | Entur implemented and validated locally (2026-10-28), deployment pending; [contracts](docs/pipeline/silver.md) · [design/code log](docs/pipeline/silver-design-log.md) |
 | Gold | use cases in [`docs/pipeline/gold.md`](docs/pipeline/gold.md), not built |
 
 ## Docs
@@ -27,7 +27,7 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 | Folder | Docs |
 | ------ | ---- |
 | [`docs/system/`](docs/system/) | [architecture](docs/system/architecture.md): components, landing zone, pipeline, monitoring · [storage](docs/system/storage.md): VM capacity, volumes, runway, manual cleanup, Spark memory rules · [switchboard-style](docs/system/switchboard-style.md): look of the status page |
-| [`docs/pipeline/`](docs/pipeline/) | [methodology](docs/pipeline/methodology.md): how we decide, layer by layer · [silver](docs/pipeline/silver.md): grain, keys, joins, dedup, proposed tables · [gold](docs/pipeline/gold.md): use cases, the prediction product |
+| [`docs/pipeline/`](docs/pipeline/) | [methodology](docs/pipeline/methodology.md): how we decide, layer by layer · [silver](docs/pipeline/silver.md): contracts and operation · [Silver log](docs/pipeline/silver-design-log.md): decisions, code snippets and evidence · [gold](docs/pipeline/gold.md): use cases, the prediction product |
 | [`docs/entur/`](docs/entur/) | [sources](docs/entur/sources.md): every Entur source, limits, licence · [realtime](docs/entur/realtime.md): SIRI pub/sub and vehicle positions · [identifiers](docs/entur/identifiers.md): ids and join keys |
 | [`docs/datex/`](docs/datex/) | [sources](docs/datex/sources.md): access, feeds, collection, costs · [content](docs/datex/content.md): what the payloads contain, pitfalls |
 | [`docs/external/`](docs/external/) | [sources](docs/external/sources.md): weather, traffic and other enrichment |
@@ -39,8 +39,8 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 | Path | Contents |
 | ---- | -------- |
 | `collector/` | always-on collectors, monitor, exporter, systemd units, Grafana dashboard |
-| `pipeline/` | Spark jobs (`bronze.py`, `bronze_datex.py`) and their tests |
-| `.github/workflows/` | `dat535-dev.yml` (push/PR to `dev`), `dat535-prod.yml` (deploy on `main` with approval, Bronze daily) |
+| `pipeline/` | Bronze jobs, Entur Silver (`silver.py`, `silver_parse.py`, `silver_reference.py`), offline tests |
+| `.github/workflows/` | `dat535-dev.yml` (tests + partial Bronze/Silver), `dat535-prod.yml` (approved deploy; daily Bronze + Entur Silver) |
 | `notebooks/` | exploration (`peek.ipynb`) |
 | `entur-ai-docs/` | Entur's generated BigQuery catalog (reference, don't edit) |
 | `labs/` | course lab material |
@@ -48,11 +48,15 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 ## Tests
 
 ```sh
-python3 -m unittest discover -s collector/tests      # localhost only, never Entur or NPRA
-python3 -m unittest discover -s pipeline/tests       # needs pyspark + Java (~/spark-env on the VM)
+uv run --python 3.11 --with-requirements requirements-dev.txt --with websockets==10.4 \
+  python -m unittest discover -s collector/tests    # localhost only, matches the VM's websockets
+uv run --python 3.11 --with-requirements requirements-dev.txt \
+  python -m unittest discover -s pipeline/tests     # needs Java 8/17; no external services
 ```
 
-Both run in CI on every push and PR to `dev`, and before every deploy.
+Both run in CI on every push and PR to `dev`, and before every deploy. On the VM the
+pipeline suite uses `~/spark-env` under the shared Spark lock. Local collector tests need
+the VM's websocket version: newer websocket APIs reject its `extra_headers` argument.
 
 ## Data credits
 

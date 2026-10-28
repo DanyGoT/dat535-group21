@@ -1,0 +1,329 @@
+{
+  "run_id": "local-20261028T144237Z-1a77a24e",
+  "env": "local",
+  "schema_version": 1,
+  "operating_date": "2026-10-26",
+  "started_at": "2026-10-28T14:42:37.311Z",
+  "status": "partial",
+  "ready": false,
+  "inputs": {
+    "et": {
+      "2026-10-25": {
+        "missing_partition": true,
+        "missing_hours": [
+          "00",
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23"
+        ]
+      },
+      "2026-10-26": {
+        "missing_hours": [
+          "00",
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23"
+        ],
+        "rows": 8,
+        "bronze_status": {
+          "ok": 8
+        },
+        "bronze_run_ids": [
+          "local-20261028T144233Z-fa1423dd"
+        ],
+        "parquet_bytes": 13215
+      },
+      "2026-10-27": {
+        "missing_partition": true,
+        "missing_hours": [
+          "00",
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23"
+        ]
+      },
+      "decoded": {
+        "call": 232,
+        "journey": 8
+      },
+      "retained_versions": {
+        "call": 232,
+        "journey": 8
+      }
+    },
+    "sx": {
+      "2026-10-26": {
+        "missing_hours": [
+          "00",
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23"
+        ],
+        "rows": 108,
+        "bronze_status": {
+          "ok": 108
+        },
+        "bronze_run_ids": [
+          "local-20261028T144233Z-fa1423dd"
+        ],
+        "parquet_bytes": 21250
+      },
+      "decoded": {
+        "control": 60,
+        "sx": 50
+      },
+      "retained_versions": {
+        "sx": 50
+      }
+    },
+    "vehicles": {
+      "2026-10-26": {
+        "missing_hours": [
+          "00",
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23"
+        ],
+        "rows": 10,
+        "bronze_status": {
+          "ok": 10
+        },
+        "bronze_run_ids": [
+          "local-20261028T144233Z-fa1423dd"
+        ],
+        "parquet_bytes": 29274
+      },
+      "decoded": {
+        "vehicle": 197
+      },
+      "retained_versions": {
+        "vehicle": 197
+      }
+    }
+  },
+  "tables": {
+    "quay": {
+      "rows": 101843,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1983935,
+      "partition": "operating_date=2026-10-26"
+    },
+    "stop_place": {
+      "rows": 58018,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1305419,
+      "partition": "operating_date=2026-10-26"
+    },
+    "line": {
+      "rows": 4751,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 97124,
+      "partition": "operating_date=2026-10-26"
+    },
+    "operator": {
+      "rows": 273,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 6403,
+      "partition": "operating_date=2026-10-26"
+    },
+    "dated_journey": {
+      "rows": 21086,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 736832,
+      "partition": "operating_date=2026-10-26"
+    },
+    "journey": {
+      "rows": 76186,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1824442,
+      "partition": "operating_date=2026-10-26"
+    },
+    "stop_call": {
+      "rows": 1855992,
+      "flagged_rows": 1879,
+      "issues": {
+        "missing_quay": 1879,
+        "missing_quay_mapping": 1879
+      },
+      "parquet_bytes": 15031097,
+      "partition": "operating_date=2026-10-26"
+    },
+    "call_prediction": {
+      "rows": 598,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 46178,
+      "partition": "operating_date=2026-10-26"
+    },
+    "vehicle_position": {
+      "rows": 196,
+      "flagged_rows": 13,
+      "issues": {
+        "invalid_bearing": 6,
+        "missing_operating_date": 2,
+        "unknown_quay": 5,
+        "unknown_line": 1
+      },
+      "parquet_bytes": 28465,
+      "partition": "observation_date=2026-10-26"
+    },
+    "sx_situation": {
+      "rows": 47,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 19289,
+      "partition": "observation_date=2026-10-26"
+    },
+    "quarantine": {
+      "rows": 0,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1378,
+      "partition": "operating_date=2026-10-26"
+    }
+  },
+  "lead_minutes": [
+    1,
+    5,
+    10,
+    20,
+    30
+  ],
+  "references": {
+    "netex": {
+      "snapshot_date": "2026-10-26",
+      "file": "rb_norway-aggregated-netex.zip",
+      "bytes": 280023131,
+      "sha256": "ef25666ca8e1d54967a3bac5665fa08b3f1d208025b646bb2bb19d71537906fd"
+    },
+    "nsr": {
+      "snapshot_date": "2026-10-26",
+      "file": "Current_latest.zip",
+      "bytes": 41266628,
+      "sha256": "95421064bd73be8bb59968033d287903610adba99f2c3ed5e952c5c56c769e6f"
+    }
+  },
+  "call_coverage": {
+    "matched": 232,
+    "no_realtime": 1855760
+  },
+  "call_reconciliation": {
+    "input_versions": 232,
+    "planned_calls": 1855992,
+    "reported_calls": 232,
+    "duplicate_versions_removed": 0
+  },
+  "contract_errors": {},
+  "finished_at": "2026-10-28T14:47:37.118Z",
+  "elapsed_s": 299.807,
+  "validation_context": {
+    "source": "Read-only copies of /data/dat535/landing, date=2026-10-26 on the UiS VM",
+    "realtime_sampling": "First 8 ET, first 200 available SX lines (108 envelopes present), first 10 vehicle lines of UTC hour 08",
+    "reference_sampling": "Complete national NeTEx and NSR archives",
+    "runtime": "Local Spark 3.5.0, Python 3.11, Java 8, local[2], 2 GiB driver heap, 8 shuffle partitions",
+    "limit": "Bounded realtime sample; no claim about national reporting coverage or full-day ET performance"
+  }
+}
