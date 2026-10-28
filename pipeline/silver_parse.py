@@ -220,13 +220,23 @@ def parse_vehicles(payload, base):
     if message.get("type") in {"connection_ack", "ping", "pong", "complete"}:
         yield dict(base, kind="control")
         return
-    data = (message.get("payload") or {}).get("data") or {}
+    # graphql-transport-ws error frames have an array payload, not a data object.
+    if message.get("type") == "error":
+        yield reject(base, "graphql_error")
+        return
+    body = message.get("payload")
+    if not isinstance(body, dict):
+        yield reject(base, "unknown_message_shape")
+        return
+    data = body.get("data") or {}
+    if not isinstance(data, dict):
+        yield reject(base, "unknown_message_shape")
+        return
     vehicles = data.get("vehicles")
     if message.get("type") != "next" or not isinstance(vehicles, list):
-        yield reject(base, "graphql_error" if message.get("type") == "error" or
-                     (message.get("payload") or {}).get("errors") else "unknown_message_shape")
+        yield reject(base, "graphql_error" if body.get("errors") else "unknown_message_shape")
         return
-    if (message.get("payload") or {}).get("errors"):
+    if body.get("errors"):
         yield reject(base, "graphql_partial_error")
     for index, vehicle in enumerate(vehicles):
         if not isinstance(vehicle, dict):

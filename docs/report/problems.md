@@ -64,6 +64,28 @@ Entry template:
 - **Trade-off:** none. Rerun old days to reclassify their rows.
 - **Lesson:** "corrupt" rows deserve a look even when there are only two: they were the
   biggest messages, likely full snapshots after a re-subscribe.
+## 2026-10-28 — Missing and malformed real-time data crossed Silver contract boundaries
+
+- **Area:** Silver, readiness and regression coverage.
+- **Evidence:** PR #34 review findings reproduced locally: 120 corrupt envelopes spanning
+  every required hour published `ready=true`; a vehicle's available dated alias left its
+  operating date null; a known cancellation with no call history produced no sample; a
+  GraphQL error-array payload raised `AttributeError`.
+- **Cause:** Hour presence was treated as sufficient coverage without gating all source
+  contract failures. Journey lookup and prediction sampling assumed a particular ID/call
+  shape, while the vehicle decoder assumed every transport payload was an object.
+- **Fix:** Gate all Bronze envelope/vehicle shape failures; resolve explicit dated aliases;
+  preserve cancellation targets without call versions and retain their journey evidence;
+  decode transport errors before accessing data objects. See the
+  [review regression table](../pipeline/silver-design-log.md#review-regressions--2026-10-28).
+- **Validation:** Offline regressions cover strict/partial runs with all hours present,
+  preservation of the previous marker, both ID forms, cancellation before any call update,
+  cutoff timing, error arrays and unexpected envelope shapes.
+- **Trade-off / lesson:** Strict source-contract failures require repair or an explicit
+  exploratory run, even if only one envelope is affected. Field-level quality flags remain
+  nonfatal. Test combined missing/error states rather than only valid messages and isolated
+  parser fields.
+
 ## 2026-10-28 — National NeTEx references need scope and native versions
 
 - **Area:** Silver, reference data.

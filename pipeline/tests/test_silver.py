@@ -121,6 +121,26 @@ class ParseTest(unittest.TestCase):
         self.assertIn("unknown_message_shape", next(P.parse_et(
             "<Siri><EstimatedTimetableDelivery><NewJourneyShape/></EstimatedTimetableDelivery></Siri>", base()))["dq_issue"])
 
+    def test_graphql_error_array_is_quarantined(self):
+        payload = json.dumps({"type": "error", "payload": [{"message": "subscription failed"}]})
+        source = dict(received_at="2026-10-26T08:00:00Z", payload=payload, _bronze_status="ok",
+                      _bronze_source_file="vehicles/hour=08.jsonl.gz", _bronze_payload_sha256=P.digest(payload),
+                      _bronze_run_id="fixture", source_date=str(DAY))
+        rows = list(P.decode_partition([source], "vehicles"))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["kind"], "quarantine")
+        self.assertEqual(rows[0]["dq_issue"], ["graphql_error"])
+        self.assertEqual(rows[0]["payload_sha256"], source["_bronze_payload_sha256"])
+        self.assertEqual(rows[0]["source_file"], source["_bronze_source_file"])
+
+    def test_graphql_unexpected_envelope_shapes_are_quarantined(self):
+        for body in ([{"message": "unexpected array"}], {"data": [{"vehicles": []}]}):
+            with self.subTest(payload=body):
+                rows = list(P.parse_vehicles(json.dumps({"type": "next", "payload": body}), base()))
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["kind"], "quarantine")
+                self.assertEqual(rows[0]["dq_issue"], ["unknown_message_shape"])
+
     def test_sx_versions_without_native_version_and_scopes(self):
         xml = """<Siri><PtSituationElement><ParticipantRef>T</ParticipantRef><SituationNumber>1</SituationNumber>
           <Summary xml:lang="NO">Forsinket</Summary><Summary xml:lang="EN">Delayed</Summary>
@@ -283,6 +303,35 @@ class SparkTest(unittest.TestCase):
         df = self.spark.createDataFrame(records, P.schema("vehicles"))
         self.assertEqual(self.S.latest(df, ["codespace", "vehicle_id", "last_updated_at"]).count(), 2)
 
+    def test_explicit_dated_reference_resolves_vehicle_date(self):
+        alias = "T:DatedServiceJourney:1"
+        aliases = self.spark.createDataFrame([(alias, JID, DAY)],
+            "dated_journey_id string, journey_id string, operating_date date")
+        cases = [
+            ("vehicle", JID, alias, None),
+            ("et_alias", alias, None, None),
+            ("reported_date", JID, alias, DAY + timedelta(days=1)),
+            ("unmapped", JID, "T:DatedServiceJourney:unknown", None),
+            ("conflicting_id", "T:ServiceJourney:other", alias, None),
+        ]
+        versions = self.spark.createDataFrame([
+            dict(base(), kind="vehicle", vehicle_id=case, journey_id=jid, dated_journey_id=dated, operating_date=op)
+            for case, jid, dated, op in cases], P.schema("vehicles"))
+        rows = {r["vehicle_id"]: r for r in self.S.normalize_journeys(versions, aliases).collect()}
+        self.assertEqual(len(rows), len(cases))
+        for case in ("vehicle", "et_alias"):
+            self.assertEqual(rows[case]["operating_date"], DAY)
+            self.assertEqual(rows[case]["journey_id"], JID)
+            self.assertEqual(rows[case]["dq_issue"], [])
+        self.assertEqual(rows["vehicle"]["source_journey_id"], JID)
+        self.assertEqual(rows["et_alias"]["source_journey_id"], alias)
+        self.assertEqual(rows["reported_date"]["operating_date"], DAY + timedelta(days=1))
+        self.assertEqual(rows["reported_date"]["dq_issue"], ["conflicting_operating_date"])
+        self.assertIsNone(rows["unmapped"]["operating_date"])
+        self.assertEqual(rows["unmapped"]["journey_id"], JID)
+        self.assertEqual(rows["conflicting_id"]["source_journey_id"], "T:ServiceJourney:other")
+        self.assertEqual(rows["conflicting_id"]["dq_issue"], ["conflicting_journey_id"])
+
     def test_cancellation_only_journey_is_visible_at_prediction_cutoff(self):
         records = list(P.parse_et(et(call()), base("2026-10-26T08:00:01Z")))
         records += list(P.parse_et(et(recorded="2026-10-26T08:03:00Z", extra="<Cancellation>true</Cancellation>"), base("2026-10-26T08:03:01Z")))
@@ -292,6 +341,36 @@ class SparkTest(unittest.TestCase):
         self.assertTrue(rows)
         self.assertTrue(all(r["journey_cancelled"] for r in rows))
         self.assertTrue(all(r["journey_received_at"] <= r["cutoff_at"] for r in rows))
+
+    def test_cancellation_samples_do_not_require_a_preceding_call(self):
+        from pyspark.sql import functions as F
+        target = self.target_calls().withColumn("actual_departure_at", F.lit(None).cast("timestamp"))
+        for case in ("no_calls", "first_call_after_cutoff", "cancellation_after_cutoff"):
+            with self.subTest(case=case):
+                received = "2026-10-26T08:05:01Z" if case == "cancellation_after_cutoff" else "2026-10-26T08:03:01Z"
+                cancelled = base(received)
+                cancelled["dq_issue"] = ["journey_source_warning"]
+                records = list(P.parse_et(et(recorded="2026-10-26T08:03:00Z", extra="<Cancellation>true</Cancellation>"), cancelled))
+                if case == "first_call_after_cutoff":
+                    records += list(P.parse_et(et(call(), recorded="2026-10-26T08:06:00Z"), base("2026-10-26T08:06:01Z")))
+                versions = self.spark.createDataFrame(records, P.schema("et"))
+                rows = self.S.build_predictions(versions, target, leads=[5]).collect()
+                if case == "cancellation_after_cutoff":
+                    self.assertEqual(rows, [])
+                    continue
+                self.assertEqual(len(rows), 1)
+                row = rows[0]
+                self.assertEqual((row["event"], row["reference"]), ("departure", "planned"))
+                self.assertTrue(row["journey_cancelled"])
+                self.assertIsNone(row["predicted_at"])
+                self.assertIsNone(row["call_cancelled"])
+                self.assertEqual(row["payload_sha256"], cancelled["payload_sha256"])
+                self.assertEqual(row["source_file"], cancelled["source_file"])
+                self.assertEqual(row["bronze_run_id"], cancelled["bronze_run_id"])
+                self.assertEqual(row["dq_issue"], ["journey_source_warning"])
+                self.assertLessEqual(row["recorded_at"], row["cutoff_at"])
+                self.assertLessEqual(row["received_at"], row["cutoff_at"])
+                self.assertEqual(row["available_at"], row["journey_received_at"])
 
     def test_actual_wins_replay_and_latest_journey_is_independent(self):
         v = self.versions([
@@ -329,6 +408,51 @@ class SparkTest(unittest.TestCase):
         self.assertEqual(planned["predicted_at"].timestamp(), instant("2026-10-26T08:12:00Z").timestamp())
         self.assertEqual(actual["predicted_at"].timestamp(), instant("2026-10-26T08:13:00Z").timestamp())
         self.assertTrue(all(r["received_at"] <= r["cutoff_at"] and r["recorded_at"] <= r["cutoff_at"] for r in rows))
+
+    def test_unusable_bronze_blocks_readiness_and_preserves_published_day(self):
+        with tempfile.TemporaryDirectory(prefix="silver-contract-gate-") as tmp:
+            root = Path(tmp)
+            landing, output = root / "landing", root / "out"
+            for dataset, xml in (("netex", plan_xml()), ("nsr", NSR)):
+                folder = landing / dataset / f"date={DAY}"
+                folder.mkdir(parents=True)
+                with zipfile.ZipFile(folder / "fixture.zip", "w") as z:
+                    z.writestr("T_line.xml", xml)
+            cases = [("et", DAY - timedelta(days=1), "corrupt"), ("et", DAY, "incomplete"),
+                     ("et", DAY + timedelta(days=1), "wrong_endpoint"), ("sx", DAY, "corrupt"),
+                     ("vehicles", DAY, "ok")]
+            for feed, source_day, status in cases:
+                payload = json.dumps({"type": "next", "payload": {"data": {"vehicles": [None]}}}) if feed == "vehicles" else None
+                rows = [(f"{source_day}T{h:02d}:00:01Z", payload, status, f"{h:02d}",
+                         f"fixture/{feed}/{source_day}/{h:02d}", P.digest(payload) if payload else None,
+                         "fixture", f"broken envelope {h}" if status == "corrupt" else None) for h in range(24)]
+                self.spark.createDataFrame(rows,
+                    "received_at string, payload string, _bronze_status string, hour string, _bronze_source_file string, _bronze_payload_sha256 string, _bronze_run_id string, _bronze_raw_line string") \
+                    .write.parquet(str(output / "bronze" / self.S.DATASETS[feed] / f"date={source_day}"))
+            marker = output / "silver" / "_runs" / f"operating_date={DAY}" / "latest.json"
+            previous = {"run_id": "previous", "status": "complete", "ready": True}
+            self.S.atomic_json(marker, previous)
+            expected = {"bronze_corrupt": 48, "bronze_incomplete": 24, "bronze_wrong_endpoint": 24,
+                        "invalid_vehicle_shape": 24}
+            with self.assertRaisesRegex(ValueError, "source contract errors"):
+                self.S.run(landing, output, DAY, spark=self.spark, leads=[5])
+            self.assertEqual(json.loads(marker.read_text()), previous)
+            history = next(p for p in marker.parent.glob("*.json") if p.name != "latest.json")
+            failed = json.loads(history.read_text())
+            self.assertEqual(failed["status"], "failed")
+            self.assertFalse(failed["ready"])
+            self.assertEqual(failed["contract_errors"], expected)
+            self.assertEqual(failed["tables"]["quarantine"]["rows"], 120)
+            self.assertFalse((output / "silver" / "stop_call" / f"operating_date={DAY}").exists())
+            partial = self.S.run(landing, output, DAY, spark=self.spark, allow_partial=True, leads=[5])
+            self.assertEqual(partial["status"], "partial")
+            self.assertFalse(partial["ready"])
+            self.assertEqual(partial["contract_errors"], expected)
+            self.assertEqual(partial["tables"]["quarantine"]["rows"], 120)
+            self.assertFalse(json.loads(marker.read_text())["ready"])
+            for feed, source_day, _ in cases:
+                self.assertEqual(partial["inputs"][feed][str(source_day)]["missing_hours"], [])
+            self.assertFalse(any((output / "silver" / "_staging").iterdir()))
 
     def test_full_pipeline_denominator_quarantine_and_rerun(self):
         from pyspark.sql import functions as F

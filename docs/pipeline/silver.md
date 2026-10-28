@@ -163,6 +163,11 @@ Bronze sample with `--allow-partial`; its marker always says `ready=false`.
 - Nonempty `dq_issue` arrays remain on the fact/reference rows. Missing keys and unreadable
   messages live in `quarantine`, with their Bronze file/hash/run locator and decoded evidence.
   Superseded versions are the intentional reduction; Bronze retains all of them.
+- Corrupt, incomplete or wrong-endpoint Bronze envelopes and invalid vehicle objects are
+  contract failures even when every source hour exists. Strict runs fail with audit counts
+  and leave the published day intact; `--allow-partial` retains the quarantine rows and
+  publishes `ready=false`. Ordinary field-level flags remain countable without blocking
+  readiness by themselves. GraphQL error arrays become `graphql_error` quarantine records.
 - `has_plan`, `has_realtime` and `realtime_status` distinguish `matched`, `no_realtime` and
   `realtime_only`. `journey_has_realtime` also distinguishes a cancellation-only journey
   message from an entirely unseen journey. Missing real-time is an ordinary coverage state.
@@ -209,7 +214,9 @@ the archived planned time (ET aimed if absent) or the final actual time. A versi
 only after **both** producer and receiver timestamps; a later actual terminates its estimate
 interval, and a late old replay cannot undo a newer producer state already known. Journey
 cancellation at the cutoff is sampled independently, including messages
-with no calls. No row means no eligible estimate/cancellation state at that cutoff.
+with no calls or with the first call update arriving after the cutoff. Such samples retain
+null predicted/call-specific values and use journey provenance and quality flags. No row
+means no eligible estimate/cancellation state at that cutoff.
 
 The `actual` reference is retrospective and final `stop_call` states are outcomes. They must
 not become pre-departure features. Facts also retain reference availability timestamps when
