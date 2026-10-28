@@ -33,7 +33,11 @@ rules built on these keys: [pipeline/silver.md](../pipeline/silver.md).
   `DayType` instead (2026-10-22/23).
 - **Extra journeys** carry `EstimatedVehicleJourneyCode` and no `FramedVehicleJourneyRef`
   ([entur/realtime.md](realtime.md)); they have no planned counterpart.
-- Silver resolves dated aliases from the selected archived plan. An ET record whose
+- Silver resolves dated aliases from the selected archived plan. The explicit dated
+  reference takes precedence for lookup, even when a normal `serviceJourney.id` is also
+  present; ET can instead carry the alias in the journey ID itself. An existing reported
+  date is retained, with a flag if it conflicts with the mapping; original IDs stay available
+  in provenance. An ET record whose
   operating day still cannot be established goes to quarantine; neither its receive date
   nor a call's calendar date is silently used as the journey day. Vehicle positions retain
   a nullable operating day and are partitioned by UTC observation day instead.

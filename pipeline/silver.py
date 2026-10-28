@@ -29,6 +29,10 @@ JOURNEY_KEY = ["operating_date", "journey_id"]
 CALL_KEY = JOURNEY_KEY + ["call_order"]
 LEAD_MINUTES = [1, 5, 10, 20, 30]
 SCHEMA_VERSION = 1
+CONTRACT_ISSUES = frozenset({
+    "bronze_corrupt", "bronze_incomplete", "bronze_wrong_endpoint", "invalid_vehicle_shape",
+    "unknown_message_shape", "malformed_payload", "source_delivery_error", "graphql_error", "graphql_partial_error",
+})
 
 
 def functions():
@@ -93,9 +97,15 @@ def normalize_journeys(df, aliases):
     mapped = aliases.select(F.col("dated_journey_id").alias("_alias"),
                             F.col("journey_id").alias("_mapped_journey"),
                             F.col("operating_date").alias("_mapped_date"))
-    joined = df.join(mapped, df.journey_id == mapped._alias, "left")
+    # Vehicles can carry both a normal ServiceJourney id and an explicit dated
+    # reference. ET may carry the dated alias in journey_id itself instead.
+    alias_ref = F.coalesce(F.col("dated_journey_id"), F.col("journey_id"))
+    joined = df.join(mapped, alias_ref == mapped._alias, "left")
     joined = issues(joined, ("conflicting_operating_date", F.col("operating_date").isNotNull() &
-                             F.col("_mapped_date").isNotNull() & (F.col("operating_date") != F.col("_mapped_date"))))
+                             F.col("_mapped_date").isNotNull() & (F.col("operating_date") != F.col("_mapped_date"))),
+                    ("conflicting_journey_id", F.col("_mapped_journey").isNotNull() &
+                     F.col("journey_id").isNotNull() & (F.col("journey_id") != F.col("_alias")) &
+                     (F.col("journey_id") != F.col("_mapped_journey"))))
     return joined.withColumn("source_journey_id", F.col("journey_id")) \
         .withColumn("journey_id", F.coalesce("_mapped_journey", "journey_id")) \
         .withColumn("operating_date", F.coalesce("operating_date", "_mapped_date")) \
@@ -215,7 +225,9 @@ def build_predictions(versions, final_calls, leads=LEAD_MINUTES):
             (F.col("v.next_available_at").isNull() | (F.col("t.cutoff_at") < F.col("v.next_available_at")))
         for key in CALL_KEY:
             condition = condition & (F.col("v." + key) == F.col("t." + key))
-        joined = target.join(v, condition, "inner").filter(F.col("v.known_actual_at").isNull())
+        # Keep planned targets even when no call update was known: a journey
+        # cancellation can independently provide their state at the cutoff.
+        joined = target.join(v, condition, "left").filter(F.col("v.known_actual_at").isNull())
         journey_condition = (F.col("j.available_at") <= F.col("t.cutoff_at")) & \
             (F.col("j.next_available_at").isNull() | (F.col("t.cutoff_at") < F.col("j.next_available_at")))
         for key in JOURNEY_KEY:
@@ -225,10 +237,16 @@ def build_predictions(versions, final_calls, leads=LEAD_MINUTES):
         parts.append(joined.select(*[F.col("t." + c).alias(c) for c in CALL_KEY],
                      F.lit(event).alias("event"), "t.reference", "t.target_at", "t.lead_minutes", "t.cutoff_at",
                      "v.predicted_at", F.greatest("v.available_at", "j.available_at").alias("available_at"),
-                     "v.recorded_at", "v.received_at", "v.call_cancelled", "j.journey_cancelled",
+                     F.coalesce("v.recorded_at", "j.recorded_at").alias("recorded_at"),
+                     F.coalesce("v.received_at", "j.received_at").alias("received_at"),
+                     "v.call_cancelled", "j.journey_cancelled",
                      F.col("j.recorded_at").alias("journey_recorded_at"), F.col("j.received_at").alias("journey_received_at"),
                      F.col("j.payload_sha256").alias("journey_payload_sha256"),
-                     "v.payload_sha256", "v.source_file", "v.bronze_run_id", "v.dq_issue"))
+                     F.coalesce("v.payload_sha256", "j.payload_sha256").alias("payload_sha256"),
+                     F.coalesce("v.source_file", "j.source_file").alias("source_file"),
+                     F.coalesce("v.bronze_run_id", "j.bronze_run_id").alias("bronze_run_id"),
+                     F.sort_array(F.array_distinct(F.concat(F.coalesce(F.col("v.dq_issue"), empty_issues()),
+                                                          F.coalesce(F.col("j.dq_issue"), empty_issues())))).alias("dq_issue")))
     return parts[0].unionByName(parts[1])
 
 
@@ -520,8 +538,7 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
             rejected = rejected.unionByName(frame)
         save(rejected, "quarantine", None)
         contract_errors = record["tables"]["quarantine"]["issues"]
-        record["contract_errors"] = {k: n for k, n in contract_errors.items() if k in {
-            "unknown_message_shape", "malformed_payload", "source_delivery_error", "graphql_error", "graphql_partial_error"}}
+        record["contract_errors"] = {k: n for k, n in contract_errors.items() if k in CONTRACT_ISSUES}
         record["finished_at"] = iso(utcnow())
         record["elapsed_s"] = round(time.monotonic() - started, 3)
         record["status"] = "complete" if complete and not record["contract_errors"] else "partial"

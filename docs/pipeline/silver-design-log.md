@@ -94,7 +94,7 @@ includes archive hashes, source counts, quality reasons and output sizes.
 | Source envelope contracts | No errors in the captured sample |
 | Completeness marker | `partial`, `ready=false`, as required for bounded RT input |
 | Local run time | 299.807 s; Spark 3.5.0, Python 3.11, Java 8, two workers, 2 GiB driver heap |
-| Offline regressions | 40 pipeline tests (22 Silver); 54 collector tests with the VM's websockets 10.4 |
+| Offline regressions | 45 pipeline tests (27 Silver); 54 collector tests with the VM's websockets 10.4 |
 | Workflow checks | Both YAML files parsed; 14 shell steps passed `bash -n` |
 | Default Spark session | Four workers, supplied scratch directory, 32 shuffle partitions, zstd, batch 256 and UTC verified |
 
@@ -103,6 +103,18 @@ Offline fixtures also cover repeated quays, overnight calls, DST ambiguity, canc
 journeys, late producer/receiver times, stale replays, missing identities, reference version
 conflicts, preserving a missing reported quay during plan enrichment, replacement reruns and
 rollback after a failed partition install.
+
+## Review regressions — 2026-10-28
+
+| Boundary | Corrected behavior | Regression evidence |
+| -------- | ------------------ | ------------------- |
+| Complete hours, unusable content | Bronze contract failures and invalid vehicle objects block strict publication; exploratory output stays partial. | 120 unusable envelopes, all hours present: strict failure preserves the old marker; partial output retains every quarantine row and reason. |
+| Normal and dated IDs together | Look up the explicit dated alias before falling back to the journey ID; retain source IDs and flag conflicts. | Vehicle date resolves from its alias; ET alias fallback still works; unknown aliases leave the date null. |
+| Journey cancellation without call data | Preserve planned cutoff targets so cancellation can independently qualify them, with journey provenance and quality flags. | No preceding call and first call after cutoff both produce a cancellation sample; cancellation received after cutoff does not. |
+| GraphQL transport errors | Classify error frames before accessing their array payload as a data object. | Error arrays quarantine with their locator; unexpected payload/data shapes also quarantine instead of raising `AttributeError`. |
+
+The regression tests distinguish source contract failures from field-level quality flags;
+quarantining a missing call order alone still allows a complete, otherwise valid input run.
 
 ## Code map and remaining limits
 
