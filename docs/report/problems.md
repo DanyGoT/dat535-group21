@@ -44,3 +44,30 @@ Entry template:
 - **Lesson:** Spark operations that look free (`partitionBy` on a constant) can trigger hidden
   sorts and shuffles; check the physical plan and where spills land. Silver will need real
   shuffles, so local spill space must be planned for, not left at the default.
+
+## 2026-10-29 — DATEX Bronze ran out of heap on its first full day
+
+- **Area:** Bronze, VM
+- **Symptom:** The scheduled prod run failed in **Run Bronze DATEX** after ~35 s with
+  `java.lang.OutOfMemoryError: Java heap space` while writing `datex-situation/date=2026-10-28`.
+  SIRI and vehicles Bronze for the same day had succeeded (issue #35).
+- **Evidence:** GitHub Actions run `40849746177` (prod, schedule). Parquet logged
+  `InternalParquetRecordWriter: Too much memory used`. Every situation line is one snapshot of
+  ~26.6M characters, twelve per hour file; 2026-10-28 had 13 hour files (DATEX was deployed at
+  11:30 UTC), 339 MB gzipped, which the job coalesces into 3 write tasks of ~50 snapshots each.
+  The same code on the same day on the VM failed again after 37 s.
+- **Cause:** Parquet first measures how much a writer has buffered after
+  `parquet.page.size.row.check.min` = 100 rows, for pages and row groups alike. A task with
+  fewer rows than that keeps all of them in one page until it closes: ~1.3 GB of snapshots per
+  task, three tasks at once, plus the JSON parser's copies of each line, against a 4 GB heap.
+  The dev workflow only ever ingests one hour (12 snapshots), so this first showed on the first
+  full day in prod.
+- **Fix:** The DATEX write sets `parquet.page.size.row.check.min` to 1, so the writer measures
+  from the first row and writes a page per snapshot. On the VM, the same day: 55 s with the
+  4 GB heap, and it also passes with 2 GB; all five feeds in 60 s, no bad rows.
+- **Trade-off:** The writer measures its buffers after every row. With ~150–300 rows per feed
+  and day that costs nothing. `bronze.py` keeps the default: ET rows are mostly small, and it
+  has run daily without this problem.
+- **Lesson:** Parquet's memory control counts rows before it counts bytes, so a column of
+  uniformly huge values defeats it. Run a new source's Bronze on a full real day before it is
+  scheduled, not only the dev workflow's single hour.
