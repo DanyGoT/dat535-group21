@@ -114,8 +114,13 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
     # read tasks and no shuffle of the payloads.
     n_out = min(len(files), max(1, math.ceil(sum(f.stat().st_size for f in files) / INPUT_BYTES_PER_FILE)))
     partition = Path(out_root) / f"{PREFIX}{feed}" / f"date={day}"
+    # Parquet first measures what a writer has buffered after 100 rows. Every situation row is
+    # a ~26.6M-character snapshot and a task gets ~50 of them, so each task held all of its
+    # rows in one page until it closed: three tasks ran the 4 GB driver out of heap (prod,
+    # 2026-10-29). Measuring from the first row writes a page per snapshot.
     bronze.coalesce(n_out).write \
         .mode("overwrite") \
+        .option("parquet.page.size.row.check.min", 1) \
         .parquet(str(partition))
 
     # Everything below reads narrow columns of the written Parquet, never the payloads.
