@@ -1,0 +1,29 @@
+{
+  "run_id": "local-20261104T162507Z-4e6ebbc8",
+  "operating_date": "2026-10-26",
+  "schema_version": 1,
+  "status": "partial",
+  "ready": false,
+  "started_at": "2026-11-04T16:25:07.532Z",
+  "silver_run_id": "local-20261028T144237Z-1a77a24e",
+  "silver_status": "partial",
+  "late_seconds": 180,
+  "tables": {
+    "line_scorecard": {
+      "rows": 3953,
+      "partition": "operating_date=2026-10-26",
+      "parquet_bytes": 115281
+    }
+  },
+  "totals": {
+    "input_journeys": 76186,
+    "input_calls": 1855992,
+    "planned_journeys": 76186,
+    "reported_journeys": 8,
+    "scored_departures": 107,
+    "late_departures": 31,
+    "actual_equals_aimed_departures": 0
+  },
+  "finished_at": "2026-11-04T16:25:20.490Z",
+  "elapsed_s": 12.959
+}

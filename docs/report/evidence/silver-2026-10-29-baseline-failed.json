@@ -1,0 +1,144 @@
+{
+  "run_id": "local-20261104T181119Z-620f6795",
+  "env": "prod",
+  "schema_version": 1,
+  "operating_date": "2026-10-29",
+  "started_at": "2026-11-04T18:11:19.623Z",
+  "status": "failed",
+  "ready": false,
+  "inputs": {
+    "et": {
+      "2026-10-28": {
+        "missing_hours": [],
+        "rows": 4834382,
+        "bronze_status": {
+          "ok": 4834382
+        },
+        "bronze_run_ids": [
+          "gh-40849746177-2"
+        ],
+        "parquet_bytes": 8576728782
+      },
+      "2026-10-29": {
+        "missing_hours": [],
+        "rows": 4729337,
+        "bronze_status": {
+          "ok": 4729337
+        },
+        "bronze_run_ids": [
+          "gh-41035074018-1"
+        ],
+        "parquet_bytes": 8559423609
+      },
+      "2026-10-30": {
+        "missing_hours": [],
+        "rows": 4758483,
+        "bronze_status": {
+          "ok": 4758483
+        },
+        "bronze_run_ids": [
+          "gh-41188264539-1"
+        ],
+        "parquet_bytes": 8686727726
+      },
+      "decoded": {
+        "call": 850820065,
+        "control": 4338,
+        "journey": 26055055
+      },
+      "retained_versions": {
+        "call": 280853976,
+        "journey": 8647458
+      }
+    },
+    "sx": {
+      "2026-10-29": {
+        "missing_hours": [],
+        "rows": 4701,
+        "bronze_status": {
+          "ok": 4701
+        },
+        "bronze_run_ids": [
+          "gh-41035074018-1"
+        ],
+        "parquet_bytes": 600045
+      }
+    },
+    "vehicles": {
+      "2026-10-29": {
+        "missing_hours": [],
+        "rows": 599862,
+        "bronze_status": {
+          "ok": 599862
+        },
+        "bronze_run_ids": [
+          "gh-41035074018-1"
+        ],
+        "parquet_bytes": 874199065
+      }
+    }
+  },
+  "tables": {
+    "quay": {
+      "rows": 101828,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 2006920,
+      "partition": "operating_date=2026-10-29"
+    },
+    "stop_place": {
+      "rows": 58005,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1302356,
+      "partition": "operating_date=2026-10-29"
+    },
+    "line": {
+      "rows": 4750,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 97444,
+      "partition": "operating_date=2026-10-29"
+    },
+    "operator": {
+      "rows": 273,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 6709,
+      "partition": "operating_date=2026-10-29"
+    },
+    "dated_journey": {
+      "rows": 21100,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 740697,
+      "partition": "operating_date=2026-10-29"
+    }
+  },
+  "lead_minutes": [
+    1,
+    5,
+    10,
+    20,
+    30
+  ],
+  "references": {
+    "netex": {
+      "snapshot_date": "2026-10-28",
+      "file": "/data/dat535/landing/netex/date=2026-10-28/rb_norway-aggregated-netex.zip",
+      "bytes": 284186586,
+      "sha256": "c2a6064f55dc1ca208200da1a79ecde17ca2f76847a6610fc570dccb9903a858",
+      "available_at": "2026-10-28T11:29:10.900Z"
+    },
+    "nsr": {
+      "snapshot_date": "2026-10-28",
+      "file": "/data/dat535/landing/nsr/date=2026-10-28/Current_latest.zip",
+      "bytes": 41266112,
+      "sha256": "847b7374fc8a1bd7f95ba6c3c935c986fbd92ca010034c308727a47e2c47a315",
+      "available_at": "2026-10-28T11:29:12.819Z"
+    }
+  },
+  "error": "Py4JJavaError: An error occurred while calling o1468.parquet.\n: org.apache.spark.SparkException: Job aborted due to stage failure: Task 0 in stage 166.0 failed 1 times, most recent failure: Lost task 0.0 in stage 166.0 (TID 776) (test executor driver): org.apache.spark.SparkException: [TASK_WRITE_FAILED] Task failed while writing rows to file:/data/dat535/prod/silver/_staging/local-20261104T181119Z-620f6795-5b8b9665/_work/sx.\n\tat org.apache.spark.sql.errors.QueryExecutionErrors$.taskFailedWhileWritingRowsError(QueryExecutionErrors.scala:774)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.executeTask(FileFormatWriter.scala:420)\n\tat org.apache.spark.sql.execution.datasources.WriteFilesExec.$anonfun$doExecuteWrite$1(WriteFiles.scala:100)\n\tat org.apache.spark.rdd.RDD.$anonfun$mapPartitionsInternal$2(RDD.scala:890)\n\tat org.apache.spark.rdd.RDD.$anonfun$mapPartitionsInternal$2$adapted(RDD.scala:890)\n\tat org.apache.spark.rdd.MapPartitionsRDD.compute(MapPartitionsRDD.scala:52)\n\tat org.apache.spark.rdd.RDD.computeOrReadCheckpoint(RDD.scala:364)\n\tat org.apache.spark.rdd.RDD.iterator(RDD.scala:328)\n\tat org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)\n\tat org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:161)\n\tat org.apache.spark.scheduler.Task.run(Task.scala:141)\n\tat org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)\n\tat org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)\n\tat org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)\n\tat org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:94)\n\tat org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)\n\tat java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1149)\n\tat java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)\n\tat java.lang.Thread.run(Thread.java:750)\nCaused by: org.apache.spark.api.python.PythonException: Traceback (most recent call last):\n  File \"/opt/spark/python/lib/pyspark.zip/pyspark/worker.py\", line 1247, in main\n    process()\n  File \"/opt/spark/python/lib/pyspark.zip/pyspark/worker.py\", line 1239, in process\n    serializer.dump_stream(out_iter, outfile)\n  File \"/opt/spark/python/lib/pyspark.zip/pyspark/serializers.py\", line 274, in dump_stream\n    vs = list(itertools.islice(iterator, batch))\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/data/dat535/silver-week-validation/spark-scratch/spark-39fc9ed0-6af2-4a71-b5f0-cddafcc97552/userFiles-c9419b4a-6974-4895-9700-44b594d71218/silver_parse.py\", line 283, in decode_partition\n    yield from parser(source[\"payload\"], base)\n  File \"/data/dat535/silver-week-validation/spark-scratch/spark-39fc9ed0-6af2-4a71-b5f0-cddafcc97552/userFiles-c9419b4a-6974-4895-9700-44b594d71218/silver_parse.py\", line 192, in parse_sx\n    periods.append(dict(start_at=timestamp(text(period, \"StartTime\"), issues, \"validity_start\"),\n                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/data/dat535/silver-week-validation/spark-scratch/spark-39fc9ed0-6af2-4a71-b5f0-cddafcc97552/userFiles-c9419b4a-6974-4895-9700-44b594d71218/silver_parse.py\", line 41, in timestamp\n    return result.astimezone(timezone.utc)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOverflowError: date value out of range\n\n\tat org.apache.spark.api.python.BasePythonRunner$ReaderIterator.handlePythonException(PythonRunner.scala:572)\n\tat org.apache.spark.api.python.PythonRunner$$anon$3.read(PythonRunner.scala:784)\n\tat org.apache.spark.api.python.PythonRunner$$anon$3.read(PythonRunner.scala:766)\n\tat org.apache.spark.api.python.BasePythonRunner$ReaderIterator.hasNext(PythonRunner.scala:525)\n\tat org.apache.spark.InterruptibleIterator.hasNext(InterruptibleIterator.scala:37)\n\tat scala.collection.Iterator$$anon$11.hasNext(Iterator.scala:491)\n\tat scala.collection.Iterator$$anon$10.hasNext(Iterator.scala:460)\n\tat scala.collection.Iterator$$anon$10.hasNext(Iterator.scala:460)\n\tat org.apache.spark.sql.catalyst.expressions.GeneratedClass$GeneratedIteratorForCodegenStage1.processNext(Unknown Source)\n\tat org.apache.spark.sql.execution.BufferedRowIterator.hasNext(BufferedRowIterator.java:43)\n\tat org.apache.spark.sql.execution.WholeStageCodegenEvaluatorFactory$WholeStageCodegenPartitionEvaluator$$anon$1.hasNext(WholeStageCodegenEvaluatorFactory.scala:43)\n\tat org.apache.spark.sql.execution.datasources.FileFormatDataWriter.writeWithIterator(FileFormatDataWriter.scala:91)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.$anonfun$executeTask$1(FileFormatWriter.scala:403)\n\tat org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1397)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.executeTask(FileFormatWriter.scala:410)\n\t... 17 more\n\nDriver stacktrace:\n\tat org.apache.spark.scheduler.DAGScheduler.failJobAndIndependentStages(DAGScheduler.scala:2844)\n\tat org.apache.spark.scheduler.DAGScheduler.$anonfun$abortStage$2(DAGScheduler.scala:2780)\n\tat org.apache.spark.scheduler.DAGScheduler.$anonfun$abortStage$2$adapted(DAGScheduler.scala:2779)\n\tat scala.collection.mutable.ResizableArray.foreach(ResizableArray.scala:62)\n\tat scala.collection.mutable.ResizableArray.foreach$(ResizableArray.scala:55)\n\tat scala.collection.mutable.ArrayBuffer.foreach(ArrayBuffer.scala:49)\n\tat org.apache.spark.scheduler.DAGScheduler.abortStage(DAGScheduler.scala:2779)\n\tat org.apache.spark.scheduler.DAGScheduler.$anonfun$handleTaskSetFailed$1(DAGScheduler.scala:1242)\n\tat org.apache.spark.scheduler.DAGScheduler.$anonfun$handleTaskSetFailed$1$adapted(DAGScheduler.scala:1242)\n\tat scala.Option.foreach(Option.scala:407)\n\tat org.apache.spark.scheduler.DAGScheduler.handleTaskSetFailed(DAGScheduler.scala:1242)\n\tat org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.doOnReceive(DAGScheduler.scala:3048)\n\tat org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.onReceive(DAGScheduler.scala:2982)\n\tat org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.onReceive(DAGScheduler.scala:2971)\n\tat org.apache.spark.util.EventLoop$$anon$1.run(EventLoop.scala:49)\n\tat org.apache.spark.scheduler.DAGScheduler.runJob(DAGScheduler.scala:984)\n\tat org.apache.spark.SparkContext.runJob(SparkContext.scala:2398)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.$anonfun$executeWrite$4(FileFormatWriter.scala:307)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.writeAndCommit(FileFormatWriter.scala:271)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.executeWrite(FileFormatWriter.scala:304)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.write(FileFormatWriter.scala:190)\n\tat org.apache.spark.sql.execution.datasources.InsertIntoHadoopFsRelationCommand.run(InsertIntoHadoopFsRelationCommand.scala:190)\n\tat org.apache.spark.sql.execution.command.DataWritingCommandExec.sideEffectResult$lzycompute(commands.scala:113)\n\tat org.apache.spark.sql.execution.command.DataWritingCommandExec.sideEffectResult(commands.scala:111)\n\tat org.apache.spark.sql.execution.command.DataWritingCommandExec.executeCollect(commands.scala:125)\n\tat org.apache.spark.sql.execution.QueryExecution$$anonfun$eagerlyExecuteCommands$1.$anonfun$applyOrElse$1(QueryExecution.scala:107)\n\tat org.apache.spark.sql.execution.SQLExecution$.$anonfun$withNewExecutionId$6(SQLExecution.scala:125)\n\tat org.apache.spark.sql.execution.SQLExecution$.withSQLConfPropagated(SQLExecution.scala:201)\n\tat org.apache.spark.sql.execution.SQLExecution$.$anonfun$withNewExecutionId$1(SQLExecution.scala:108)\n\tat org.apache.spark.sql.SparkSession.withActive(SparkSession.scala:900)\n\tat org.apache.spark.sql.execution.SQLExecution$.withNewExecutionId(SQLExecution.scala:66)\n\tat org.apache.spark.sql.execution.QueryExecution$$anonfun$eagerlyExecuteCommands$1.applyOrElse(QueryExecution.scala:107)\n\tat org.apache.spark.sql.execution.QueryExecution$$anonfun$eagerlyExecuteCommands$1.applyOrElse(QueryExecution.scala:98)\n\tat org.apache.spark.sql.catalyst.trees.TreeNode.$anonfun$transformDownWithPruning$1(TreeNode.scala:461)\n\tat org.apache.spark.sql.catalyst.trees.CurrentOrigin$.withOrigin(origin.scala:76)\n\tat org.apache.spark.sql.catalyst.trees.TreeNode.transformDownWithPruning(TreeNode.scala:461)\n\tat org.apache.spark.sql.catalyst.plans.logical.LogicalPlan.org$apache$spark$sql$catalyst$plans$logical$AnalysisHelper$$super$transformDownWithPruning(LogicalPlan.scala:32)\n\tat org.apache.spark.sql.catalyst.plans.logical.AnalysisHelper.transformDownWithPruning(AnalysisHelper.scala:267)\n\tat org.apache.spark.sql.catalyst.plans.logical.AnalysisHelper.transformDownWithPruning$(AnalysisHelper.scala:263)\n\tat org.apache.spark.sql.catalyst.plans.logical.LogicalPlan.transformDownWithPruning(LogicalPlan.scala:32)\n\tat org.apache.spark.sql.catalyst.plans.logical.LogicalPlan.transformDownWithPruning(LogicalPlan.scala:32)\n\tat org.apache.spark.sql.catalyst.trees.TreeNode.transformDown(TreeNode.scala:437)\n\tat org.apache.spark.sql.execution.QueryExecution.eagerlyExecuteCommands(QueryExecution.scala:98)\n\tat org.apache.spark.sql.execution.QueryExecution.commandExecuted$lzycompute(QueryExecution.scala:85)\n\tat org.apache.spark.sql.execution.QueryExecution.commandExecuted(QueryExecution.scala:83)\n\tat org.apache.spark.sql.execution.QueryExecution.assertCommandExecuted(QueryExecution.scala:142)\n\tat org.apache.spark.sql.DataFrameWriter.runCommand(DataFrameWriter.scala:859)\n\tat org.apache.spark.sql.DataFrameWriter.saveToV1Source(DataFrameWriter.scala:388)\n\tat org.apache.spark.sql.DataFrameWriter.saveInternal(DataFrameWriter.scala:361)\n\tat org.apache.spark.sql.DataFrameWriter.save(DataFrameWriter.scala:240)\n\tat org.apache.spark.sql.DataFrameWriter.parquet(DataFrameWriter.scala:792)\n\tat sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\n\tat sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)\n\tat sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\n\tat java.lang.reflect.Method.invoke(Method.java:498)\n\tat py4j.reflection.MethodInvoker.invoke(MethodInvoker.java:244)\n\tat py4j.reflection.ReflectionEngine.invoke(ReflectionEngine.java:374)\n\tat py4j.Gateway.invoke(Gateway.java:282)\n\tat py4j.commands.AbstractCommand.invokeMethod(AbstractCommand.java:132)\n\tat py4j.commands.CallCommand.execute(CallCommand.java:79)\n\tat py4j.ClientServerConnection.waitForCommands(ClientServerConnection.java:182)\n\tat py4j.ClientServerConnection.run(ClientServerConnection.java:106)\n\tat java.lang.Thread.run(Thread.java:750)\nCaused by: org.apache.spark.SparkException: [TASK_WRITE_FAILED] Task failed while writing rows to file:/data/dat535/prod/silver/_staging/local-20261104T181119Z-620f6795-5b8b9665/_work/sx.\n\tat org.apache.spark.sql.errors.QueryExecutionErrors$.taskFailedWhileWritingRowsError(QueryExecutionErrors.scala:774)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.executeTask(FileFormatWriter.scala:420)\n\tat org.apache.spark.sql.execution.datasources.WriteFilesExec.$anonfun$doExecuteWrite$1(WriteFiles.scala:100)\n\tat org.apache.spark.rdd.RDD.$anonfun$mapPartitionsInternal$2(RDD.scala:890)\n\tat org.apache.spark.rdd.RDD.$anonfun$mapPartitionsInternal$2$adapted(RDD.scala:890)\n\tat org.apache.spark.rdd.MapPartitionsRDD.compute(MapPartitionsRDD.scala:52)\n\tat org.apache.spark.rdd.RDD.computeOrReadCheckpoint(RDD.scala:364)\n\tat org.apache.spark.rdd.RDD.iterator(RDD.scala:328)\n\tat org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)\n\tat org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:161)\n\tat org.apache.spark.scheduler.Task.run(Task.scala:141)\n\tat org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)\n\tat org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)\n\tat org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)\n\tat org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:94)\n\tat org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)\n\tat java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1149)\n\tat java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)\n\t... 1 more\nCaused by: org.apache.spark.api.python.PythonException: Traceback (most recent call last):\n  File \"/opt/spark/python/lib/pyspark.zip/pyspark/worker.py\", line 1247, in main\n    process()\n  File \"/opt/spark/python/lib/pyspark.zip/pyspark/worker.py\", line 1239, in process\n    serializer.dump_stream(out_iter, outfile)\n  File \"/opt/spark/python/lib/pyspark.zip/pyspark/serializers.py\", line 274, in dump_stream\n    vs = list(itertools.islice(iterator, batch))\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/data/dat535/silver-week-validation/spark-scratch/spark-39fc9ed0-6af2-4a71-b5f0-cddafcc97552/userFiles-c9419b4a-6974-4895-9700-44b594d71218/silver_parse.py\", line 283, in decode_partition\n    yield from parser(source[\"payload\"], base)\n  File \"/data/dat535/silver-week-validation/spark-scratch/spark-39fc9ed0-6af2-4a71-b5f0-cddafcc97552/userFiles-c9419b4a-6974-4895-9700-44b594d71218/silver_parse.py\", line 192, in parse_sx\n    periods.append(dict(start_at=timestamp(text(period, \"StartTime\"), issues, \"validity_start\"),\n                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/data/dat535/silver-week-validation/spark-scratch/spark-39fc9ed0-6af2-4a71-b5f0-cddafcc97552/userFiles-c9419b4a-6974-4895-9700-44b594d71218/silver_parse.py\", line 41, in timestamp\n    return result.astimezone(timezone.utc)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOverflowError: date value out of range\n\n\tat org.apache.spark.api.python.BasePythonRunner$ReaderIterator.handlePythonException(PythonRunner.scala:572)\n\tat org.apache.spark.api.python.PythonRunner$$anon$3.read(PythonRunner.scala:784)\n\tat org.apache.spark.api.python.PythonRunner$$anon$3.read(PythonRunner.scala:766)\n\tat org.apache.spark.api.python.BasePythonRunner$ReaderIterator.hasNext(PythonRunner.scala:525)\n\tat org.apache.spark.InterruptibleIterator.hasNext(InterruptibleIterator.scala:37)\n\tat scala.collection.Iterator$$anon$11.hasNext(Iterator.scala:491)\n\tat scala.collection.Iterator$$anon$10.hasNext(Iterator.scala:460)\n\tat scala.collection.Iterator$$anon$10.hasNext(Iterator.scala:460)\n\tat org.apache.spark.sql.catalyst.expressions.GeneratedClass$GeneratedIteratorForCodegenStage1.processNext(Unknown Source)\n\tat org.apache.spark.sql.execution.BufferedRowIterator.hasNext(BufferedRowIterator.java:43)\n\tat org.apache.spark.sql.execution.WholeStageCodegenEvaluatorFactory$WholeStageCodegenPartitionEvaluator$$anon$1.hasNext(WholeStageCodegenEvaluatorFactory.scala:43)\n\tat org.apache.spark.sql.execution.datasources.FileFormatDataWriter.writeWithIterator(FileFormatDataWriter.scala:91)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.$anonfun$executeTask$1(FileFormatWriter.scala:403)\n\tat org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1397)\n\tat org.apache.spark.sql.execution.datasources.FileFormatWriter$.executeTask(FileFormatWriter.scala:410)\n\t... 17 more\n",
+  "finished_at": "2026-11-05T00:41:42.215Z",
+  "elapsed_s": 23422.592
+}

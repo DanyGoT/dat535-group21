@@ -1,0 +1,20 @@
+{
+  "operating_date": "2026-10-29",
+  "silver_run_id": "local-20261105T005115Z-2f3d11a3",
+  "spark_stage": 176,
+  "submitted_at": "2026-11-05T01:01:13.939Z",
+  "finished_at": "2026-11-05T03:37:42.555Z",
+  "elapsed_s": 9388.616,
+  "successful_tasks": 202,
+  "failed_tasks": 0,
+  "output_version_records": 293946860,
+  "output_bytes": 3438599016,
+  "retained_call_versions": 280853976,
+  "retained_journey_versions": 8647458,
+  "baseline_retained_counts_equal": true,
+  "notes": [
+    "An explicit different day is scoped before call timestamp conversion and Spark row creation; unresolved identities/dates and source controls remain.",
+    "The retry used a three-core CPU quota throughout. The baseline used two cores initially, then three, so the phase durations are not an isolated filter-only benchmark.",
+    "Full Silver and Gold both completed and passed their readiness gates."
+  ]
+}

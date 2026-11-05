@@ -1,0 +1,32 @@
+{
+  "operating_date": "2026-10-29",
+  "silver_run_id": "local-20261104T181119Z-620f6795",
+  "source_utc_dates": ["2026-10-28", "2026-10-29", "2026-10-30"],
+  "phase": "ET decode and typed Parquet staging; not a completed Silver day",
+  "spark_stage": 155,
+  "submitted_at": "2026-11-04T18:16:57.902Z",
+  "finished_at": "2026-11-05T00:16:20.153Z",
+  "elapsed_s": 21562.251,
+  "successful_tasks": 202,
+  "failed_tasks": 0,
+  "output_version_records": 876879458,
+  "output_bytes": 10308622982,
+  "sum_executor_wall_ms": 42971655,
+  "sum_jvm_thread_cpu_ns": 12287278612396,
+  "memory_bytes_spilled": 0,
+  "disk_bytes_spilled": 0,
+  "resource_check_at": "2026-11-05T00:17:30Z",
+  "whole_service_memory_peak_bytes": 4299554816,
+  "whole_service_memory_limit_bytes": 5368709120,
+  "whole_service_cpu_usage_ns_at_check": 52830903811000,
+  "global_available_ram_mib_at_check": 4053,
+  "whole_service_swap_bytes_at_followup": 0,
+  "cgroup_oom_events_at_followup": 0,
+  "cgroup_oom_kills_at_followup": 0,
+  "notes": [
+    "The CPU quota changed from two to three cores at 21:08 UTC; two local Spark workers and a 2 GiB driver remained unchanged.",
+    "Output rows are update versions across the three source days, not unique stop calls or target-day observations.",
+    "Executor wall time sums concurrent task durations. JVM thread CPU excludes Python worker CPU; the cgroup CPU reading includes the entire service and preceding reference work.",
+    "No spill was recorded in this decoding phase. Later joins, windows and predictions remain unmeasured here."
+  ]
+}

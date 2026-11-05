@@ -3,7 +3,8 @@
 Silver turns Bronze (every message, as received) into trusted tables with a stated grain,
 keys and quality flags, shared by every Gold product ([pipeline/gold.md](gold.md)). The Entur
 tables are implemented in [`pipeline/silver.py`](../../pipeline/silver.py); DATEX Silver and
-Gold remain future work. A compact overview of the decisions, code and evidence is in the
+departure-risk Gold remain future work. A manual [line-scorecard Gold example](gold-example.md)
+has passed a complete-day VM run. A compact overview of the decisions, code and evidence is in the
 [implementation log](silver-design-log.md). Keys and id quirks: [entur/identifiers.md](../entur/identifiers.md).
 
 ## Rules in brief
@@ -142,6 +143,14 @@ completed Bronze partitions for `D-1, D, D+1`, then filters by the explicit oper
 (after dated-ID resolution). This conservative window covers pre-midnight reports, overnight
 services and following-day replay. SX and positions read UTC `D` only; their grains are
 observation-based. Updates received beyond the ET window are a remaining backfill limit.
+
+The decoder skips usable identities with an explicit different operating day before
+converting every call timestamp and creating Spark rows. An explicit day takes precedence
+over an alias date, so those versions cannot enter the final target-day facts. Unknown
+dates, missing IDs/orders, out-of-range integer keys, controls and message quarantine stay
+available for the usual resolution and quality checks. The final date filter after alias
+resolution remains authoritative. The run record's ET `decode_scope` identifies these scoped
+staging counts; `retained_versions` still counts the same resolved target-day records.
 
 ```sh
 # Local example; Java 8/17 and the archived data must already be available.

@@ -39,7 +39,7 @@ def timestamp(value, issues, field):
         if result.tzinfo is None:
             raise ValueError("offset missing")
         return result.astimezone(timezone.utc)
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, OverflowError):
         issues.append(f"invalid_{field}")
         return None
 
@@ -102,7 +102,7 @@ def reject(base, issue, entity=None):
                 entity_json=json.dumps(entity, default=str, sort_keys=True) if entity else None)
 
 
-def parse_et(payload, base):
+def parse_et(payload, base, target_day=None):
     """One ET journey version, then its call versions. Never manufacture actuals."""
     root = strip_ns(ET.fromstring(payload))
     journeys = list(root.iter("EstimatedVehicleJourney"))
@@ -129,11 +129,24 @@ def parse_et(payload, base):
                         journey_cancelled=boolean(text(journey, "Cancellation"), issues, "journey_cancelled"),
                         extra_journey=boolean(text(journey, "ExtraJourney"), issues, "extra_journey"),
                         monitored=boolean(text(journey, "Monitored"), issues, "monitored"))
-        yield dict(base_row, kind="journey")
+        # An explicit different day cannot become the target after alias
+        # resolution (normalize_journeys coalesces the explicit day first).
+        # Keep unknown dates/IDs and unusable call orders for quarantine. This
+        # applies the existing scope before expensive call-time conversion and
+        # Spark row verification, while preserving original entity indices.
+        outside = target_day is not None and op is not None and op != target_day and jid is not None
+        if not outside or index >= 2**31:
+            yield dict(base_row, kind="journey")
         for call_index, call in enumerate(list(journey.iter("RecordedCall")) + list(journey.iter("EstimatedCall"))):
             ci = list(issues)
-            row = dict(base_row, kind="call", dq_issue=ci, entity_index=index * 100000 + call_index,
-                       call_order=number(text(call, "Order"), ci, "call_order", integer=True),
+            order = number(text(call, "Order"), ci, "call_order", integer=True)
+            entity_index = index * 100000 + call_index
+            # Values outside Spark's integer contract must still reach its
+            # verifier, including when they belong to a different day.
+            if outside and order is not None and -(2**31) <= order < 2**31 and entity_index < 2**31:
+                continue
+            row = dict(base_row, kind="call", dq_issue=ci, entity_index=entity_index,
+                       call_order=order,
                        quay_id=text(call, "StopPointRef"), call_kind=call.tag,
                        call_cancelled=boolean(text(call, "Cancellation"), ci, "call_cancelled"),
                        extra_call=boolean(text(call, "ExtraCall"), ci, "extra_call"),
@@ -272,7 +285,7 @@ def parse_vehicles(payload, base):
         yield row
 
 
-def decode_partition(rows, feed):
+def decode_partition(rows, feed, target_day=None):
     parser = {"et": parse_et, "sx": parse_sx, "vehicles": parse_vehicles}[feed]
     for source in rows:
         base = provenance(source)
@@ -280,7 +293,10 @@ def decode_partition(rows, feed):
             yield reject(base, "bronze_" + source["_bronze_status"])
             continue
         try:
-            yield from parser(source["payload"], base)
+            if feed == "et":
+                yield from parser(source["payload"], base, target_day=target_day)
+            else:
+                yield from parser(source["payload"], base)
         except (ET.ParseError, json.JSONDecodeError):
             yield reject(base, "malformed_payload")
 
