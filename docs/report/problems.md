@@ -64,6 +64,49 @@ Entry template:
 - **Trade-off:** none. Rerun old days to reclassify their rows.
 - **Lesson:** "corrupt" rows deserve a look even when there are only two: they were the
   biggest messages, likely full snapshots after a re-subscribe.
+## 2026-11-05 — A minimum-date SX timestamp overflowed during UTC conversion
+
+- **Area:** Silver parser and full-feed validation.
+- **Symptom:** The first complete-input 2026-10-29 pilot failed after 6 h 30 min while
+  decoding SX, after finishing the large ET input. No Silver day or Gold output was published.
+- **Evidence:** [Failed run record](evidence/silver-2026-10-29-baseline-failed.json),
+  `local-20261104T181119Z-620f6795`. Two of 4,701 closed SX envelopes contain
+  `StartTime=0001-01-01T00:00:00+00:53:28`. Python parses that offset but conversion to
+  UTC would precede year 1 and raises `OverflowError`.
+- **Cause:** `timestamp()` handled invalid syntax and missing offsets, but omitted this
+  representable-input / unrepresentable-UTC boundary case.
+- **Fix:** Handle `OverflowError` with the existing invalid-timestamp policy: preserve
+  the source record, set that typed value to null, and add `invalid_validity_start`.
+  The original XML remains unchanged in landing and traceable through Bronze; its content hash remains intact.
+  Decode the small SX/vehicle feeds before nationwide ET to expose decoder exceptions earlier.
+- **Validation:** The regression includes the actual offset and both UTC range boundaries.
+  A read-only pass over all 4,701 real SX envelopes produced 5,947 situation versions and
+  1,439 controls; Spark's row verifier/converter accepted every row, with exactly two
+  `invalid_validity_start` flags. Full retry validation is tracked in the
+  [week evidence](evidence/silver-week-2026-10-26-to-2026-11-01.md).
+- **Trade-off / lesson:** A timestamp with a legal ISO offset can still be outside the
+  target type after standardisation. Exercise the full small feeds before a long ET run.
+
+## 2026-11-04 — Gold must discover dates from Silver partition paths
+
+- **Area:** Gold, Silver consumer contract.
+- **Symptom:** The first VM scorecard run failed with `UNRESOLVED_COLUMN` for
+  `operating_date` while reading the saved national line reference table.
+- **Evidence:** The 2026-10-26 Silver sample stores that reference date in
+  `line/operating_date=2026-10-26/`, without repeating it in the Parquet columns. The first
+  fixture tests passed because their files did repeat the date.
+- **Cause:** Gold read a single partition directory without declaring the table root, so
+  Spark did not discover the partition key. Fact files and reference files need not have
+  the same physical representation of a partition column.
+- **Fix:** Declare `basePath` for each Silver table read; Spark recovers the partition date.
+  The regression fixture now omits the physical date column. No Silver files were changed.
+- **Validation:** All 5 Gold tests passed; the VM run reconciled 76,186 journeys and
+  1,855,992 calls into 3,953 line/day rows. See the
+  [example run record](evidence/gold-2026-10-26-sample.json).
+- **Trade-off / lesson:** A partition key is part of the dataset contract, even when it is
+  absent from individual files. Test consumers against the physical files as well as
+  convenient in-memory fixtures.
+
 ## 2026-10-28 — Missing and malformed real-time data crossed Silver contract boundaries
 
 - **Area:** Silver, readiness and regression coverage.

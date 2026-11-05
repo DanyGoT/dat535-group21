@@ -1,0 +1,37 @@
+{
+  "target_day": "2026-10-29",
+  "messages": 144,
+  "surviving_records": {
+    "journey": 68,
+    "call": 2175
+  },
+  "source_journey_version_dates": {
+    "2026-10-27": 2,
+    "2026-10-28": 145,
+    "None": 4,
+    "2026-10-29": 64,
+    "2026-10-30": 79
+  },
+  "codespaces": {
+    "RUT": 71,
+    "NOR": 76,
+    "KOL": 33,
+    "NBU": 2,
+    "MOR": 7,
+    "SKY": 19,
+    "BRA": 22,
+    "AKT": 16,
+    "OST": 8,
+    "VYG": 4,
+    "ATB": 1,
+    "FIN": 3,
+    "VOT": 25,
+    "TRO": 7
+  },
+  "timings": {
+    "unscoped_then_filter_cpu_s": 0.23313446100000013,
+    "scoped_decode_cpu_s": 0.17063318199999997
+  },
+  "equal": true,
+  "method": "First two ET data messages from each of 24 closed hours on three UTC days; compare every surviving field and entity order, including quarantine candidates. No Spark context."
+}

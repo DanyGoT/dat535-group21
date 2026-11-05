@@ -2,8 +2,9 @@
 
 Gold serves a named consumer; Silver stays general so several Gold products can share it
 ([pipeline/methodology.md](methodology.md)). This page lists the primary use case, independent ones that reuse the
-same Silver, what each needs, and which DATEX feeds earn their keep. Nothing here is built
-yet (2026-10-24).
+same Silver, what each needs, and which DATEX feeds earn their keep. A manual
+[daily line scorecard example](gold-example.md) implements a first slice of #2 over Entur
+Silver. The prediction model, DATEX products and other use cases remain future work.
 
 ## At a glance
 

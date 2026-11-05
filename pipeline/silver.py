@@ -462,11 +462,16 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
         assert_unique(plan_call, CALL_KEY, "plan calls")
         quarantine = []
         decoded = {}
-        for feed, source in inputs.items():
+        # Check the small feeds before spending hours decoding nationwide ET.
+        for feed in ("sx", "vehicles", "et"):
+            source = inputs[feed]
             work = stage / "_work" / feed
-            parsed = spark.createDataFrame(source.rdd.mapPartitions(lambda it, feed=feed: decode_partition(it, feed)), schema(feed))
+            parsed = spark.createDataFrame(source.rdd.mapPartitions(
+                lambda it, feed=feed: decode_partition(it, feed, target_day=day if feed == "et" else None)), schema(feed))
             parsed.write.parquet(str(work))
             parsed = spark.read.parquet(str(work))
+            if feed == "et":
+                record["inputs"][feed]["decode_scope"] = "target day, unresolved dates and unusable identities; controls/quarantine retained"
             record["inputs"][feed]["decoded"] = {r["kind"]: r["count"] for r in parsed.groupBy("kind").count().collect()}
             bad = parsed.filter(F.col("kind") == "quarantine")
             quarantine.append(quarantine_rows(bad, feed))

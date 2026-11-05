@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f6f1">
+    <meta name="description" content="Explore Norwegian public transport departure reliability, one day and line at a time.">
+    <title>Line reliability · DAT535</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="scorecard-data.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#line-detail">Skip to line results</a>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="index.html" aria-label="DAT535 line reliability home">
+          <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="10" fill="currentColor"/><path d="M11 10h14M11 18h14M11 26h14M14 10v16" stroke="#fff" stroke-width="2"/><circle cx="14" cy="10" r="3" fill="#fff"/><circle cx="14" cy="18" r="3" fill="#fff"/><circle cx="14" cy="26" r="3" fill="#fff"/></svg>
+          <span>DAT535<span class="brand-divider">/</span><span class="brand-description">Transport reliability</span></span>
+        </a>
+        <span class="example-label"><span class="status-dot"></span>Gold example</span>
+      </header>
+
+      <main>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">FROM JOURNEYS TO A CLEARER PICTURE</p>
+            <h1>How did the lines run?</h1>
+            <p class="page-description" id="page-description">Choose a line to explore its observed departure delays.</p>
+          </div>
+          <div class="heading-actions">
+            <div class="day-field" id="day-field" hidden>
+              <label for="day-select">Operating day</label>
+              <select id="day-select" aria-describedby="day-help"></select>
+              <span class="sr-only" id="day-help">Each day has its own results. Choose a day to update the line results below.</span>
+            </div>
+            <time id="operating-date" class="date-label">Sample date</time>
+            <a class="download-link" href="scorecard.csv" download>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m-3-3 3 3 3-3M4 13v3h12v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span id="download-label">Download CSV</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="sample-notice" id="sample-notice">
+          <span class="sample-tag" id="sample-tag">Small sample</span>
+          <p id="sample-description">Loading the observed departure results…</p>
+        </div>
+
+        <div class="load-error" id="load-error" role="alert" hidden>
+          <h2>The sample results couldn’t be loaded</h2>
+          <p>Refresh the page or reopen the example.</p>
+        </div>
+        <noscript><p class="load-error">Enable JavaScript to choose a line and view its results. You can also download the CSV above.</p></noscript>
+
+        <div class="workspace" id="workspace" hidden>
+          <aside class="line-picker" aria-labelledby="picker-title">
+            <div class="picker-heading"><h2 id="picker-title">Choose a line</h2><span class="count-badge" id="line-count">—</span></div>
+            <label class="sr-only" for="line-search">Search by line number, destination or operator</label>
+            <div class="search-field">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m12.5 12.5 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <input id="line-search" type="search" placeholder="Line, place or operator" autocomplete="off" aria-controls="line-list" aria-describedby="line-list-note">
+            </div>
+            <p class="picker-caption" id="picker-caption">Lines with reports in this sample</p>
+            <nav aria-label="Observed lines"><ul class="line-list" id="line-list"></ul></nav>
+            <p class="list-note" id="line-list-note" role="status" aria-live="polite"></p>
+            <div class="search-empty" id="search-empty" hidden>
+              <p>No matching lines.</p>
+              <button class="text-button" id="clear-search" type="button">Clear search</button>
+            </div>
+            <p class="picker-footnote">One journey can produce a departure observation at each stop.</p>
+          </aside>
+
+          <section class="results" id="line-detail" tabindex="-1" aria-labelledby="selected-name">
+            <p class="sr-only" id="selection-announcement" aria-live="polite" aria-atomic="true"></p>
+            <div class="detail-empty" id="detail-empty" hidden><p>Try another line number, destination or operator.</p></div>
+            <div id="selected-results">
+              <div class="line-heading">
+                <span class="route-badge" id="selected-code">—</span>
+                <div class="route-heading-text">
+                  <p class="eyebrow">SELECTED LINE</p>
+                  <h2 id="selected-name">Choose a line</h2>
+                  <p class="operator-label" id="selected-operator">—</p>
+                </div>
+              </div>
+
+              <div class="observation-strip">
+                <span><strong id="journey-count">—</strong> <span id="journey-label">journeys observed</span></span>
+                <svg viewBox="0 0 28 14" aria-hidden="true"><path d="M1 7h24m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span><strong id="departure-count">—</strong> <span id="departure-label">stop departures timed</span></span>
+              </div>
+              <p class="coverage-note" id="coverage-note">Reporting coverage is unavailable. Missing reports remain unknown.</p>
+
+              <div class="metric-grid">
+                <article class="metric-card">
+                  <h3>Typical delay</h3>
+                  <p class="metric-value" id="median-delay">—</p>
+                  <p class="metric-explanation">The median: half the timed departures had this delay or less.</p>
+                </article>
+                <article class="metric-card">
+                  <h3>Delay at the 90th percentile</h3>
+                  <p class="metric-value" id="p90-delay">—</p>
+                  <p class="metric-explanation">About 9 in 10 timed departures had this delay or less.</p>
+                </article>
+                <article class="metric-card metric-card-accent">
+                  <h3>At least 3 minutes late</h3>
+                  <p class="metric-value" id="late-share">—</p>
+                  <p class="metric-explanation" id="late-count">No timed departures in this sample.</p>
+                </article>
+              </div>
+
+              <section class="distribution-card" aria-labelledby="distribution-title">
+                <div class="section-heading"><h3 id="distribution-title">At the stops along the way</h3><span class="small-label">Measured departures</span></div>
+                <div id="distribution-content">
+                  <div class="distribution-bar" id="distribution-bar" role="img" aria-label="Departure delay distribution">
+                    <span class="distribution-segment segment-early" id="segment-early"></span>
+                    <span class="distribution-segment segment-within" id="segment-within"></span>
+                    <span class="distribution-segment segment-late" id="segment-late"></span>
+                  </div>
+                  <dl class="distribution-legend">
+                    <div><dt><span class="legend-dot early"></span>Early</dt><dd id="count-early">—</dd></div>
+                    <div><dt><span class="legend-dot within"></span>0 to &lt;3 min late</dt><dd id="count-within">—</dd></div>
+                    <div><dt><span class="legend-dot late"></span>3+ min late</dt><dd id="count-late">—</dd></div>
+                  </dl>
+                </div>
+                <p class="measurement-empty" id="measurement-empty" hidden>This line has reports, but no usable actual departure times in this sample.</p>
+              </section>
+
+              <p class="reading-note"><span class="info-mark" aria-hidden="true">i</span><span id="reading-note">These observations come from stops along the sampled journeys.</span></p>
+            </div>
+          </section>
+        </div>
+
+        <details class="comparison" id="comparison" hidden>
+          <summary><span>Compare lines for this day</span><span class="comparison-hint">See the same measures side by side</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+          <div class="comparison-body">
+            <p class="comparison-limit-note" id="comparison-limit-note"></p>
+            <div class="table-scroll"><table aria-describedby="comparison-limit-note">
+              <caption class="sr-only">Delay measurements for matching lines on the selected day. Choose a line number to view its details.</caption>
+              <thead><tr><th scope="col">Line</th><th scope="col">Journeys</th><th scope="col">Timed stop departures</th><th scope="col">Median delay</th><th scope="col">3+ min late</th></tr></thead>
+              <tbody id="comparison-rows"></tbody>
+            </table></div>
+            <p class="comparison-note" id="comparison-note">Use the observation counts when comparing lines. A small sample cannot describe a line’s usual reliability.</p>
+          </div>
+        </details>
+      </main>
+
+      <footer class="page-footer"><span>Data: Entur (NLOD)</span><span>Observed departures · Daily line scorecard</span></footer>
+    </div>
+  </body>
+</html>
