@@ -1,0 +1,40 @@
+{
+  "python": "3.11.15",
+  "spark": "3.5.0",
+  "source_messages": 8,
+  "decoded_versions": 240,
+  "repeats": 200,
+  "cases": [
+    {
+      "case": "decode_only",
+      "rows": 48000,
+      "cpu_s": 0.9597607579999998,
+      "rows_per_cpu_s": 50012.46362689899
+    },
+    {
+      "case": "decode_and_convert",
+      "rows": 48000,
+      "cpu_s": 1.6951612269999998,
+      "rows_per_cpu_s": 28315.890686662104
+    },
+    {
+      "case": "decode_verify_convert",
+      "rows": 48000,
+      "cpu_s": 2.4648027399999997,
+      "rows_per_cpu_s": 19474.175040879745
+    },
+    {
+      "case": "verify_predecoded",
+      "rows": 48000,
+      "cpu_s": 0.4491176889999995,
+      "rows_per_cpu_s": 106876.21791712607
+    },
+    {
+      "case": "convert_predecoded",
+      "rows": 48000,
+      "cpu_s": 0.6581120570000003,
+      "rows_per_cpu_s": 72935.90732679736
+    }
+  ],
+  "note": "Small real-data CPU microprofile; not a full-day performance benchmark"
+}

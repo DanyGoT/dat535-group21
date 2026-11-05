@@ -107,6 +107,34 @@ class ParseTest(unittest.TestCase):
         self.assertIsNone(row["expected_departure_at"])
         self.assertIn("invalid_expected_departure_at", row["dq_issue"])
 
+    def test_utc_conversion_overflow_is_flagged(self):
+        for value in ("0001-01-01T00:00:00+00:53:28", "0001-01-01T00:00:00+01:00",
+                      "9999-12-31T23:59:59-01:00"):
+            with self.subTest(value=value):
+                issues = []
+                self.assertIsNone(P.timestamp(value, issues, "validity_start"))
+                self.assertEqual(issues, ["invalid_validity_start"])
+                xml = f"<Siri><PtSituationElement><ParticipantRef>T</ParticipantRef><SituationNumber>1</SituationNumber><ValidityPeriod><StartTime>{value}</StartTime><EndTime>2026-10-27T12:00:00Z</EndTime></ValidityPeriod></PtSituationElement></Siri>"
+                row = next(P.parse_sx(xml, base()))
+                self.assertIsNone(row["validity_periods"][0]["start_at"])
+                self.assertEqual(row["validity_periods"][0]["end_at"], instant("2026-10-27T12:00:00Z"))
+                self.assertIn("invalid_validity_start", row["dq_issue"])
+
+    def test_early_scope_preserves_target_unknown_dates_and_quarantine_candidates(self):
+        outside = et(call() + call(order=2) + call().replace("<Order>1</Order>", "")) \
+            .replace(f"<DataFrameRef>{DAY}</DataFrameRef>", "<DataFrameRef>2026-10-25</DataFrameRef>")
+        for xml in (et(call(actual="2026-10-26T08:11:00Z")), outside,
+                    et(call(), framed=False, jid="T:DatedServiceJourney:1"),
+                    outside.replace(f"<DatedVehicleJourneyRef>{JID}</DatedVehicleJourneyRef>", ""),
+                    outside.replace("<Order>2</Order>", "<Order>2147483648</Order>"),
+                    "<Siri><HeartbeatNotification/></Siri>", "<Unknown/>"):
+            with self.subTest(xml=xml):
+                unscoped = list(P.parse_et(xml, base()))
+                expected = [r for r in unscoped if r["kind"] not in {"journey", "call"}
+                            or r["operating_date"] in (None, DAY) or r["journey_id"] is None
+                            or (r["kind"] == "call" and (r["call_order"] is None or not -(2**31) <= r["call_order"] < 2**31))]
+                self.assertEqual(list(P.parse_et(xml, base(), target_day=DAY)), expected)
+
     def test_cancellation_without_calls_is_a_journey(self):
         rows = list(P.parse_et(et(extra="<Cancellation>true</Cancellation>"), base()))
         self.assertEqual(len(rows), 1)

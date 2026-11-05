@@ -17,8 +17,8 @@ Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 | NeTEx and NSR daily archive | first day archived 2026-10-26; daily timer starts with the next deploy |
 | Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
 | Bronze (SIRI, vehicles, DATEX) | SIRI daily at 03:00 UTC; vehicles and DATEX added |
-| Silver | Entur implemented and validated locally (2026-10-28), deployment pending; [contracts](docs/pipeline/silver.md) · [design/code log](docs/pipeline/silver-design-log.md) |
-| Gold | use cases in [`docs/pipeline/gold.md`](docs/pipeline/gold.md), not built |
+| Silver | Entur implemented; complete 2026-10-29 validated on the VM, regular deployment pending; [contracts](docs/pipeline/silver.md) · [run evidence](docs/report/evidence/silver-week-2026-10-26-to-2026-11-01.md) |
+| Gold | full-day [line scorecard example](docs/pipeline/gold-example.md) with a [simple frontend](examples/gold-scorecard/README.md); other [use cases](docs/pipeline/gold.md) remain future work |
 
 ## Docs
 
@@ -39,7 +39,7 @@ Start with [`docs/system/architecture.md`](docs/system/architecture.md).
 | Path | Contents |
 | ---- | -------- |
 | `collector/` | always-on collectors, monitor, exporter, systemd units, Grafana dashboard |
-| `pipeline/` | Bronze jobs, Entur Silver (`silver.py`, `silver_parse.py`, `silver_reference.py`), offline tests |
+| `pipeline/` | Bronze jobs, Entur Silver (`silver.py`, `silver_parse.py`, `silver_reference.py`), manual Gold scorecard (`gold_scorecard.py`), offline tests |
 | `.github/workflows/` | `dat535-dev.yml` (tests + partial Bronze/Silver), `dat535-prod.yml` (approved deploy; daily Bronze + Entur Silver) |
 | `notebooks/` | exploration (`peek.ipynb`) |
 | `entur-ai-docs/` | Entur's generated BigQuery catalog (reference, don't edit) |
