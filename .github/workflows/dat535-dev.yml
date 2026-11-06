@@ -52,6 +52,7 @@ jobs:
 
       - name: Run Bronze DATEX (yesterday 08:00-09:00 UTC)
         # Its own step, run even if SIRI Bronze failed: one source must not hide the other.
+        id: datex_bronze
         if: ${{ !cancelled() && steps.dirs.outcome == 'success' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
@@ -61,6 +62,15 @@ jobs:
           mkdir -p "$DAT535_OUTPUT_DIR"
           # One Spark job at a time on the 8 GB VM (dev and prod share it): wait, never overlap.
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze_datex.py --hours 08
+
+      - name: Run DATEX Silver (partial dev sample)
+        if: ${{ !cancelled() && steps.datex_bronze.outcome == 'success' }}
+        env:
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+        run: |
+          source ~/spark-env/bin/activate
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver_datex.py --date "$(date -u -d yesterday +%F)" --allow-partial
 
       - name: Run Entur Silver (partial dev sample)
         if: ${{ !cancelled() && steps.entur_bronze.outcome == 'success' }}
