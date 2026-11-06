@@ -84,6 +84,20 @@ class ScanDayTest(LandingCase):
         self.assertEqual((files, missing, open_hours), ([gz], ["06", "07"], ["07"]))
 
 
+class HolesTest(LandingCase):
+    def test_only_earlier_days_without_a_finished_partition(self):
+        yesterday = date(2026, 11, 5)
+        for dataset, day in (("siri-et", "2026-11-03"), ("siri-et", "2026-11-02"), ("vehicles", "2026-11-04"),
+                             ("vehicles", "2026-11-03"), ("vehicles", "2026-11-02")):
+            done = self.out / "bronze" / dataset / f"date={day}"
+            done.mkdir(parents=True)
+            (done / "_SUCCESS").touch()
+        # A failed run leaves a directory without the marker (2026-10-28, datex-situation).
+        (self.out / "bronze" / "siri-et" / "date=2026-11-04").mkdir()
+        found = bronze.holes(self.out, {"et": "siri-et", "vehicles": "vehicles"}, yesterday)
+        self.assertEqual(found, {date(2026, 11, 4): ["et"]})
+
+
 class ParseHoursTest(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(bronze.parse_hours("9, 08,9"), ["08", "09"])

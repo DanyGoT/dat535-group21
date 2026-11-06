@@ -39,8 +39,8 @@ from datetime import date as Date, timedelta
 from importlib.util import find_spec
 from pathlib import Path
 
-from bronze import (HOURS, MAX_STRING_LEN, create_spark, iso, parse_hours, run_id, scan_day, utcnow,
-                    write_run_record)
+from bronze import (CATCH_UP_DAYS, HOURS, MAX_STRING_LEN, create_spark, holes, iso, parse_hours, run_id, scan_day,
+                    utcnow, write_run_record)
 
 log = logging.getLogger("bronze_datex")
 
@@ -184,8 +184,7 @@ def main(argv=None):
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--date", type=Date.fromisoformat,
-                   default=(utcnow() - timedelta(days=1)).date(),
-                   help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
+                   help=f"UTC day to ingest, YYYY-MM-DD (default: yesterday, and any hole in the {CATCH_UP_DAYS} days before)")
     p.add_argument("--feeds", default=",".join(FEEDS),
                    help=f"comma-separated feeds (default: {','.join(FEEDS)})")
     p.add_argument("--hours", type=parse_hours, default=HOURS,
@@ -204,7 +203,12 @@ def main(argv=None):
     if not landing.is_dir():
         log.error("landing directory %s does not exist", landing)
         return 1
-    run(landing, output_dir, args.date, feeds, hours=args.hours)
+    yesterday = (utcnow() - timedelta(days=1)).date()
+    run(landing, output_dir, args.date or yesterday, feeds, hours=args.hours)
+    if args.date is None and args.hours == HOURS:
+        for day, missing in holes(output_dir, {f: f"{PREFIX}{f}" for f in feeds}, yesterday).items():
+            log.warning("%s has no DATEX Bronze for %s: catching up", day, missing)
+            run(landing, output_dir, day, missing)
     return 0
 
 

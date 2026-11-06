@@ -50,6 +50,7 @@ OPEN = re.compile(r"^hour=(\d{2})\.jsonl\.part$")
 # lines corrupt. Real payloads are longer: ET pushes of 21.6M and 22.8M characters on
 # 2026-10-22, every DATEX situation snapshot (~28.6M). The reader option lifts the cap.
 MAX_STRING_LEN = 2**31 - 1
+CATCH_UP_DAYS = 3
 
 
 def utcnow():
@@ -195,6 +196,20 @@ def write_run_record(out_root, day, rid, record, name=None):
     return final
 
 
+def holes(output_dir, datasets, yesterday, days=CATCH_UP_DAYS):
+    """{day: [feeds]} without a finished partition in the days before yesterday: what a scheduled
+    run does as well. A run that fails or times out on the Spark lock (2026-11-05) must not lose
+    its day until someone notices. A feed with no landing files that day is skipped by run()."""
+    found = {}
+    for n in range(days, 0, -1):
+        day = yesterday - timedelta(days=n)
+        missing = [feed for feed, dataset in datasets.items()
+                   if not (Path(output_dir) / "bronze" / dataset / f"date={day}" / "_SUCCESS").exists()]
+        if missing:
+            found[day] = missing
+    return found
+
+
 def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
     """Bronze for one UTC day (or some of its hours). Returns the run record (also written
     under _runs/)."""
@@ -232,8 +247,7 @@ def main(argv=None):
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--date", type=Date.fromisoformat,
-                   default=(utcnow() - timedelta(days=1)).date(),
-                   help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
+                   help=f"UTC day to ingest, YYYY-MM-DD (default: yesterday, and any hole in the {CATCH_UP_DAYS} days before)")
     p.add_argument("--feeds", default=",".join(FEEDS),
                    help="comma-separated feeds (default: et,sx,vehicles)")
     p.add_argument("--hours", type=parse_hours, default=HOURS,
@@ -252,7 +266,12 @@ def main(argv=None):
     if not landing.is_dir():
         log.error("landing directory %s does not exist", landing)
         return 1
-    run(landing, output_dir, args.date, feeds, hours=args.hours)
+    yesterday = (utcnow() - timedelta(days=1)).date()
+    run(landing, output_dir, args.date or yesterday, feeds, hours=args.hours)
+    if args.date is None and args.hours == HOURS:
+        for day, missing in holes(output_dir, {f: DATASETS[f] for f in feeds}, yesterday).items():
+            log.warning("%s has no Bronze for %s: catching up", day, missing)
+            run(landing, output_dir, day, missing)
     return 0
 
 
