@@ -85,6 +85,7 @@ jobs:
 
       - name: Run Bronze DATEX
         # Its own step, run even if SIRI Bronze failed: one source must not hide the other.
+        id: datex_bronze
         if: ${{ !cancelled() && steps.dirs.outcome == 'success' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
@@ -95,6 +96,27 @@ jobs:
           mkdir -p "$DAT535_OUTPUT_DIR"
           # One Spark job at a time on the 8 GB VM (dev and prod share it): wait, never overlap.
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze_datex.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
+
+      - name: Run DATEX Silver
+        # A UTC observation day: yesterday, or silver_date on a manual run. Independent of Entur.
+        if: ${{ !cancelled() && steps.datex_bronze.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == '') }}
+        env:
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+          SILVER_DATE: ${{ github.event.inputs.silver_date }}
+        run: |
+          source ~/spark-env/bin/activate
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver_datex.py ${SILVER_DATE:+--date "$SILVER_DATE"}
+
+      - name: Decode yesterday's Bronze
+        # The slow part of Entur Silver, once per UTC day and under its own lock hold.
+        if: ${{ !cancelled() && steps.entur_bronze.outcome == 'success' && github.event.inputs.bronze_date == '' }}
+        env:
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+        run: |
+          source ~/spark-env/bin/activate
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py --date "$(date -u -d yesterday +%F)" --decode-only
 
       - name: Run Entur Silver
         # ET spans adjacent UTC days. Today's Bronze completes the following day
@@ -136,7 +158,7 @@ jobs:
           echo "## Pipeline run" >> "$GITHUB_STEP_SUMMARY"
           # This attempt's records: <run id>.json (SIRI) and <run id>.datex.json. `|| true`: the
           # shell runs with -e, and no record at all must still reach the fallback below.
-          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json "$OUT"/silver/_runs/operating_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json 2>/dev/null || true)
+          records=$(ls "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json "$OUT"/silver/_runs/operating_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json "$OUT"/silver/_runs/datex/observation_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json 2>/dev/null || true)
           if [ -n "$records" ]; then
             for r in $records; do
               echo "### $(basename "$r")" >> "$GITHUB_STEP_SUMMARY"
