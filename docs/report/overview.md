@@ -141,8 +141,9 @@ writes a JSON record: files, rows, bad rows, missing and open hours.
 | Write the day's folder, no `partitionBy` | `partitionBy` on a constant still sorts the whole day; it filled the root disk |
 | DATEX: `parquet.page.size.row.check.min` = 1 | Parquet measures its buffer only after 100 rows; every row is 26.6M characters, and the first full day ran out of heap |
 
-**Is it sound?** Audited 2026-11-06: Bronze rows equal landing lines on every feed checked, every hour
-of every day is present, and the only collection dip is 2026-10-21, 15-17 UTC.
+**Is it sound?** Audited 2026-11-06: Bronze rows equal landing lines on every feed checked, and the only
+collection dip is 2026-10-21, 15-17 UTC. One day was never ingested: SIRI for 2026-10-23 (landing
+is complete, so one manual rerun restores it).
 
 DATEX has its own Bronze job, `pipeline/bronze_datex.py`, because one row is one poll and failed polls
 are evidence: a run reports polls by outcome, distinct snapshots and the longest gap.
