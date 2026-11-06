@@ -217,7 +217,7 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(rows[0]["payload_sha256"], source["_bronze_payload_sha256"])
         self.assertEqual(rows[0]["source_file"], source["_bronze_source_file"])
 
-    def test_a_task_reading_a_later_hour_first_keeps_the_earliest_copy(self):
+    def test_memory_starts_over_where_a_task_input_breaks(self):
         # 2026-10-29, INN: Spark read the 03:57 piece of a task before the 01:02 piece.
         def source(received, recorded):
             payload = et(call(), recorded=recorded)
@@ -228,7 +228,11 @@ class ParseTest(unittest.TestCase):
         calls = [r["received_at"] for r in P.decode_partition(rows, "et") if r["kind"] == "call"]
         # The second is a repeat; the third is earlier input, not a late replay of older data.
         self.assertEqual(calls, [instant("2026-10-26T03:57:00Z"), instant("2026-10-26T01:02:00Z")])
-        # Thread jitter (0.3 s back) is not a new piece: the repeat is still dropped.
+        # Forward over a gap too (a task read 15:xx, then 18:47): what lies between was read by
+        # another task, so an equal state is not a repeat.
+        gap = [source("2026-10-26T01:02:00Z", "2026-10-26T01:01:50Z"), source("2026-10-26T03:57:00Z", "2026-10-26T03:56:50Z")]
+        self.assertEqual(len([r for r in P.decode_partition(gap, "et") if r["kind"] == "call"]), 2)
+        # Thread jitter (0.3 s back) is not a break: the repeat is still dropped.
         jitter = [source("2026-10-26T03:57:00.3Z", "2026-10-26T03:56:51Z"), source("2026-10-26T03:57:00Z", "2026-10-26T03:56:51Z")]
         self.assertEqual(len([r for r in P.decode_partition(jitter, "et") if r["kind"] == "call"]), 1)
 

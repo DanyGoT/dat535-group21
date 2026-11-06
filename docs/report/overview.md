@@ -186,8 +186,8 @@ for call_index, call in enumerate(calls):
 Dropping a repeat loses nothing: a state holds until the next one, and the first copy has the earliest
 time. Two things make that true, both found by comparing with the slow version key by key
 (`problems.md`, 2026-11-06): the memory keeps the newest copy it dropped, so a late replay of older
-data still loses to it, and it starts over when a task's input jumps back in time, because Spark
-packs pieces of several hours into one task, largest first. Rows leave Python through Arrow
+data still loses to it, and it starts over wherever a task's input breaks, because Spark packs
+pieces of several hours into one task, largest first. Rows leave Python through Arrow
 (`mapInArrow`) instead of being pickled one by one.
 
 ### Every version gets an operating day
