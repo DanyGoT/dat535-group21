@@ -140,6 +140,20 @@ class ParseTest(unittest.TestCase):
         cancelled = list(P.parse_et(et(call(), extra="<Cancellation>true</Cancellation>"), base("2026-10-26T08:05:00Z"), last))
         self.assertEqual([(r["kind"], r["journey_cancelled"]) for r in cancelled], [("journey", True)])
 
+    def test_late_replay_stays_dropped_after_a_dropped_repeat(self):
+        # 2026-10-29, AKT: state A, A again (dropped), then B recorded between the two copies.
+        last = {}
+        a, b = call(expected="2026-10-26T08:12:00Z"), call(expected="2026-10-26T08:11:50Z")
+        self.assertEqual(len(list(P.parse_et(et(a, recorded="2026-10-26T08:00:00Z"), base("2026-10-26T08:00:10Z"), last))), 2)
+        self.assertEqual(list(P.parse_et(et(a, recorded="2026-10-26T08:00:02Z"), base("2026-10-26T08:00:11Z"), last)), [])
+        self.assertEqual(list(P.parse_et(et(b, recorded="2026-10-26T08:00:01Z"), base("2026-10-26T08:00:12Z"), last)), [])
+        # Newer than every copy seen: kept.
+        newer = list(P.parse_et(et(b, recorded="2026-10-26T08:00:03Z"), base("2026-10-26T08:00:13Z"), last))
+        self.assertEqual([r["kind"] for r in newer], ["call"])
+        # Older, but with an actual the newer copy lacks: the as-of ranks actuals first, so kept.
+        actual = list(P.parse_et(et(call(actual="2026-10-26T08:11:00Z"), recorded="2026-10-26T08:00:00Z"), base("2026-10-26T08:00:14Z"), last))
+        self.assertEqual([r["kind"] for r in actual], ["call"])
+
     def test_call_rows_leave_journey_attributes_to_the_journey_row(self):
         journey, row = list(P.parse_et(et(call()), base()))
         self.assertEqual(journey["line_id"], "T:Line:1")
@@ -202,6 +216,21 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(rows[0]["dq_issue"], ["graphql_error"])
         self.assertEqual(rows[0]["payload_sha256"], source["_bronze_payload_sha256"])
         self.assertEqual(rows[0]["source_file"], source["_bronze_source_file"])
+
+    def test_a_task_reading_a_later_hour_first_keeps_the_earliest_copy(self):
+        # 2026-10-29, INN: Spark read the 03:57 piece of a task before the 01:02 piece.
+        def source(received, recorded):
+            payload = et(call(), recorded=recorded)
+            return dict(received_at=received, payload=payload, _bronze_status="ok", _bronze_source_file="et/hour.jsonl.gz",
+                        _bronze_payload_sha256=P.digest(payload + received), _bronze_run_id="fixture", source_date=str(DAY))
+        rows = [source("2026-10-26T03:57:00Z", "2026-10-26T03:56:50Z"), source("2026-10-26T03:57:00.3Z", "2026-10-26T03:56:51Z"),
+                source("2026-10-26T01:02:00Z", "2026-10-26T01:01:50Z")]
+        calls = [r["received_at"] for r in P.decode_partition(rows, "et") if r["kind"] == "call"]
+        # The second is a repeat; the third is earlier input, not a late replay of older data.
+        self.assertEqual(calls, [instant("2026-10-26T03:57:00Z"), instant("2026-10-26T01:02:00Z")])
+        # Thread jitter (0.3 s back) is not a new piece: the repeat is still dropped.
+        jitter = [source("2026-10-26T03:57:00.3Z", "2026-10-26T03:56:51Z"), source("2026-10-26T03:57:00Z", "2026-10-26T03:56:51Z")]
+        self.assertEqual(len([r for r in P.decode_partition(jitter, "et") if r["kind"] == "call"]), 1)
 
     def test_graphql_unexpected_envelope_shapes_are_quarantined(self):
         for body in ([{"message": "unexpected array"}], {"data": [{"vehicles": []}]}):

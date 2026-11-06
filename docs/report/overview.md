@@ -176,15 +176,18 @@ emitted only when it differs from that entity's last one:
 for call_index, call in enumerate(calls):
     raw_order = call.findtext("Order")
     state = hash((call.tag, tuple((child.tag, child.text) for child in call)))
-    key = (op, jid, raw_order)
-    if last.get(key) == state:
+    actuals = (1 if call.find("ActualArrivalTime") is not None else 0) + (2 if call.find("ActualDepartureTime") is not None else 0)
+    if not says_something_new(last, (op, jid, raw_order), state, recorded, actuals):
         continue
-    last[key] = state
     ...
 ```
 
 Dropping a repeat loses nothing: a state holds until the next one, and the first copy has the earliest
-time. Rows leave Python through Arrow (`mapInArrow`) instead of being pickled one by one.
+time. Two things make that true, both found by comparing with the slow version key by key
+(`problems.md`, 2026-11-06): the memory keeps the newest copy it dropped, so a late replay of older
+data still loses to it, and it starts over when a task's input jumps back in time, because Spark
+packs pieces of several hours into one task, largest first. Rows leave Python through Arrow
+(`mapInArrow`) instead of being pickled one by one.
 
 ### Every version gets an operating day
 
