@@ -14,9 +14,11 @@ from zoneinfo import ZoneInfo
 
 OSLO = ZoneInfo("Europe/Oslo")
 # Bump when a decoded table's meaning changes: Silver then decodes Bronze again.
-DECODER_VERSION = 3
-# A backward step in arrival time larger than this is a new piece of input, not thread jitter.
-REORDER_TOLERANCE = timedelta(seconds=60)
+DECODER_VERSION = 4
+# Consecutive ET messages are at most 9.5 s apart even at night, and the receiver's threads swap
+# them by at most 0.4 s (2026-10-29). A larger step, either way, means the next row does not
+# follow the previous one: another task read what lies between.
+INPUT_GAP = timedelta(seconds=60)
 SIRI_NAMESPACE = ' xmlns="http://www.siri.org.uk/siri"'
 # The operating day inside a dated id: VYG:DatedServiceJourney:1614_DAL-DRM_26-11-05,
 # ..._2026-10-30_ExtraJourney, and Bane NOR's 660:2026-11-05.
@@ -367,19 +369,18 @@ def parse_vehicles(payload, base):
 
 
 def decode_partition(rows, feed):
-    """One task's Bronze rows. parse_et's memory needs them in arrival order, but Spark may pack
-    pieces of several hours into one task, largest first (2026-10-29: 03:57 read before 01:02).
-    Memory starts over when the input jumps back in time; within an hour the receiver's threads
-    reorder by at most 0.4 s, far below the threshold."""
-    last, newest = {}, None
+    """One task's Bronze rows. parse_et's memory is only right for an unbroken run of messages,
+    but Spark packs pieces of several hours into one task, largest first: on 2026-10-29 a task
+    read 03:57 before 01:02, another 15:xx and then 18:47, missing the states in between.
+    Memory starts over wherever the input breaks (INPUT_GAP)."""
+    last, previous = {}, None
     for source in rows:
         base = provenance(source)
         received = base["received_at"]
         if received is not None:
-            if newest is not None and received < newest - REORDER_TOLERANCE:
+            if previous is not None and abs(received - previous) > INPUT_GAP:
                 last.clear()
-                newest = None
-            newest = received if newest is None else max(newest, received)
+            previous = received
         if source["_bronze_status"] != "ok":
             yield reject(base, "bronze_" + source["_bronze_status"])
             continue
