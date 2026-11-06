@@ -62,7 +62,7 @@ jobs share 7.9 GB with the collectors, Grafana, Prometheus, the runner and any n
 | Rule | Why |
 | ---- | --- |
 | **One Spark job at a time.** Workflow steps run under `flock /data/dat535/.spark.lock`; dev and prod wait for each other instead of overlapping. | two 4 GB drivers do not fit |
-| **Notebooks:** `spark.driver.memory` ≤ 2g, `spark.stop()` when done, and not around 03:00 UTC (prod Bronze). Wrap long jobs in the same `flock`. | a forgotten notebook driver holds its heap for days |
+| **Notebooks:** `spark.driver.memory` ≤ 2g, `spark.stop()` when done, and not while prod Bronze runs (scheduled 03:17 UTC, in practice as late as 11:00). Wrap long jobs in the same `flock`. | a forgotten notebook driver holds its heap for days |
 | **Read payloads in small batches:** `spark.sql.parquet.columnarReaderBatchSize=256` (set in `create_spark`). | reading one ET hour's payloads with the default 4096 killed a 3 GB driver; 256 read it in 23 s |
 | **Lift Jackson's string cap:** `.option("maxStringLen", ...)` on every JSON read of landing. | ET pushes reach 22.8M characters, DATEX situations 28.6M; the default (20M) marked them corrupt |
 | **No `partitionBy` on a constant column.** Write the day directory directly. | it sorts the whole day and spilled to `/tmp` until the root disk filled (2026-10-24) |

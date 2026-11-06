@@ -90,6 +90,27 @@ Entry template:
   sorts and shuffles; check the physical plan and where spills land. Silver will need real
   shuffles, so local spill space must be planned for, not left at the default.
 
+## 2026-11-05 — A long Silver run cost us a day of Bronze, silently
+
+- **Area:** Bronze, CI/CD, monitor
+- **Symptom:** Prod run 74 failed in **Run Bronze** after exactly 3 h with no Spark output.
+  SIRI and vehicles Bronze for 2026-11-04 were never written. Nobody noticed until an audit on
+  2026-11-06: the status page was green, and the next night's run only did its own day.
+- **Evidence:** GitHub Actions run `42010536942`. `flock -w 10800` gave up at 13:25 UTC. A manual
+  4-hour Silver validation held `/data/dat535/.spark.lock` from 10:22 to 14:19. Its runner reserved
+  the "nightly Bronze slot" until 06:00 UTC, but the 03:00 cron has started at 08:09-10:36 UTC since
+  October: GitHub delays scheduled runs, most of all those on the hour.
+- **Cause:** Three things together. Any job holding the lock longer than the 3-hour wait kills
+  Bronze; a schedule that drifts by 7 h can't be reserved around; and a missed day had no retry and
+  no alarm. The first failed DATEX day (2026-10-28) had also stayed empty for over a week.
+- **Fix:** A scheduled run also fills holes in the 3 days before yesterday (`bronze.holes`). The
+  monitor checks that a partition exists for each of the last 7 days, per dataset, and alerts.
+  The cron moved off the hour. Silver now decodes one UTC day per lock hold, so nothing keeps the
+  lock for hours.
+- **Trade-off:** A hole older than 3 days still needs a manual run; the monitor says which.
+- **Lesson:** A green collector says nothing about the batch. "The run failed once" is not an
+  event anyone acts on: alert on the missing output, and make the next run repair it.
+
 ## 2026-10-29 — DATEX Bronze ran out of heap on its first full day
 
 - **Area:** Bronze, VM

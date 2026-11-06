@@ -96,9 +96,10 @@ The contract between the collectors and Spark.
 
 ## Batch pipeline
 
-- The prod workflow runs at 03:00 UTC for the previous UTC day (after hour 23 has closed);
-  manual reruns take a date. The dev workflow runs one hour of yesterday on every push and PR
-  to `dev`. Outputs: `/data/dat535/prod` and `/data/dat535/dev`, next to the landing zone.
+- The prod workflow is scheduled at 03:17 UTC for the previous UTC day, after hour 23 has closed
+  (GitHub starts scheduled runs late, by up to 7.5 h so far). It also fills holes in the 3 days
+  before; manual reruns take a date. The dev workflow runs one hour of yesterday on every push
+  and PR to `dev`. Outputs: `/data/dat535/prod` and `/data/dat535/dev`, next to the landing zone.
 - **Bronze**: closed hourly files → zstd Parquet per dataset and day, payload unchanged, plus
   evidence columns (`_bronze_*`: source file, status, payload hash and size, run id) and a run
   record per run under `bronze/_runs/`. `bronze.py` reads SIRI and vehicle positions; `bronze_datex.py` reads DATEX
@@ -120,7 +121,9 @@ The contract between the collectors and Spark.
 4. Per DATEX feed: last successful poll and last write within two poll intervals; travel
    times and weather still changing (NPRA still publishing).
 5. NeTEx and NSR: newest archived file younger than 30 h.
-6. Data volume and root volume below `MONITOR_DISK_MAX_PCT` (90 %).
+6. Bronze: a finished partition for each of the last 7 days, per dataset; yesterday's is due by
+   16:00 UTC (`MONITOR_BRONZE_DEADLINE_H`).
+7. Data volume and root volume below `MONITOR_DISK_MAX_PCT` (90 %).
 
 It writes the status page ([system/switchboard-style.md](switchboard-style.md)) and sends an ntfy push on state change
 only (OK→FAIL, FAIL→OK).

@@ -16,7 +16,7 @@ Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 | DATEX collection | built and tested against NPRA; credentials are on the VM, starts with the next deploy |
 | NeTEx and NSR daily archive | first day archived 2026-10-26; daily timer starts with the next deploy |
 | Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
-| Bronze (SIRI, vehicles, DATEX) | SIRI daily at 03:00 UTC; vehicles and DATEX added |
+| Bronze (SIRI, vehicles, DATEX) | daily after 03:17 UTC, with catch-up of missed days |
 | Silver | design in [`docs/pipeline/silver.md`](docs/pipeline/silver.md), not built |
 | Gold | use cases in [`docs/pipeline/gold.md`](docs/pipeline/gold.md), not built |
 
