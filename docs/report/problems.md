@@ -20,6 +20,28 @@ Entry template:
 
 ---
 
+## 2026-11-06 — Dropping repeated ET states changed 650 predictions
+
+- **Area:** Silver
+- **Symptom:** The faster decoder (each UTC day once, only changed states) reproduced every stop call
+  time of 2026-10-29 exactly, but 621 of 33 M `call_prediction` rows had another predicted time
+  (median 10 s off) and 29 were missing.
+- **Evidence:** compared key by key with the published run. Raw messages of one AKT call:
+  14:14:43.8 (recorded :33.5) and 14:14:44.9 (recorded :34.5) say 15:39:41; 14:14:45.0 is a
+  replay recorded at :33.7 that says 15:39:31. And one INN journey: its 01:02 message was missing
+  because the same task had read the 03:57 one first.
+- **Cause:** Two assumptions in "keep the first copy of a state". (1) The as-of rule drops a late
+  replay of older data because a newer copy was seen; the newer copy was the repeat we dropped.
+  (2) A task's rows are not in arrival order: Spark packs pieces of several hourly files into one
+  task, largest first.
+- **Fix:** The decoder remembers the newest copy of each entity even when it drops it, and drops a
+  replay that is older and adds no actual time (`says_something_new`). Its memory starts over
+  when a task's input jumps back in time by more than 60 s; within an hour, arrival order jitters
+  by at most 0.4 s (5,776 steps back in 400,802 lines).
+- **Trade-off:** A repeat that crosses a jump in the input is kept: a few more rows, never fewer.
+- **Lesson:** An optimisation that drops rows must preserve every rule downstream that reads those
+  rows, and a row order the engine never promised is not an order.
+
 ## 2026-10-24 — Bronze Parquet was 2.6× larger than the gzipped input
 
 - **Area:** Bronze, VM

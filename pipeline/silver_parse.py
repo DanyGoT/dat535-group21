@@ -9,12 +9,14 @@ import json
 import math
 import re
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 OSLO = ZoneInfo("Europe/Oslo")
 # Bump when a decoded table's meaning changes: Silver then decodes Bronze again.
-DECODER_VERSION = 2
+DECODER_VERSION = 3
+# A backward step in arrival time larger than this is a new piece of input, not thread jitter.
+REORDER_TOLERANCE = timedelta(seconds=60)
 SIRI_NAMESPACE = ' xmlns="http://www.siri.org.uk/siri"'
 # The operating day inside a dated id: VYG:DatedServiceJourney:1614_DAL-DRM_26-11-05,
 # ..._2026-10-30_ExtraJourney, and Bane NOR's 660:2026-11-05.
@@ -146,15 +148,36 @@ def first_call_day(journey):
     return None
 
 
+def says_something_new(last, key, state, recorded, actuals=0):
+    """Whether a version is worth a row; `last` remembers, per entity, its latest state (a hash)
+    and the newest copy seen, even if that copy was dropped as a repeat.
+
+    A late replay of older data is dropped too: older than a copy already seen, with no actual
+    time (`actuals`: 1 arrival, 2 departure) that the copy lacks. silver.asof_intervals and
+    silver.latest would never pick it, but only while that newer copy exists. Seen on
+    2026-10-29: a copy dropped as a repeat let 621 such replays become predictions."""
+    seen = last.get(key)
+    if seen is None:
+        last[key] = (state, recorded, actuals)
+        return True
+    previous, newest, newest_actuals = seen
+    if recorded is not None and newest is not None and recorded < newest and (actuals & ~newest_actuals) == 0:
+        return False
+    if recorded is not None and (newest is None or recorded >= newest):
+        newest, newest_actuals = recorded, actuals
+    last[key] = (state, newest, newest_actuals)
+    return previous != state
+
+
 def parse_et(payload, base, last=None):
     """Journey and call versions, only those that say something new. Never manufacture actuals.
 
     A journey restates all its calls on every change: in a real hour 54 % of call versions
     and 96 % of journey versions repeat the previous one (98 % of RecordedCalls). `last` is this
-    task's memory of each entity's latest state, as a hash (~90 MB per task, the states
-    themselves would be 560 MB). A dropped repeat loses nothing: a state holds until the next
-    one, and the first copy has the earliest availability. A state that repeats across tasks
-    stays, which only costs a row. Call rows carry no journey attributes.
+    task's memory of each entity (says_something_new), with its state as a hash (~90 MB per
+    task, the states themselves would be 560 MB). A dropped repeat loses nothing: a state holds
+    until the next one, and the first copy has the earliest availability. A state that repeats
+    across tasks stays, which only costs a row. Call rows carry no journey attributes.
     """
     last = {} if last is None else last
     root = siri_root(payload)
@@ -176,17 +199,17 @@ def parse_et(payload, base, last=None):
             derived, source = date_in_id(jid), "id"
             if derived is None:
                 derived, source = first_call_day(journey), "first_call"
-        recorded = text(journey, "RecordedAtTime")
+        recorded_issues = []
+        recorded = timestamp(text(journey, "RecordedAtTime"), recorded_issues, "recorded_at")
+        issues += recorded_issues
         shared = dict(received_at=base["received_at"], source_file=base["source_file"], payload_sha256=base["payload_sha256"],
                       bronze_run_id=base["bronze_run_id"], source_date=base["source_date"], journey_id=jid, operating_date=op,
                       dated_journey_id=direct, derived_operating_date=derived, derived_date_source=source if derived else None)
         state = hash(tuple((child.tag, child.text) for child in journey if child.tag not in ("RecordedAtTime", "RecordedCalls", "EstimatedCalls")))
-        key = (op, jid)
-        if last.get(key) != state:
-            last[key] = state
+        if says_something_new(last, (op, jid), state, recorded):
             mode = text(journey, "VehicleMode")
-            yield dict(shared, kind="journey", dq_issue=issues, entity_index=index, record_sha256=base.get("record_sha256"),
-                       recorded_at=timestamp(recorded, issues, "recorded_at"),
+            yield dict(shared, kind="journey", dq_issue=list(issues), entity_index=index, record_sha256=base.get("record_sha256"),
+                       recorded_at=recorded,
                        line_id=text(journey, "LineRef"), operator_id=text(journey, "OperatorRef"),
                        direction_id=text(journey, "DirectionRef"), mode=canonical_mode(mode), source_mode=mode,
                        codespace=text(journey, "DataSource") or (jid.split(":")[0] if jid else None),
@@ -198,13 +221,12 @@ def parse_et(payload, base, last=None):
         for call_index, call in enumerate(calls):
             raw_order = call.findtext("Order")
             state = hash((call.tag, tuple((child.tag, child.text) for child in call)))
-            key = (op, jid, raw_order)
-            if last.get(key) == state:
+            actuals = (1 if call.find("ActualArrivalTime") is not None else 0) + (2 if call.find("ActualDepartureTime") is not None else 0)
+            if not says_something_new(last, (op, jid, raw_order), state, recorded, actuals):
                 continue
-            last[key] = state
             ci = list(issues)
             row = dict(shared, kind="call", dq_issue=ci, entity_index=index * 100000 + call_index,
-                       recorded_at=timestamp(recorded, ci, "recorded_at"),
+                       recorded_at=recorded,
                        call_order=number(raw_order.strip() if raw_order else None, ci, "call_order", integer=True),
                        quay_id=text(call, "StopPointRef"), call_kind=call.tag,
                        call_cancelled=boolean(text(call, "Cancellation"), ci, "call_cancelled"),
@@ -345,9 +367,19 @@ def parse_vehicles(payload, base):
 
 
 def decode_partition(rows, feed):
-    last = {}
+    """One task's Bronze rows. parse_et's memory needs them in arrival order, but Spark may pack
+    pieces of several hours into one task, largest first (2026-10-29: 03:57 read before 01:02).
+    Memory starts over when the input jumps back in time; within an hour the receiver's threads
+    reorder by at most 0.4 s, far below the threshold."""
+    last, newest = {}, None
     for source in rows:
         base = provenance(source)
+        received = base["received_at"]
+        if received is not None:
+            if newest is not None and received < newest - REORDER_TOLERANCE:
+                last.clear()
+                newest = None
+            newest = received if newest is None else max(newest, received)
         if source["_bronze_status"] != "ok":
             yield reject(base, "bronze_" + source["_bronze_status"])
             continue
