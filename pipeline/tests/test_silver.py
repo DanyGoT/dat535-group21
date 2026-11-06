@@ -586,18 +586,6 @@ class SparkTest(unittest.TestCase):
             self.assertEqual(before, {p: p.read_bytes() for p in landing.rglob("*.zip")})
 
 
-class UnfinishedDaysTest(unittest.TestCase):
-    def test_only_days_before_the_target_without_a_ready_marker(self):
-        import silver
-        with tempfile.TemporaryDirectory() as tmp:
-            runs = lambda d: Path(tmp) / f"operating_date={d}"
-            for offset, ready in ((1, True), (2, False)):
-                folder = runs(DAY - timedelta(days=offset))
-                folder.mkdir()
-                (folder / "latest.json").write_text(json.dumps(dict(ready=ready)))
-            self.assertEqual(silver.unfinished_days(runs, DAY), [DAY - timedelta(days=3), DAY - timedelta(days=2)])
-
-
 class PublishTest(unittest.TestCase):
     def test_failed_partition_install_restores_published_day(self):
         import silver

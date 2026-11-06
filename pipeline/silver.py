@@ -20,7 +20,7 @@ from datetime import date as Date, timedelta
 from functools import partial
 from pathlib import Path
 
-from bronze import CATCH_UP_DAYS, DATASETS, HOURS, create_spark as bronze_spark, iso, run_id, utcnow
+from bronze import DATASETS, HOURS, create_spark as bronze_spark, iso, run_id, utcnow
 from silver_parse import DECODER_VERSION, arrow_decoder, decode_partition, schema
 from silver_reference import (archived_file, nsr_partition, plan_members, plan_partition,
                               reference_schema)
@@ -343,9 +343,9 @@ def publish(stage, root, record, day, runs=None):
         raise
 
 
-def read_bronze(spark, output, feed, day, allow_partial, record, days=None):
+def read_bronze(spark, output, feed, day, allow_partial, record):
     F = functions()
-    days = days or ([day + timedelta(days=n) for n in (-1, 0, 1)] if feed == "et" else [day])
+    days = [day + timedelta(days=n) for n in (-1, 0, 1)] if feed == "et" else [day]
     frames = {}
     evidence = {}
     for source_day in days:
@@ -409,53 +409,6 @@ def decode_day(spark, root, stage, feed, source_day, source, evidence):
     return folder
 
 
-def unfinished_days(runs_of, target, days=CATCH_UP_DAYS):
-    """Days before target whose marker does not say ready, oldest first: a scheduled run tries them
-    again, so one failed night does not leave a hole that nobody asked to fill."""
-    out = []
-    for n in range(days, 0, -1):
-        day = target - timedelta(days=n)
-        marker = runs_of(day) / "latest.json"
-        if not (marker.exists() and json.loads(marker.read_text()).get("ready") is True):
-            out.append(day)
-    return out
-
-
-def silver_spark(output_dir):
-    scratch = Path(os.environ.get("DAT535_SPARK_LOCAL_DIR", str(Path(output_dir).parent / "spark-scratch")))
-    scratch.mkdir(parents=True, exist_ok=True)
-    return bronze_spark("DAT535-Silver-Entur", settings={
-        "spark.master": os.environ.get("SPARK_MASTER", "local[4]"),
-        "spark.local.dir": str(scratch),
-        "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", "32")})
-
-
-def decode_only(output_dir, day, spark=None):
-    """Decode one UTC day of Bronze and stop: the slow part as a step of its own, so that a
-    backfill can release the Spark lock between days (the nightly Bronze waits for it)."""
-    root = Path(output_dir) / "silver"
-    stage = root / "_staging" / ("decode-" + uuid.uuid4().hex[:8])
-    owned_spark = spark is None
-    record = dict(inputs={})
-    started = time.monotonic()
-    try:
-        if spark is None:
-            spark = silver_spark(output_dir)
-        for module in ("bronze.py", "silver.py", "silver_parse.py", "silver_reference.py"):
-            spark.sparkContext.addPyFile(str(Path(__file__).with_name(module)))
-        stage.mkdir(parents=True)
-        for feed in DATASETS:
-            frames, _ = read_bronze(spark, output_dir, feed, day, True, record, days=[day])
-            for source_day, frame in frames.items():
-                decode_day(spark, root, stage, feed, source_day, frame, record["inputs"][feed])
-        log.info("decoded %s in %.0f s", day, time.monotonic() - started)
-    finally:
-        if stage.exists():
-            shutil.rmtree(stage)
-        if owned_spark and spark is not None:
-            spark.stop()
-
-
 def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MINUTES):
     F = functions()
     root = Path(output_dir) / "silver"
@@ -485,7 +438,12 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
                 with path.open("rb") as source:
                     record["references"][dataset]["sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
         if spark is None:
-            spark = silver_spark(output_dir)
+            scratch = Path(os.environ.get("DAT535_SPARK_LOCAL_DIR", str(Path(output_dir).parent / "spark-scratch")))
+            scratch.mkdir(parents=True, exist_ok=True)
+            spark = bronze_spark("DAT535-Silver-Entur", settings={
+                "spark.master": os.environ.get("SPARK_MASTER", "local[4]"),
+                "spark.local.dir": str(scratch),
+                "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", "32")})
         for module in ("bronze.py", "silver.py", "silver_parse.py", "silver_reference.py"):
             spark.sparkContext.addPyFile(str(Path(__file__).with_name(module)))
         stage.mkdir(parents=True)
@@ -656,28 +614,16 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
 def main(argv=None):
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", type=Date.fromisoformat,
-                        help=f"Norwegian operating day, YYYY-MM-DD (default: two days ago, and any unfinished day in the {CATCH_UP_DAYS} days before)")
+    parser.add_argument("--date", type=Date.fromisoformat, default=(utcnow() - timedelta(days=2)).date(),
+                        help="Norwegian operating day, YYYY-MM-DD (default: two days ago)")
     parser.add_argument("--allow-partial", action="store_true", help="publish exploration output with ready=false when input is incomplete")
-    parser.add_argument("--decode-only", action="store_true", help="--date is a UTC Bronze day: decode it and publish nothing")
     args = parser.parse_args(argv)
-    landing, output = Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output"))
-    target = args.date or (utcnow() - timedelta(days=2)).date()
     try:
-        if args.decode_only:
-            decode_only(output, target)
-            return 0
-        run(landing, output, target, allow_partial=args.allow_partial)
+        run(Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output")),
+            args.date, allow_partial=args.allow_partial)
     except (OSError, ValueError) as error:
         log.error("%s", error)
         return 1
-    if args.date is None:
-        for day in unfinished_days(lambda d: output / "silver" / "_runs" / f"operating_date={d}", target):
-            try:
-                log.warning("%s has no ready Silver: catching up", day)
-                run(landing, output, day)
-            except (OSError, ValueError) as error:
-                log.error("catching up %s: %s", day, error)
     return 0
 
 

@@ -108,16 +108,6 @@ jobs:
           source ~/spark-env/bin/activate
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver_datex.py ${SILVER_DATE:+--date "$SILVER_DATE"}
 
-      - name: Decode yesterday's Bronze
-        # The slow part of Entur Silver, once per UTC day and under its own lock hold.
-        if: ${{ !cancelled() && steps.entur_bronze.outcome == 'success' && github.event.inputs.bronze_date == '' }}
-        env:
-          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
-          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
-        run: |
-          source ~/spark-env/bin/activate
-          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py --date "$(date -u -d yesterday +%F)" --decode-only
-
       - name: Run Entur Silver
         # ET spans adjacent UTC days. Today's Bronze completes the following day
         # for Silver's default operating day (two days ago). A manual Bronze-only

@@ -6,7 +6,7 @@ tables are implemented in [`pipeline/silver.py`](../../pipeline/silver.py), the 
 [`pipeline/silver_datex.py`](../../pipeline/silver_datex.py); departure-risk Gold remains future
 work. A manual [line-scorecard Gold example](gold-example.md)
 has passed a complete-day VM run. A compact overview of the decisions, code and evidence is in the
-[implementation log](silver-design-log.md). Keys and id quirks: [entur/identifiers.md](../entur/identifiers.md).
+[system overview](../report/overview.md). Keys and id quirks: [entur/identifiers.md](../entur/identifiers.md).
 
 ## Rules in brief
 
@@ -152,9 +152,8 @@ sightings. `(id, version)` alone is not unique ([datex/content.md](../datex/cont
 8 GB RAM, one Spark job at a time, small Parquet reader batches for payload columns, and a
 spill directory on `/data` rather than the small root disk. Details and evidence: [system/storage.md](../system/storage.md).
 
-The daily workflow runs Bronze for yesterday, DATEX Silver for yesterday, decodes yesterday, then
-runs Entur Silver for **two days ago**, and retries any day in the three before it that has no
-ready marker. ET reads
+The daily workflow runs Bronze and DATEX Silver for yesterday, then Entur Silver for **two days
+ago**. A failed day is rerun by hand, with `bronze_date` or `silver_date` on the workflow. ET reads
 completed Bronze partitions for `D-1, D, D+1`, then filters by the explicit operating day
 (after dated-ID resolution). This conservative window covers pre-midnight reports, overnight
 services and following-day replay. SX and positions read UTC `D` only; their grains are
@@ -162,9 +161,8 @@ observation-based. Updates received beyond the ET window are a remaining backfil
 
 **Decoding is the expensive part, so it happens once.** `silver/_decoded/<feed>/source_date=D/`
 holds the typed versions of one UTC Bronze day, reused by all three operating days that read it
-until Bronze or `DECODER_VERSION` changes. `python pipeline/silver.py --date D --decode-only` does
-one day under its own lock hold; the workflow runs it before the Silver step. It is rebuildable
-at any time, so it is the first thing to delete when disk runs short. Two more measured savings,
+until Bronze or `DECODER_VERSION` changes. It is rebuildable at any time, so it is the first thing
+to delete when disk runs short. Two more measured savings,
 see `parse_et`: a state is emitted only when it differs from that entity's last one in the task
 (54 % of call versions and 96 % of journey versions repeat, 98 % of `RecordedCall`s), and call rows
 carry no journey attributes. Rows leave Python through Arrow (`mapInArrow`, `arrow_decoder`).
