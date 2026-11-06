@@ -167,7 +167,9 @@ see `parse_et`: a state is emitted only when it differs from that entity's last 
 (54 % of call versions and 96 % of journey versions repeat, 98 % of `RecordedCall`s), and call rows
 carry no journey attributes. Dropping a row must not change what the as-of rule sees: the memory
 keeps the newest copy of each entity, so a late replay of older data is still dropped, and starts
-over wherever a task's input breaks (Spark packs pieces of several hours into one task). Rows leave Python through Arrow (`mapInArrow`, `arrow_decoder`).
+over wherever a task's input breaks (Spark packs pieces of several hours into one task). Memory
+does not cross a task boundary, so a replay right after one can still count: on 2026-10-29, 2 of
+33.0 M predictions moved by 3 s and 100 got a later `available_at`. Rows leave Python through Arrow (`mapInArrow`, `arrow_decoder`).
 
 **The operating day of a version** is resolved in this order, `date_source` says which:
 `framed` (the message's `DataFrameRef`), `alias` (the plan's dated journey), `id` (a date inside
