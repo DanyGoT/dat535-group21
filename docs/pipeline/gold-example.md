@@ -42,7 +42,7 @@ Journey and call counts are aggregated separately before being combined: a journ
 | Real-time-only journeys | Reported journeys absent from the selected archived plan |
 | Reported cancelled journeys | Real-time journey record explicitly marked cancelled |
 | Timetable cancellations / replacements | Separate counts of the NeTEx `service_alteration`; do not add these to real-time cancellations |
-| Scored departures | Reported calls with actual and aimed departures, usable delay, no call/journey cancellation, boarding not explicitly forbidden, and no departure-before-arrival issue |
+| Scored departures | Reported calls with actual and aimed departures, usable delay, no call/journey cancellation, boarding not explicitly forbidden, and no departure-before-arrival or implausible-delay issue |
 | Late share | Scored departures with `departure_delay_s >= 180`, divided by scored departures |
 | Median / p90 delay | Approximate percentiles over those same scored departures, in seconds |
 | Reporting coverage | Reported planned journeys / planned journeys; the analogous stop-call measure is also exported |

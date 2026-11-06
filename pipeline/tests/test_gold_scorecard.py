@@ -116,10 +116,11 @@ class GoldScorecardTest(unittest.TestCase):
         frames = self.frames([call("j1", delay=60, dq_issue=["unknown_quay"]),
                              call("j1", order=2, delay=180, dq_issue=["departure_before_arrival"]),
                              call("j1", order=3, delay=180, for_boarding=False),
-                             call("j1", order=4, delay=180, call_cancelled=True)])
+                             call("j1", order=4, delay=180, call_cancelled=True),
+                             call("j1", order=5, delay=-33825, dq_issue=["implausible_departure_delay"])])
         row = self.build(frames).first()
         self.assertEqual(row.scored_departures, 1)
-        self.assertEqual(row.flagged_calls, 2)
+        self.assertEqual(row.flagged_calls, 3)
         self.assertEqual(row.late_departure_pct, 0)
 
     def test_unknown_line_is_retained_and_duplicate_labels_fail(self):
