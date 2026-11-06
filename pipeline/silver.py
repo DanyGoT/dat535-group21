@@ -17,10 +17,11 @@ import time
 import uuid
 import zipfile
 from datetime import date as Date, timedelta
+from functools import partial
 from pathlib import Path
 
-from bronze import DATASETS, HOURS, create_spark as bronze_spark, iso, run_id, utcnow
-from silver_parse import decode_partition, schema
+from bronze import CATCH_UP_DAYS, DATASETS, HOURS, create_spark as bronze_spark, iso, run_id, utcnow
+from silver_parse import DECODER_VERSION, arrow_decoder, decode_partition, schema
 from silver_reference import (archived_file, nsr_partition, plan_members, plan_partition,
                               reference_schema)
 
@@ -106,10 +107,21 @@ def normalize_journeys(df, aliases):
                     ("conflicting_journey_id", F.col("_mapped_journey").isNotNull() &
                      F.col("journey_id").isNotNull() & (F.col("journey_id") != F.col("_alias")) &
                      (F.col("journey_id") != F.col("_mapped_journey"))))
-    return joined.withColumn("source_journey_id", F.col("journey_id")) \
-        .withColumn("journey_id", F.coalesce("_mapped_journey", "journey_id")) \
-        .withColumn("operating_date", F.coalesce("operating_date", "_mapped_date")) \
-        .drop("_alias", "_mapped_journey", "_mapped_date")
+    joined = joined.withColumn("source_journey_id", F.col("journey_id")) \
+        .withColumn("journey_id", F.coalesce("_mapped_journey", "journey_id"))
+    if "derived_operating_date" in joined.columns:
+        # Explicit day, then the plan's alias (it only holds the target day), then what the id or
+        # the first call says. A dated id of another day resolves to that day and is filtered
+        # out by the caller, not reported as an unknown identity.
+        joined = issues(joined, ("operating_date_derived", F.col("operating_date").isNull() & F.col("_mapped_date").isNull() &
+                                 F.col("derived_operating_date").isNotNull()))
+        joined = joined.withColumn("date_source", F.when(F.col("operating_date").isNotNull(), "framed")
+                                   .when(F.col("_mapped_date").isNotNull(), "alias").otherwise(F.col("derived_date_source"))) \
+            .withColumn("operating_date", F.coalesce("operating_date", "_mapped_date", "derived_operating_date")) \
+            .drop("derived_operating_date", "derived_date_source")
+    else:
+        joined = joined.withColumn("operating_date", F.coalesce("operating_date", "_mapped_date"))
+    return joined.drop("_alias", "_mapped_journey", "_mapped_date")
 
 
 def merge_plan(rt, plan, key):
@@ -145,7 +157,7 @@ def conform(df, quays, lines):
 
 def build_journeys(versions, plan):
     columns = JOURNEY_KEY + ["line_id", "operator_id", "direction_id", "mode", "codespace", "vehicle_id",
-                             "source_mode",
+                             "source_mode", "date_source",
                              "journey_cancelled", "extra_journey", "monitored", "recorded_at", "received_at",
                              "payload_sha256", "record_sha256", "source_file", "bronze_run_id", "source_journey_id", "entity_index", "dq_issue"]
     rt = latest(versions.filter(functions().col("kind") == "journey").select(*columns), JOURNEY_KEY)
@@ -154,8 +166,12 @@ def build_journeys(versions, plan):
 
 def build_calls(versions, plan, journeys):
     F = functions()
-    calls = versions.filter(F.col("kind") == "call").drop("kind", "entity_json", "source_date", "journey_cancelled", "extra_journey")
+    attributes = ["line_id", "operator_id", "direction_id", "mode", "source_mode", "codespace", "vehicle_id", "monitored", "date_source"]
+    calls = versions.filter(F.col("kind") == "call").drop("kind", "entity_json", "source_date", "journey_cancelled", "extra_journey", *attributes)
     final = latest(calls, CALL_KEY, actual_first=True).withColumn("reported_quay_id", F.col("quay_id"))
+    # Call versions carry no journey attributes (silver_parse.parse_et); the journey's latest do.
+    final = final.join(journeys.filter(F.col("has_realtime")).select(*JOURNEY_KEY, *[c for c in attributes if c in journeys.columns]),
+                       JOURNEY_KEY, "left")
     final = merge_plan(final, plan, CALL_KEY)
     # A cancellation-only journey message may have no calls. Its latest flag
     # still reaches every planned call, independently of the call-time winner.
@@ -168,7 +184,11 @@ def build_calls(versions, plan, journeys):
         # ET aimed remains distinct from the archived plan. Neither is an actual.
         final = final.withColumn(f"{event}_delay_s", actual.cast("double") - aimed.cast("double")) \
             .withColumn(f"actual_{event}_equals_aimed", actual == aimed)
+    # Half an hour early or six hours late at one call: batch-stamped or wrong-day actuals, e.g.
+    # a whole ferry journey stamped 9 h before departure (2026-10-29). Real delays stay unflagged.
     return issues(final, ("missing_quay", F.col("quay_id").isNull()),
+                  ("implausible_arrival_delay", (F.col("arrival_delay_s") < -1800) | (F.col("arrival_delay_s") > 21600)),
+                  ("implausible_departure_delay", (F.col("departure_delay_s") < -1800) | (F.col("departure_delay_s") > 21600)),
                   ("missing_reported_quay", F.col("has_realtime") & F.col("reported_quay_id").isNull()),
                   ("nonpositive_call_order", F.col("call_order") <= 0),
                   ("departure_before_arrival", F.col("actual_departure_at") < F.col("actual_arrival_at")),
@@ -288,13 +308,13 @@ def atomic_json(path, record):
     os.replace(tmp, path)
 
 
-def publish(stage, root, record, day):
+def publish(stage, root, record, day, runs=None):
     """Stage and check first; publish readiness last. Roll back a failed install.
 
     Runs/readers must use the documented VM lock. No landing/Bronze files are
     moved. Backups live inside this run's staging directory until commit.
     """
-    marker = root / "_runs" / f"operating_date={day}" / "latest.json"
+    marker = (runs or root / "_runs" / f"operating_date={day}") / "latest.json"
     previous = marker.read_text() if marker.exists() else None
     moved, installed = [], []
     atomic_json(marker, dict(record, status="publishing", ready=False))
@@ -323,10 +343,10 @@ def publish(stage, root, record, day):
         raise
 
 
-def read_bronze(spark, output, feed, day, allow_partial, record):
+def read_bronze(spark, output, feed, day, allow_partial, record, days=None):
     F = functions()
-    days = [day + timedelta(days=n) for n in (-1, 0, 1)] if feed == "et" else [day]
-    frames = []
+    days = days or ([day + timedelta(days=n) for n in (-1, 0, 1)] if feed == "et" else [day])
+    frames = {}
     evidence = {}
     for source_day in days:
         folder = Path(output) / "bronze" / DATASETS[feed] / f"date={source_day}"
@@ -344,21 +364,96 @@ def read_bronze(spark, output, feed, day, allow_partial, record):
         evidence[str(source_day)] = {"missing_hours": missing, "rows": sum(r["rows"] for r in audit),
                                      "bronze_status": statuses, "bronze_run_ids": sorted({r["_bronze_run_id"] for r in audit}),
                                      "parquet_bytes": sum(p.stat().st_size for p in folder.glob("*.parquet"))}
-        frames.append(frame.withColumn("source_date", F.lit(str(source_day))))
+        frames[source_day] = frame.withColumn("source_date", F.lit(str(source_day)))
     record["inputs"][feed] = evidence
     complete = all(not entry["missing_hours"] for entry in evidence.values())
     if not complete and not allow_partial:
         raise ValueError(f"incomplete {feed} Bronze coverage: {evidence}; use --allow-partial only for exploration")
     if not frames:
         raise FileNotFoundError(f"no completed Bronze input for {feed} near {day}")
-    result = frames[0]
-    for frame in frames[1:]:
-        result = result.unionByName(frame)
-    raw_line = F.col("_bronze_raw_line") if "_bronze_raw_line" in result.columns else F.lit(None).cast("string")
-    result = result.withColumn("record_sha256", F.coalesce("_bronze_payload_sha256", F.sha2(raw_line, 256),
-        F.sha2(F.to_json(F.struct("received_at", "_bronze_status", "_bronze_source_file")), 256)))
-    return result.select("received_at", "payload", "_bronze_source_file", "_bronze_payload_sha256",
-                         "record_sha256", "_bronze_run_id", "_bronze_status", "source_date"), complete
+
+    def source(frame):
+        raw_line = F.col("_bronze_raw_line") if "_bronze_raw_line" in frame.columns else F.lit(None).cast("string")
+        frame = frame.withColumn("record_sha256", F.coalesce("_bronze_payload_sha256", F.sha2(raw_line, 256),
+            F.sha2(F.to_json(F.struct("received_at", "_bronze_status", "_bronze_source_file")), 256)))
+        return frame.select("received_at", "payload", "_bronze_source_file", "_bronze_payload_sha256",
+                            "record_sha256", "_bronze_run_id", "_bronze_status", "source_date")
+    return {source_day: source(frame) for source_day, frame in frames.items()}, complete
+
+
+def decode_day(spark, root, stage, feed, source_day, source, evidence):
+    """Typed versions of one Bronze day, decoded once: ET needs D-1, D and D+1 for every operating
+    day, so three runs would otherwise parse the same XML. Reused unless Bronze or the decoder changed.
+    """
+    F = functions()
+    folder = root / "_decoded" / feed / f"source_date={source_day}"
+    audit = evidence[str(source_day)]
+    stamp = dict(decoder=DECODER_VERSION, bronze_run_ids=audit["bronze_run_ids"], rows=audit["rows"], parquet_bytes=audit["parquet_bytes"])
+    marker = folder / "_decoded.json"
+    if marker.exists() and json.loads(marker.read_text()) == stamp:
+        return folder
+    work = stage / "_work" / f"{feed}-{source_day}"
+    previous = spark.conf.get("spark.sql.execution.arrow.maxRecordsPerBatch")
+    # Rows per Arrow batch: an ET message can be 22M characters, ten thousand of the default is ~300 MB.
+    spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", "500")
+    try:
+        spec = schema(feed)
+        source.mapInArrow(arrow_decoder(partial(decode_partition, feed=feed), spec), spec).write.parquet(str(work))
+    finally:
+        spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", previous)
+    atomic_json(work / "_decoded.json", stamp)
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    if folder.exists():
+        shutil.rmtree(folder)
+    os.replace(work, folder)
+    return folder
+
+
+def unfinished_days(runs_of, target, days=CATCH_UP_DAYS):
+    """Days before target whose marker does not say ready, oldest first: a scheduled run tries them
+    again, so one failed night does not leave a hole that nobody asked to fill."""
+    out = []
+    for n in range(days, 0, -1):
+        day = target - timedelta(days=n)
+        marker = runs_of(day) / "latest.json"
+        if not (marker.exists() and json.loads(marker.read_text()).get("ready") is True):
+            out.append(day)
+    return out
+
+
+def silver_spark(output_dir):
+    scratch = Path(os.environ.get("DAT535_SPARK_LOCAL_DIR", str(Path(output_dir).parent / "spark-scratch")))
+    scratch.mkdir(parents=True, exist_ok=True)
+    return bronze_spark("DAT535-Silver-Entur", settings={
+        "spark.master": os.environ.get("SPARK_MASTER", "local[4]"),
+        "spark.local.dir": str(scratch),
+        "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", "32")})
+
+
+def decode_only(output_dir, day, spark=None):
+    """Decode one UTC day of Bronze and stop: the slow part as a step of its own, so that a
+    backfill can release the Spark lock between days (the nightly Bronze waits for it)."""
+    root = Path(output_dir) / "silver"
+    stage = root / "_staging" / ("decode-" + uuid.uuid4().hex[:8])
+    owned_spark = spark is None
+    record = dict(inputs={})
+    started = time.monotonic()
+    try:
+        if spark is None:
+            spark = silver_spark(output_dir)
+        for module in ("bronze.py", "silver.py", "silver_parse.py", "silver_reference.py"):
+            spark.sparkContext.addPyFile(str(Path(__file__).with_name(module)))
+        stage.mkdir(parents=True)
+        for feed in DATASETS:
+            frames, _ = read_bronze(spark, output_dir, feed, day, True, record, days=[day])
+            for source_day, frame in frames.items():
+                decode_day(spark, root, stage, feed, source_day, frame, record["inputs"][feed])
+        log.info("decoded %s in %.0f s", day, time.monotonic() - started)
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+        if owned_spark and spark is not None:
+            spark.stop()
 
 
 def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MINUTES):
@@ -390,13 +485,8 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
                 with path.open("rb") as source:
                     record["references"][dataset]["sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
         if spark is None:
-            scratch = Path(os.environ.get("DAT535_SPARK_LOCAL_DIR", str(Path(output_dir).parent / "spark-scratch")))
-            scratch.mkdir(parents=True, exist_ok=True)
-            spark = bronze_spark("DAT535-Silver-Entur", settings={
-                "spark.master": os.environ.get("SPARK_MASTER", "local[4]"),
-                "spark.local.dir": str(scratch),
-                "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", "32")})
-        for module in ("silver.py", "silver_parse.py", "silver_reference.py"):
+            spark = silver_spark(output_dir)
+        for module in ("bronze.py", "silver.py", "silver_parse.py", "silver_reference.py"):
             spark.sparkContext.addPyFile(str(Path(__file__).with_name(module)))
         stage.mkdir(parents=True)
         inputs, complete = {}, True
@@ -465,17 +555,15 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
         # Check the small feeds before spending hours decoding nationwide ET.
         for feed in ("sx", "vehicles", "et"):
             source = inputs[feed]
-            work = stage / "_work" / feed
-            parsed = spark.createDataFrame(source.rdd.mapPartitions(
-                lambda it, feed=feed: decode_partition(it, feed, target_day=day if feed == "et" else None)), schema(feed))
-            parsed.write.parquet(str(work))
-            parsed = spark.read.parquet(str(work))
-            if feed == "et":
-                record["inputs"][feed]["decode_scope"] = "target day, unresolved dates and unusable identities; controls/quarantine retained"
+            parsed = spark.read.parquet(*[str(decode_day(spark, root, stage, feed, source_day, frame, record["inputs"][feed]))
+                                          for source_day, frame in source.items()])
             record["inputs"][feed]["decoded"] = {r["kind"]: r["count"] for r in parsed.groupBy("kind").count().collect()}
             bad = parsed.filter(F.col("kind") == "quarantine")
             quarantine.append(quarantine_rows(bad, feed))
             parsed = parsed.filter(~F.col("kind").isin("quarantine", "control"))
+            if feed == "et":
+                # Explicitly another day: that day's run owns it. Pushed down to the Parquet scan.
+                parsed = parsed.filter((F.col("operating_date") == F.lit(day)) | F.col("operating_date").isNull())
             if feed in {"et", "vehicles"}:
                 parsed = normalize_journeys(parsed, aliases)
                 parsed = issues(parsed, ("missing_operating_date", F.col("operating_date").isNull()),
@@ -568,16 +656,28 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
 def main(argv=None):
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", type=Date.fromisoformat, default=(utcnow() - timedelta(days=2)).date(),
-                        help="Norwegian operating day, YYYY-MM-DD (default: two days ago)")
+    parser.add_argument("--date", type=Date.fromisoformat,
+                        help=f"Norwegian operating day, YYYY-MM-DD (default: two days ago, and any unfinished day in the {CATCH_UP_DAYS} days before)")
     parser.add_argument("--allow-partial", action="store_true", help="publish exploration output with ready=false when input is incomplete")
+    parser.add_argument("--decode-only", action="store_true", help="--date is a UTC Bronze day: decode it and publish nothing")
     args = parser.parse_args(argv)
+    landing, output = Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output"))
+    target = args.date or (utcnow() - timedelta(days=2)).date()
     try:
-        run(Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output")),
-            args.date, allow_partial=args.allow_partial)
+        if args.decode_only:
+            decode_only(output, target)
+            return 0
+        run(landing, output, target, allow_partial=args.allow_partial)
     except (OSError, ValueError) as error:
         log.error("%s", error)
         return 1
+    if args.date is None:
+        for day in unfinished_days(lambda d: output / "silver" / "_runs" / f"operating_date={d}", target):
+            try:
+                log.warning("%s has no ready Silver: catching up", day)
+                run(landing, output, day)
+            except (OSError, ValueError) as error:
+                log.error("catching up %s: %s", day, error)
     return 0
 
 

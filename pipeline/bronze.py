@@ -50,6 +50,7 @@ OPEN = re.compile(r"^hour=(\d{2})\.jsonl\.part$")
 # lines corrupt. Real payloads are longer: ET pushes of 21.6M and 22.8M characters on
 # 2026-10-22, every DATEX situation snapshot (~28.6M). The reader option lifts the cap.
 MAX_STRING_LEN = 2**31 - 1
+CATCH_UP_DAYS = 3
 
 
 def utcnow():
