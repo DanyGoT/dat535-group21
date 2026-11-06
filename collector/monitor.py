@@ -16,6 +16,8 @@ Environment:
     DATEX_FEEDS             the DATEX poller's feeds (default: all of datex.FEEDS)
     MONITOR_STATIC          daily downloads to check (default: netex,nsr; empty = none)
     MONITOR_STATIC_MAX_AGE_H  newest archived file must be younger than this (default: 30)
+    MONITOR_BRONZE_DIR      Bronze of the daily batch (default: prod/bronze next to the landing root)
+    MONITOR_BRONZE_DEADLINE_H  UTC hour by which yesterday's Bronze must exist (default: 16)
     MONITOR_STATUS_DIR      output directory, the only thing ever served (default: ./status)
     MONITOR_MAX_PART_AGE_MIN  .part must be modified within this many minutes (default: 5)
     MONITOR_DISK_MAX_PCT    usage limit in percent for the landing volume and / (default: 90)
@@ -32,7 +34,7 @@ import socket
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from datex import FEEDS as DATEX_FEEDS
@@ -209,6 +211,27 @@ def check_static(landing, dataset, now, max_age_h):
     if age > max_age_h * 3600:
         res.update(ok=False, reason=f"{dataset}: last archived {fmt_age(age)} ago ({res['file']})",
                    short=f"{dataset}: not archived for {fmt_age(age)}")
+    return res
+
+
+def check_bronze(bronze, now, deadline_h, days=7):
+    """The daily batch left its output: a partition for each of the last days, per dataset that
+    has started. Collectors can be green while Bronze quietly loses a day (2026-11-05: the run
+    timed out waiting for the Spark lock, and nothing said so). Read-only, only looks at markers."""
+    res = {"ok": True, "reason": None, "short": None, "missing": []}
+    root = Path(bronze)
+    last = (now - timedelta(days=1 if now.hour >= deadline_h else 2)).date()
+    for folder in sorted(root.iterdir()) if root.is_dir() else []:
+        started = sorted(p.name.removeprefix("date=") for p in folder.glob("date=*"))
+        if folder.name.startswith("_") or not started:
+            continue
+        for n in range(days):
+            day = last - timedelta(days=n)
+            if str(day) >= started[0] and not (folder / f"date={day}" / "_SUCCESS").exists():
+                res["missing"].append(f"{folder.name} {day}")
+    if res["missing"]:
+        res.update(ok=False, reason="Bronze missing: " + ", ".join(res["missing"][:6]) + ("…" if len(res["missing"]) > 6 else ""),
+                   short=f"Bronze missing: {len(res['missing'])} partitions")
     return res
 
 
@@ -418,6 +441,10 @@ def render(status, host):
             out.append(row("OK" if c["ok"] else "FAILED", c["ok"], key[7:], nums,
                            c["reason"] or f"daily archive, {c['file']}"))
 
+    b = checks.get("bronze")
+    if b:
+        out.append(row("OK" if b["ok"] else "FAILED", b["ok"], "bronze", "", b["reason"] or "daily batch: every partition of the last 7 days exists"))
+
     for key, desc in (("disk", "data volume: landing, Bronze, Silver, Gold"),
                       ("root-disk", "root volume: /tmp (Spark spill), Prometheus, the runner")):
         d = checks.get(key)
@@ -549,6 +576,8 @@ def main():
     static_max_age = float(os.environ.get("MONITOR_STATIC_MAX_AGE_H", "30"))
     for d in static_from_env():
         checks[f"static:{d}"] = check_static(landing, d, now, static_max_age)
+    checks["bronze"] = check_bronze(os.environ.get("MONITOR_BRONZE_DIR", landing.parent / "prod" / "bronze"), now,
+                                    int(os.environ.get("MONITOR_BRONZE_DEADLINE_H", "16")))
     checks["disk"] = check_disk(landing, disk_max)
     # Spark spills to /tmp on the small root volume; a full one failed Bronze on 2026-10-24.
     checks["root-disk"] = check_disk("/", disk_max, "root disk")

@@ -429,6 +429,26 @@ class MonitorTest(unittest.TestCase):
         self.assertIn("datex poller not running", r.stdout)
         self.assertIn("datex-situation: no successful poll yet", r.stdout)
 
+    def test_bronze_partitions_of_the_last_days(self):
+        import monitor
+        bronze = self.tmp / "bronze"
+        now = datetime(2026, 11, 6, 17, 0, tzinfo=timezone.utc)
+        self.assertTrue(monitor.check_bronze(bronze, now, 16)["ok"])     # nothing started yet
+        for day in ("2026-11-03", "2026-11-05"):
+            (bronze / "siri-et" / f"date={day}").mkdir(parents=True)
+            (bronze / "siri-et" / f"date={day}" / "_SUCCESS").touch()
+        (bronze / "siri-et" / "date=2026-11-04").mkdir()     # a failed run: no marker
+        (bronze / "_runs" / "date=2026-11-05").mkdir(parents=True)
+        result = monitor.check_bronze(bronze, now, 16)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["missing"], ["siri-et 2026-11-04"])     # days before it started don't count
+        self.assertIn("Bronze missing: siri-et 2026-11-04", result["reason"])
+        # Before the deadline yesterday is not due yet, the hole still is.
+        early = monitor.check_bronze(bronze, datetime(2026, 11, 7, 9, 0, tzinfo=timezone.utc), 16)
+        self.assertEqual(early["missing"], ["siri-et 2026-11-04"])
+        late = monitor.check_bronze(bronze, datetime(2026, 11, 7, 17, 0, tzinfo=timezone.utc), 16)
+        self.assertEqual(late["missing"], ["siri-et 2026-11-06", "siri-et 2026-11-04"])
+
     def test_stale_part(self):
         old = time.time() - 600
         os.utime(self.part, (old, old))
