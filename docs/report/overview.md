@@ -142,8 +142,10 @@ writes a JSON record: files, rows, bad rows, missing and open hours.
 | DATEX: `parquet.page.size.row.check.min` = 1 | Parquet measures its buffer only after 100 rows; every row is 26.6M characters, and the first full day ran out of heap |
 
 **Is it sound?** Audited 2026-11-06: Bronze rows equal landing lines on every feed checked, and the only
-collection dip is 2026-10-21, 15-17 UTC. One day was never ingested: SIRI for 2026-10-23 (landing
-is complete, so one manual rerun restores it).
+collection dip is 2026-10-21, 15-17 UTC. SIRI for 2026-10-23 was never ingested; one manual rerun
+restored it from landing (2026-11-06, prod run 78: 4,808,892 ET, 4,605 SX and 643,233 vehicle rows,
+equal to the landing lines). Vehicle positions reach Bronze from 2026-10-26, plus that 2026-10-23;
+landing has them from 2026-10-17.
 
 DATEX has its own Bronze job, `pipeline/bronze_datex.py`, because one row is one poll and failed polls
 are evidence: a run reports polls by outcome, distinct snapshots and the longest gap.
@@ -183,11 +185,13 @@ for call_index, call in enumerate(calls):
     ...
 ```
 
-Dropping a repeat loses nothing: a state holds until the next one, and the first copy has the earliest
-time. Two things make that true, both found by comparing with the slow version key by key
+Dropping a repeat loses (almost) nothing: a state holds until the next one, and the first copy has the
+earliest time. Two things make that true, both found by comparing with the slow version key by key
 (`problems.md`, 2026-11-06): the memory keeps the newest copy it dropped, so a late replay of older
 data still loses to it, and it starts over wherever a task's input breaks, because Spark packs
-pieces of several hours into one task, largest first. Rows leave Python through Arrow
+pieces of several hours into one task, largest first. What is left is measured: memory does not
+cross a task boundary, so a replay right after one can still count: on 2026-10-29, 2 of 33.0 M
+predictions moved by 3 s and 100 got a later `available_at` (seconds). Rows leave Python through Arrow
 (`mapInArrow`) instead of being pickled one by one.
 
 ### Every version gets an operating day

@@ -40,7 +40,13 @@ Entry template:
   replay that is older and adds no actual time (`says_something_new`). Its memory starts over
   wherever consecutive rows are more than 60 s apart, either way: messages are at most 9.5 s apart
   even at night, and arrival order jitters by at most 0.4 s (5,776 steps back in 400,802 lines).
-- **Trade-off:** A repeat that crosses a break in the input is kept: a few more rows, never fewer.
+- **Result (2026-10-29, key by key against the published run):** no prediction, call or journey
+  missing; vehicles and SX identical. 2 of 33.0 M predictions differ (3 s) and 100 have a later
+  `available_at` (a sample: 4 to 26 s), all at one task boundary, 15:52:13.
+- **Trade-off:** Memory does not cross a task boundary. Before 15:52:13 a task dropped an AKT
+  copy (recorded 15:52:02.4) as a repeat; the next task starts fresh, so the replay at 15:52:16.9
+  (recorded 15:52:01.6) is kept, and since the as-of rule never saw the newer copy, it counts.
+  Carrying memory across tasks would need ordered input or a second pass; not worth 102 rows.
 - **Lesson:** An optimisation that drops rows must preserve every rule downstream that reads those
   rows, and a row order the engine never promised is not an order.
 
