@@ -7,8 +7,18 @@ values become explicit issues; a malformed message becomes a quarantine record.
 import hashlib
 import json
 import math
+import re
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+OSLO = ZoneInfo("Europe/Oslo")
+# Bump when a decoded table's meaning changes: Silver then decodes Bronze again.
+DECODER_VERSION = 2
+SIRI_NAMESPACE = ' xmlns="http://www.siri.org.uk/siri"'
+# The operating day inside a dated id: VYG:DatedServiceJourney:1614_DAL-DRM_26-11-05,
+# ..._2026-10-30_ExtraJourney, and Bane NOR's 660:2026-11-05.
+DATE_IN_ID = re.compile(r"[_:](\d{4}|\d{2})-(\d{2})-(\d{2})(?:_[A-Za-z]+)?$")
 
 
 def local(tag):
@@ -59,8 +69,8 @@ def number(value, issues, field, integer=False):
         return None
     try:
         result = int(value) if integer else float(value)
-        if not math.isfinite(result):
-            raise ValueError("non-finite")
+        if not math.isfinite(result) or (integer and not -(2**31) <= result < 2**31):
+            raise ValueError("outside the column's range")
         return result
     except (ValueError, TypeError, OverflowError):
         issues.append(f"invalid_{field}")
@@ -102,9 +112,52 @@ def reject(base, issue, entity=None):
                 entity_json=json.dumps(entity, default=str, sort_keys=True) if entity else None)
 
 
-def parse_et(payload, base, target_day=None):
-    """One ET journey version, then its call versions. Never manufacture actuals."""
-    root = strip_ns(ET.fromstring(payload))
+def siri_root(payload):
+    """Parsed message with plain tag names. Dropping the default namespace before parsing costs a
+    fifth of strip_ns() on real ET messages; anything else still goes through strip_ns()."""
+    root = ET.fromstring(payload.replace(SIRI_NAMESPACE, "", 1))
+    return strip_ns(root) if root.tag.startswith("{") else root
+
+
+def date_in_id(journey_id):
+    match = DATE_IN_ID.search(journey_id) if journey_id else None
+    if not match:
+        return None
+    year, month, day_of_month = match.groups()
+    try:
+        return date(int(year) + (2000 if len(year) == 2 else 0), int(month), int(day_of_month))
+    except ValueError:
+        return None
+
+
+def first_call_day(journey):
+    """Local date of the first aimed time: the last resort for an extra journey that names no
+    operating day anywhere. Flagged, because a night journey can belong to the day before."""
+    for call in journey.iter():
+        if call.tag in ("RecordedCall", "EstimatedCall"):
+            for tag in ("AimedDepartureTime", "AimedArrivalTime"):
+                value = call.findtext(tag)
+                if value:
+                    try:
+                        return datetime.fromisoformat(value.strip().replace("Z", "+00:00")).astimezone(OSLO).date()
+                    except (ValueError, OverflowError):
+                        return None
+            return None
+    return None
+
+
+def parse_et(payload, base, last=None):
+    """Journey and call versions, only those that say something new. Never manufacture actuals.
+
+    A journey restates all its calls on every change: in a real hour 54 % of call versions
+    and 96 % of journey versions repeat the previous one (98 % of RecordedCalls). `last` is this
+    task's memory of each entity's latest state, as a hash (~90 MB per task, the states
+    themselves would be 560 MB). A dropped repeat loses nothing: a state holds until the next
+    one, and the first copy has the earliest availability. A state that repeats across tasks
+    stays, which only costs a row. Call rows carry no journey attributes.
+    """
+    last = {} if last is None else last
+    root = siri_root(payload)
     journeys = list(root.iter("EstimatedVehicleJourney"))
     if not journeys:
         yield protocol_or_reject(root, base, "EstimatedTimetableDelivery")
@@ -117,36 +170,42 @@ def parse_et(payload, base, target_day=None):
         direct = text(journey, "DatedVehicleJourneyRef")
         extra = text(journey, "EstimatedVehicleJourneyCode")
         jid = jid or direct or extra
-        # Extras with no explicit operating day are not assigned the receive date.
-        base_row = dict(base, dq_issue=issues, entity_index=index, journey_id=jid,
-                        operating_date=op, dated_journey_id=direct,
-                        recorded_at=timestamp(text(journey, "RecordedAtTime"), issues, "recorded_at"),
-                        line_id=text(journey, "LineRef"), operator_id=text(journey, "OperatorRef"),
-                        direction_id=text(journey, "DirectionRef"), mode=canonical_mode(text(journey, "VehicleMode")),
-                        source_mode=text(journey, "VehicleMode"),
-                        codespace=text(journey, "DataSource") or (jid.split(":")[0] if jid else None),
-                        vehicle_id=text(journey, "VehicleRef"),
-                        journey_cancelled=boolean(text(journey, "Cancellation"), issues, "journey_cancelled"),
-                        extra_journey=boolean(text(journey, "ExtraJourney"), issues, "extra_journey"),
-                        monitored=boolean(text(journey, "Monitored"), issues, "monitored"))
-        # An explicit different day cannot become the target after alias
-        # resolution (normalize_journeys coalesces the explicit day first).
-        # Keep unknown dates/IDs and unusable call orders for quarantine. This
-        # applies the existing scope before expensive call-time conversion and
-        # Spark row verification, while preserving original entity indices.
-        outside = target_day is not None and op is not None and op != target_day and jid is not None
-        if not outside or index >= 2**31:
-            yield dict(base_row, kind="journey")
-        for call_index, call in enumerate(list(journey.iter("RecordedCall")) + list(journey.iter("EstimatedCall"))):
-            ci = list(issues)
-            order = number(text(call, "Order"), ci, "call_order", integer=True)
-            entity_index = index * 100000 + call_index
-            # Values outside Spark's integer contract must still reach its
-            # verifier, including when they belong to a different day.
-            if outside and order is not None and -(2**31) <= order < 2**31 and entity_index < 2**31:
+        # Resolved in Silver: explicit day, then the plan's alias, then these two.
+        derived, source = None, None
+        if op is None:
+            derived, source = date_in_id(jid), "id"
+            if derived is None:
+                derived, source = first_call_day(journey), "first_call"
+        recorded = text(journey, "RecordedAtTime")
+        shared = dict(received_at=base["received_at"], source_file=base["source_file"], payload_sha256=base["payload_sha256"],
+                      bronze_run_id=base["bronze_run_id"], source_date=base["source_date"], journey_id=jid, operating_date=op,
+                      dated_journey_id=direct, derived_operating_date=derived, derived_date_source=source if derived else None)
+        state = hash(tuple((child.tag, child.text) for child in journey if child.tag not in ("RecordedAtTime", "RecordedCalls", "EstimatedCalls")))
+        key = (op, jid)
+        if last.get(key) != state:
+            last[key] = state
+            mode = text(journey, "VehicleMode")
+            yield dict(shared, kind="journey", dq_issue=issues, entity_index=index, record_sha256=base.get("record_sha256"),
+                       recorded_at=timestamp(recorded, issues, "recorded_at"),
+                       line_id=text(journey, "LineRef"), operator_id=text(journey, "OperatorRef"),
+                       direction_id=text(journey, "DirectionRef"), mode=canonical_mode(mode), source_mode=mode,
+                       codespace=text(journey, "DataSource") or (jid.split(":")[0] if jid else None),
+                       vehicle_id=text(journey, "VehicleRef"),
+                       journey_cancelled=boolean(text(journey, "Cancellation"), issues, "journey_cancelled"),
+                       extra_journey=boolean(text(journey, "ExtraJourney"), issues, "extra_journey"),
+                       monitored=boolean(text(journey, "Monitored"), issues, "monitored"))
+        calls = list(journey.iter("RecordedCall")) + list(journey.iter("EstimatedCall"))
+        for call_index, call in enumerate(calls):
+            raw_order = call.findtext("Order")
+            state = hash((call.tag, tuple((child.tag, child.text) for child in call)))
+            key = (op, jid, raw_order)
+            if last.get(key) == state:
                 continue
-            row = dict(base_row, kind="call", dq_issue=ci, entity_index=entity_index,
-                       call_order=order,
+            last[key] = state
+            ci = list(issues)
+            row = dict(shared, kind="call", dq_issue=ci, entity_index=index * 100000 + call_index,
+                       recorded_at=timestamp(recorded, ci, "recorded_at"),
+                       call_order=number(raw_order.strip() if raw_order else None, ci, "call_order", integer=True),
                        quay_id=text(call, "StopPointRef"), call_kind=call.tag,
                        call_cancelled=boolean(text(call, "Cancellation"), ci, "call_cancelled"),
                        extra_call=boolean(text(call, "ExtraCall"), ci, "extra_call"),
@@ -285,8 +344,8 @@ def parse_vehicles(payload, base):
         yield row
 
 
-def decode_partition(rows, feed, target_day=None):
-    parser = {"et": parse_et, "sx": parse_sx, "vehicles": parse_vehicles}[feed]
+def decode_partition(rows, feed):
+    last = {}
     for source in rows:
         base = provenance(source)
         if source["_bronze_status"] != "ok":
@@ -294,25 +353,55 @@ def decode_partition(rows, feed, target_day=None):
             continue
         try:
             if feed == "et":
-                yield from parser(source["payload"], base, target_day=target_day)
+                yield from parse_et(source["payload"], base, last)
             else:
-                yield from parser(source["payload"], base)
+                yield from {"sx": parse_sx, "vehicles": parse_vehicles}[feed](source["payload"], base)
         except (ET.ParseError, json.JSONDecodeError):
             yield reject(base, "malformed_payload")
 
 
+def arrow_decoder(decode, spark_schema, flush_rows=20000):
+    """mapInArrow body: Bronze rows in, decoded rows out, one decode() call per task so it can
+    keep state. Pickling every row through createDataFrame cost 60 % of the decode time
+    (docs/report/evidence/silver-decode-cpu-profile-2026-11-04.json); Arrow also checks types."""
+    def run(batches):
+        import pyarrow as pa
+        from pyspark.sql.pandas.types import to_arrow_schema
+
+        target = to_arrow_schema(spark_schema)
+        names = target.names
+
+        def rows():
+            for batch in batches:
+                yield from batch.to_pylist()
+
+        columns, count = {n: [] for n in names}, 0
+        for record in decode(rows()):
+            for name in names:
+                columns[name].append(record.get(name))
+            count += 1
+            if count >= flush_rows:
+                yield pa.RecordBatch.from_pydict(columns, schema=target)
+                columns, count = {n: [] for n in names}, 0
+        if count:
+            yield pa.RecordBatch.from_pydict(columns, schema=target)
+    return run
+
+
 def schema(feed):
     """Stable, explicit Spark contracts. Raw payloads never enter these schemas."""
-    from pyspark.sql.types import (ArrayType, BooleanType, DateType, DoubleType, IntegerType,
+    from pyspark.sql.types import (ArrayType, BooleanType, DateType, DoubleType, IntegerType, LongType,
                                    StringType, StructField, StructType, TimestampType)
     fields = {"kind": StringType(), "received_at": TimestampType(), "source_file": StringType(),
               "payload_sha256": StringType(), "record_sha256": StringType(), "bronze_run_id": StringType(), "source_date": StringType(),
-              "entity_index": IntegerType(), "dq_issue": ArrayType(StringType(), False),
+              "entity_index": LongType(), "dq_issue": ArrayType(StringType(), False),
               "entity_json": StringType()}
     if feed in {"et", "vehicles"}:
         fields.update({k: StringType() for k in ("journey_id", "dated_journey_id", "line_id", "operator_id",
                                                "direction_id", "direction_name", "mode", "source_mode", "codespace", "vehicle_id", "quay_id", "occupancy")})
         fields.update(operating_date=DateType(), call_order=IntegerType(), monitored=BooleanType())
+    if feed == "et":
+        fields.update(derived_operating_date=DateType(), derived_date_source=StringType())
     if feed == "et":
         fields.update({k: TimestampType() for k in ("recorded_at", "aimed_arrival_at", "aimed_departure_at",
                                                   "expected_arrival_at", "expected_departure_at",

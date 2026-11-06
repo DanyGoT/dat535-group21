@@ -120,20 +120,62 @@ class ParseTest(unittest.TestCase):
                 self.assertEqual(row["validity_periods"][0]["end_at"], instant("2026-10-27T12:00:00Z"))
                 self.assertIn("invalid_validity_start", row["dq_issue"])
 
-    def test_early_scope_preserves_target_unknown_dates_and_quarantine_candidates(self):
-        outside = et(call() + call(order=2) + call().replace("<Order>1</Order>", "")) \
-            .replace(f"<DataFrameRef>{DAY}</DataFrameRef>", "<DataFrameRef>2026-10-25</DataFrameRef>")
-        for xml in (et(call(actual="2026-10-26T08:11:00Z")), outside,
-                    et(call(), framed=False, jid="T:DatedServiceJourney:1"),
-                    outside.replace(f"<DatedVehicleJourneyRef>{JID}</DatedVehicleJourneyRef>", ""),
-                    outside.replace("<Order>2</Order>", "<Order>2147483648</Order>"),
-                    "<Siri><HeartbeatNotification/></Siri>", "<Unknown/>"):
-            with self.subTest(xml=xml):
-                unscoped = list(P.parse_et(xml, base()))
-                expected = [r for r in unscoped if r["kind"] not in {"journey", "call"}
-                            or r["operating_date"] in (None, DAY) or r["journey_id"] is None
-                            or (r["kind"] == "call" and (r["call_order"] is None or not -(2**31) <= r["call_order"] < 2**31))]
-                self.assertEqual(list(P.parse_et(xml, base(), target_day=DAY)), expected)
+    def test_repeated_states_are_dropped_within_a_task(self):
+        last = {}
+        first = list(P.parse_et(et(call(actual="2026-10-26T08:11:00Z") + call(order=2)), base(), last))
+        self.assertEqual([r["kind"] for r in first], ["journey", "call", "call"])
+        # The whole journey again, later: nothing new.
+        self.assertEqual(list(P.parse_et(et(call(actual="2026-10-26T08:11:00Z") + call(order=2), recorded="2026-10-26T08:01:00Z"),
+                                         base("2026-10-26T08:01:01Z"), last)), [])
+        # Only the changed call; a repeat in another task (a new memory) is kept.
+        changed = list(P.parse_et(et(call(actual="2026-10-26T08:11:00Z") + call(order=2, expected="2026-10-26T08:14:00Z"), recorded="2026-10-26T08:02:00Z"),
+                                  base("2026-10-26T08:02:01Z"), last))
+        self.assertEqual([(r["kind"], r["call_order"]) for r in changed], [("call", 2)])
+        self.assertEqual(changed[0]["received_at"], instant("2026-10-26T08:02:01Z"))
+        self.assertEqual(len(list(P.parse_et(et(call()), base()))), 2)
+
+    def test_journey_row_repeats_only_when_its_state_changes(self):
+        last = {}
+        list(P.parse_et(et(call()), base(), last))
+        cancelled = list(P.parse_et(et(call(), extra="<Cancellation>true</Cancellation>"), base("2026-10-26T08:05:00Z"), last))
+        self.assertEqual([(r["kind"], r["journey_cancelled"]) for r in cancelled], [("journey", True)])
+
+    def test_call_rows_leave_journey_attributes_to_the_journey_row(self):
+        journey, row = list(P.parse_et(et(call()), base()))
+        self.assertEqual(journey["line_id"], "T:Line:1")
+        self.assertNotIn("line_id", row)
+
+    def test_operating_day_inside_a_dated_id(self):
+        for jid, expected in (("VYG:DatedServiceJourney:1614_DAL-DRM_26-11-05", date(2026, 11, 5)),
+                              ("VYG:DatedServiceJourney:601_HFS-BRG_2026-10-30_ExtraJourney", date(2026, 10, 30)),
+                              ("VYG:DatedServiceJourney:BUS-802_SKK-AS_40676BFE_26-10-28", date(2026, 10, 28)),
+                              ("660:2026-11-05", date(2026, 11, 5)),
+                              ("GOA:DatedServiceJourney:3016_STV-EGS_26-11-05", date(2026, 11, 5)),
+                              ("NOR:ServiceJourney:8100_260126119369163_2012:690107063", None),
+                              ("T:ServiceJourney:1_26-13-45", None), (None, None)):
+            self.assertEqual(P.date_in_id(jid), expected, jid)
+
+    def test_undated_journey_keeps_null_day_and_a_labelled_guess(self):
+        dated = list(P.parse_et(et(call(), framed=False, jid="VYG:DatedServiceJourney:1_26-10-27"), base()))[0]
+        self.assertEqual((dated["operating_date"], dated["derived_operating_date"], dated["derived_date_source"]), (None, date(2026, 10, 27), "id"))
+        # 23:30 UTC is the next day in Oslo; an extra journey with no day at all uses the first call.
+        extra = list(P.parse_et(et(call(aimed="2026-10-26T23:30:00Z"), framed=False), base()))[0]
+        self.assertEqual((extra["operating_date"], extra["derived_operating_date"], extra["derived_date_source"]), (None, date(2026, 10, 27), "first_call"))
+        nothing = list(P.parse_et(et(framed=False), base()))[0]
+        self.assertEqual((nothing["derived_operating_date"], nothing["derived_date_source"]), (None, None))
+        framed = list(P.parse_et(et(call()), base()))[0]
+        self.assertEqual((framed["operating_date"], framed["derived_operating_date"]), (DAY, None))
+
+    def test_order_outside_the_column_range_is_flagged(self):
+        row = list(P.parse_et(et(call().replace("<Order>1</Order>", "<Order>2147483648</Order>")), base()))[1]
+        self.assertIsNone(row["call_order"])
+        self.assertIn("invalid_call_order", row["dq_issue"])
+
+    def test_namespace_shortcut_equals_stripping_every_element(self):
+        for xml in (et(call()), "<Unknown/>", '<a:Siri xmlns:a="http://www.siri.org.uk/siri"><a:HeartbeatNotification/></a:Siri>'):
+            root = P.siri_root(xml)
+            stripped = P.strip_ns(P.ET.fromstring(xml))
+            self.assertEqual([e.tag for e in root.iter()], [e.tag for e in stripped.iter()])
 
     def test_cancellation_without_calls_is_a_journey(self):
         rows = list(P.parse_et(et(extra="<Cancellation>true</Cancellation>"), base()))
@@ -542,6 +584,18 @@ class SparkTest(unittest.TestCase):
             self.assertEqual(read("stop_call").filter(F.col("actual_departure_at").isNotNull()).count(), 0)
             self.assertEqual(other.read_text(), "untouched")
             self.assertEqual(before, {p: p.read_bytes() for p in landing.rglob("*.zip")})
+
+
+class UnfinishedDaysTest(unittest.TestCase):
+    def test_only_days_before_the_target_without_a_ready_marker(self):
+        import silver
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = lambda d: Path(tmp) / f"operating_date={d}"
+            for offset, ready in ((1, True), (2, False)):
+                folder = runs(DAY - timedelta(days=offset))
+                folder.mkdir()
+                (folder / "latest.json").write_text(json.dumps(dict(ready=ready)))
+            self.assertEqual(silver.unfinished_days(runs, DAY), [DAY - timedelta(days=3), DAY - timedelta(days=2)])
 
 
 class PublishTest(unittest.TestCase):
