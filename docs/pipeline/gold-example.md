@@ -5,7 +5,7 @@ operating day. Implementation: [`gold_scorecard.py`](../../pipeline/gold_scoreca
 One row is **one line on one operating day**. Operator, public line code, name and mode
 come from that day's reference snapshot. This is a manual prototype, not a scheduled product.
 
-The [simple browser viewer](../../examples/gold-scorecard/README.md) presents these outputs
+The simple browser viewer (branch `examples/gold-scorecard`, kept off `main`) presents these outputs
 with day/line selectors, delay cards and a distribution bar. It uses the checked Gold
 CSV/run record and displays the input's completeness status. The live example currently
 shows the complete operating day 2026-10-29.

@@ -18,7 +18,7 @@ Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 | Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
 | Bronze (SIRI, vehicles, DATEX) | SIRI daily at 03:00 UTC; vehicles and DATEX added |
 | Silver | Entur implemented; complete 2026-10-29 validated on the VM, regular deployment pending; [contracts](docs/pipeline/silver.md) · [run evidence](docs/report/evidence/silver-week-2026-10-26-to-2026-11-01.md) |
-| Gold | full-day [line scorecard example](docs/pipeline/gold-example.md) with a [simple frontend](examples/gold-scorecard/README.md); other [use cases](docs/pipeline/gold.md) remain future work |
+| Gold | full-day [line scorecard example](docs/pipeline/gold-example.md) with a simple frontend (branch `examples/gold-scorecard`, kept off `main`); other [use cases](docs/pipeline/gold.md) remain future work |
 
 ## Docs
 
