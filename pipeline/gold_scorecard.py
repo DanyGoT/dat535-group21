@@ -73,7 +73,8 @@ def build_scorecard(calls, journeys, lines, operators, late_seconds=180):
     scored = reported & ~cancelled & F.coalesce(F.col("for_boarding"), F.lit(True)) & \
         F.col("actual_departure_at").isNotNull() & F.col("aimed_departure_at").isNotNull() & \
         delay.isNotNull() & ~F.isnan(delay) & \
-        ~F.array_contains("dq_issue", "departure_before_arrival")
+        ~F.array_contains("dq_issue", "departure_before_arrival") & \
+        ~F.array_contains("dq_issue", "implausible_departure_delay")
     call_counts = grouped(calls).groupBy(*KEY).agg(
         F.count("*").alias("input_calls"),
         count_if(planned, "planned_calls"),
