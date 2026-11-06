@@ -64,6 +64,25 @@ Entry template:
 - **Trade-off:** none. Rerun old days to reclassify their rows.
 - **Lesson:** "corrupt" rows deserve a look even when there are only two: they were the
   biggest messages, likely full snapshots after a re-subscribe.
+## 2026-11-05 — A long Silver run cost us a day of Bronze, and nothing said so
+
+- **Area:** Bronze, CI/CD
+- **Symptom:** Prod run 74 failed in **Run Bronze** after exactly 3 h with no Spark output. SIRI and
+  vehicles Bronze for 2026-11-04 were never written. Found a day later, in an audit: the status page
+  only watches the collectors, and the next night's run only does its own day.
+- **Evidence:** GitHub Actions run `42010536942`. `flock -w 10800` gave up at 13:25 UTC. A manual
+  4-hour Silver validation held `/data/dat535/.spark.lock` from 10:22 to 14:19. Its runner reserved
+  the "nightly slot" until 06:00 UTC, but the 03:00 cron has started at 08:09-10:36 UTC since October.
+- **Cause:** One lock, and one job holding it longer than the others wait. GitHub delays scheduled
+  runs by hours, so a slot can't be reserved around them.
+- **Fix:** Reran the day by hand (run 76), and 2026-10-28 for the DATEX that #35 left empty (run 77).
+  Silver no longer takes 4 hours (`overview.md`, section 3), which removes the cause. Automatic
+  catch-up and an alert were built and rejected (#39): less code to explain, reruns stay manual.
+- **Trade-off:** A lost day shows only in the failed run's email or the next audit. Check after long
+  manual jobs: `ls /data/dat535/prod/bronze/siri-et | tail`.
+- **Lesson:** Long manual runs on the shared lock are themselves an operational risk: keep them away
+  from the morning, and look at the batch after them.
+
 ## 2026-11-05 — A minimum-date SX timestamp overflowed during UTC conversion
 
 - **Area:** Silver parser and full-feed validation.
@@ -119,8 +138,7 @@ Entry template:
   shape, while the vehicle decoder assumed every transport payload was an object.
 - **Fix:** Gate all Bronze envelope/vehicle shape failures; resolve explicit dated aliases;
   preserve cancellation targets without call versions and retain their journey evidence;
-  decode transport errors before accessing data objects. See the
-  [review regression table](../pipeline/silver-design-log.md#review-regressions--2026-10-28).
+  decode transport errors before accessing data objects. See the Silver tests (`pipeline/tests/test_silver.py`).
 - **Validation:** Offline regressions cover strict/partial runs with all hours present,
   preservation of the previous marker, both ID forms, cancellation before any call update,
   cutoff timing, error arrays and unexpected envelope shapes.

@@ -22,16 +22,17 @@ Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
 
 ## Docs
 
-Start with [`docs/system/architecture.md`](docs/system/architecture.md).
+Start with [`docs/report/overview.md`](docs/report/overview.md): the whole system in one file, with
+code snippets, for the report and the presentation.
 
 | Folder | Docs |
 | ------ | ---- |
 | [`docs/system/`](docs/system/) | [architecture](docs/system/architecture.md): components, landing zone, pipeline, monitoring · [storage](docs/system/storage.md): VM capacity, volumes, runway, manual cleanup, Spark memory rules · [switchboard-style](docs/system/switchboard-style.md): look of the status page |
-| [`docs/pipeline/`](docs/pipeline/) | [methodology](docs/pipeline/methodology.md): how we decide, layer by layer · [silver](docs/pipeline/silver.md): contracts and operation · [Silver log](docs/pipeline/silver-design-log.md): decisions, code snippets and evidence · [gold](docs/pipeline/gold.md): use cases, the prediction product |
+| [`docs/pipeline/`](docs/pipeline/) | [methodology](docs/pipeline/methodology.md): how we decide, layer by layer · [silver](docs/pipeline/silver.md): contracts and operation · [gold](docs/pipeline/gold.md): use cases, the prediction product |
 | [`docs/entur/`](docs/entur/) | [sources](docs/entur/sources.md): every Entur source, limits, licence · [realtime](docs/entur/realtime.md): SIRI pub/sub and vehicle positions · [identifiers](docs/entur/identifiers.md): ids and join keys |
 | [`docs/datex/`](docs/datex/) | [sources](docs/datex/sources.md): access, feeds, collection, costs · [content](docs/datex/content.md): what the payloads contain, pitfalls |
 | [`docs/external/`](docs/external/) | [sources](docs/external/sources.md): weather, traffic and other enrichment |
-| [`docs/report/`](docs/report/) | [problems](docs/report/problems.md): problems we hit, with evidence, for the report's reflection |
+| [`docs/report/`](docs/report/) | [overview](docs/report/overview.md): core components and snippets · [problems](docs/report/problems.md): raw log of problems we hit, with evidence |
 | [`collector/`](collector/README.md) | operating the VM: units, setup, commands, credentials, tunnel |
 
 ## Repository

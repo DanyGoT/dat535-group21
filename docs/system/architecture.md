@@ -29,7 +29,7 @@ Entur NeTEx + NSR ── daily download ── static.py ──▶ landing/netex
 | Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
 | Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
 | Bronze | `pipeline/bronze.py` (SIRI, vehicles), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (vehicles, DATEX) |
-| Entur Silver | `pipeline/silver.py`, `silver_parse.py`, `silver_reference.py` | workflow step | implemented and locally validated 2026-10-28; deployment pending ([contracts](../pipeline/silver.md), [implementation log](../pipeline/silver-design-log.md)) |
+| Entur Silver | `pipeline/silver.py`, `silver_parse.py`, `silver_reference.py` | workflow step | implemented and locally validated 2026-10-28; deployment pending ([contracts](../pipeline/silver.md)) |
 | Gold | — | — | not built ([pipeline/gold.md](../pipeline/gold.md)) |
 
 ## Collectors

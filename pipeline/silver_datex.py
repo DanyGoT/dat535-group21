@@ -19,8 +19,8 @@ from datetime import date as Date, timedelta
 from functools import partial
 from pathlib import Path
 
-from bronze import CATCH_UP_DAYS, HOURS, create_spark as bronze_spark, iso, run_id, utcnow
-from silver import CONTRACT_ISSUES, atomic_json, functions, issues, publish, stage_table, unfinished_days
+from bronze import HOURS, create_spark as bronze_spark, iso, run_id, utcnow
+from silver import CONTRACT_ISSUES, atomic_json, functions, issues, publish, stage_table
 from silver_datex_parse import decode_partition, schema, section_points, situation_points
 from silver_parse import arrow_decoder
 
@@ -322,24 +322,16 @@ def run(landing, output_dir, day, spark=None, allow_partial=False):
 def main(argv=None):
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", type=Date.fromisoformat,
-                        help=f"UTC observation day, YYYY-MM-DD (default: yesterday, and any unfinished day in the {CATCH_UP_DAYS} days before)")
+    parser.add_argument("--date", type=Date.fromisoformat, default=(utcnow() - timedelta(days=1)).date(),
+                        help="UTC observation day, YYYY-MM-DD (default: yesterday)")
     parser.add_argument("--allow-partial", action="store_true", help="publish exploration output with ready=false when input is incomplete")
     args = parser.parse_args(argv)
-    landing, output = Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output"))
-    target = args.date or (utcnow() - timedelta(days=1)).date()
     try:
-        run(landing, output, target, allow_partial=args.allow_partial)
+        run(Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output")),
+            args.date, allow_partial=args.allow_partial)
     except (OSError, ValueError) as error:
         log.error("%s", error)
         return 1
-    if args.date is None:
-        for day in unfinished_days(lambda d: output / "silver" / "_runs" / "datex" / f"observation_date={d}", target):
-            try:
-                log.warning("%s has no ready DATEX Silver: catching up", day)
-                run(landing, output, day)
-            except (OSError, ValueError) as error:
-                log.error("catching up %s: %s", day, error)
     return 0
 
 

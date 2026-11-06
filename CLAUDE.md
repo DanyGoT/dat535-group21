@@ -29,6 +29,7 @@ layer carries the most weight, then Bronze, then Gold.
 | `docs/datex/sources.md` | Statens vegvesen DATEX: access, terms, feeds, poll intervals, costs |
 | `docs/datex/content.md` | Parsing DATEX payloads: structure, situation records, pitfalls, Silver notes |
 | `docs/external/sources.md` | Weather, road traffic or other non-Entur enrichment |
+| `docs/report/overview.md` | First stop for understanding the system. The one file the report and presentation are built from: core components with real code snippets. **Update it in the same PR when a core component is added or changes** |
 | `docs/report/problems.md` | After hitting and fixing a non-trivial problem: add an entry (raw material for the report) |
 | `collector/README.md` | Operating the VM: units, setup, credentials, tunnel, off-campus access |
 
@@ -53,6 +54,8 @@ source (or real data) before building on them, then update the doc.
 
 ## Rules
 
+- **Less code.** Every line must survive "why is this here?" on presentation day. Reruns of failed
+  pipelines and disk cleanup stay manual: no catch-up logic, no retention, no convenience modes.
 - **Respect Entur's and NPRA's limits** — never hammer endpoints in tests or loops. Every
   Entur request sends the `ET-Client-Name` header. Details in `docs/entur/sources.md`, `docs/datex/sources.md`.
   NeTEx and NSR are downloaded once a day by `collector/static.py`; never download them by
