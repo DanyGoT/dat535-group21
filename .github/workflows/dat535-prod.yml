@@ -5,7 +5,8 @@ on:
     branches: [main]
   schedule:
     # The morning after each UTC day: hour 23 closes at 00:00 and is gzipped right after.
-    - cron: '0 3 * * *'
+    # Not on the hour: GitHub delays those runs most (0 3 started 5-7.5 h late in October/November).
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       bronze_date:
