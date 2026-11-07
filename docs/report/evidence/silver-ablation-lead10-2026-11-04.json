@@ -1,0 +1,388 @@
+{
+ "run_id": "local-20261107T063800Z-820e715d",
+ "started_at": "2026-11-07T06:38:00.751Z",
+ "profile_days": [
+  "2026-10-28",
+  "2026-10-29",
+  "2026-10-30",
+  "2026-10-31",
+  "2026-11-01"
+ ],
+ "train_days": [
+  "2026-11-02",
+  "2026-11-03"
+ ],
+ "test_days": [
+  "2026-11-04"
+ ],
+ "percent": 20,
+ "lead_minutes": 10,
+ "trees": 40,
+ "models": {
+  "calendar": {
+   "auc": 0.7087,
+   "brier": 0.202,
+   "log_loss": 0.5879,
+   "groups": [
+    "calendar"
+   ],
+   "seconds": 46,
+   "top_features": {
+    "hour_local": 0.4669,
+    "call_order": 0.3352,
+    "mode_index": 0.1808,
+    "is_first_call": 0.0098,
+    "day_of_week": 0.0074,
+    "is_weekend": 0.0
+   }
+  },
+  "calendar+history": {
+   "auc": 0.8195,
+   "brier": 0.1614,
+   "log_loss": 0.4922,
+   "groups": [
+    "calendar",
+    "history"
+   ],
+   "seconds": 43,
+   "top_features": {
+    "hist_late_rate": 0.4911,
+    "hour_local": 0.2046,
+    "line_late_rate": 0.1206,
+    "call_order": 0.0946,
+    "hist_calls": 0.0712,
+    "mode_index": 0.0143,
+    "day_of_week": 0.0021,
+    "is_first_call": 0.0014
+   }
+  },
+  "calendar+realtime": {
+   "auc": 0.8322,
+   "brier": 0.1487,
+   "log_loss": 0.4605,
+   "groups": [
+    "calendar",
+    "realtime"
+   ],
+   "seconds": 41,
+   "top_features": {
+    "predicted_delay_s": 0.7058,
+    "hour_local": 0.1522,
+    "call_order": 0.072,
+    "mode_index": 0.0591,
+    "has_prediction": 0.0068,
+    "day_of_week": 0.0023,
+    "is_first_call": 0.0017,
+    "is_weekend": 0.0
+   }
+  },
+  "calendar+history+realtime": {
+   "auc": 0.8794,
+   "brier": 0.1292,
+   "log_loss": 0.4075,
+   "groups": [
+    "calendar",
+    "history",
+    "realtime"
+   ],
+   "seconds": 42,
+   "top_features": {
+    "predicted_delay_s": 0.4867,
+    "hist_late_rate": 0.227,
+    "line_late_rate": 0.0931,
+    "hour_local": 0.0748,
+    "hist_calls": 0.067,
+    "call_order": 0.0414,
+    "mode_index": 0.0065,
+    "has_prediction": 0.0027
+   }
+  },
+  "all": {
+   "auc": 0.8799,
+   "brier": 0.1292,
+   "log_loss": 0.407,
+   "groups": [
+    "calendar",
+    "history",
+    "realtime",
+    "weather",
+    "situations",
+    "congestion",
+    "alerts"
+   ],
+   "seconds": 45,
+   "top_features": {
+    "predicted_delay_s": 0.4634,
+    "hist_late_rate": 0.2163,
+    "line_late_rate": 0.0891,
+    "hour_local": 0.0623,
+    "hist_calls": 0.0463,
+    "call_order": 0.0418,
+    "site_distance_km": 0.0324,
+    "road_surface_temperature_c": 0.0067
+   }
+  },
+  "all-calendar": {
+   "auc": 0.8767,
+   "brier": 0.1305,
+   "log_loss": 0.4109,
+   "groups": [
+    "history",
+    "realtime",
+    "weather",
+    "situations",
+    "congestion",
+    "alerts"
+   ],
+   "seconds": 43,
+   "top_features": {
+    "predicted_delay_s": 0.5158,
+    "hist_late_rate": 0.2337,
+    "line_late_rate": 0.1073,
+    "hist_calls": 0.0557,
+    "site_distance_km": 0.0285,
+    "visibility_m": 0.0084,
+    "friction": 0.008,
+    "slippery_road": 0.008
+   }
+  },
+  "all-history": {
+   "auc": 0.8386,
+   "brier": 0.1473,
+   "log_loss": 0.4565,
+   "groups": [
+    "calendar",
+    "realtime",
+    "weather",
+    "situations",
+    "congestion",
+    "alerts"
+   ],
+   "seconds": 44,
+   "top_features": {
+    "predicted_delay_s": 0.5554,
+    "hour_local": 0.1644,
+    "call_order": 0.0643,
+    "mode_index": 0.041,
+    "site_distance_km": 0.03,
+    "air_temperature_c": 0.0282,
+    "visibility_m": 0.0219,
+    "wind_speed": 0.0193
+   }
+  },
+  "all-realtime": {
+   "auc": 0.8184,
+   "brier": 0.1618,
+   "log_loss": 0.4933,
+   "groups": [
+    "calendar",
+    "history",
+    "weather",
+    "situations",
+    "congestion",
+    "alerts"
+   ],
+   "seconds": 40,
+   "top_features": {
+    "hist_late_rate": 0.4671,
+    "hour_local": 0.1878,
+    "line_late_rate": 0.0984,
+    "call_order": 0.0925,
+    "hist_calls": 0.0597,
+    "air_temperature_c": 0.0166,
+    "site_distance_km": 0.0129,
+    "wind_speed": 0.0123
+   }
+  },
+  "all-weather": {
+   "auc": 0.8795,
+   "brier": 0.1292,
+   "log_loss": 0.4072,
+   "groups": [
+    "calendar",
+    "history",
+    "realtime",
+    "situations",
+    "congestion",
+    "alerts"
+   ],
+   "seconds": 40,
+   "top_features": {
+    "predicted_delay_s": 0.4806,
+    "hist_late_rate": 0.2286,
+    "line_late_rate": 0.0923,
+    "hour_local": 0.0749,
+    "hist_calls": 0.0683,
+    "call_order": 0.0403,
+    "mode_index": 0.0063,
+    "has_prediction": 0.003
+   }
+  },
+  "all-situations": {
+   "auc": 0.88,
+   "brier": 0.1291,
+   "log_loss": 0.4068,
+   "groups": [
+    "calendar",
+    "history",
+    "realtime",
+    "weather",
+    "congestion",
+    "alerts"
+   ],
+   "seconds": 42,
+   "top_features": {
+    "predicted_delay_s": 0.4619,
+    "hist_late_rate": 0.2159,
+    "line_late_rate": 0.0889,
+    "hour_local": 0.0615,
+    "hist_calls": 0.0468,
+    "call_order": 0.0421,
+    "site_distance_km": 0.0328,
+    "visibility_m": 0.0071
+   }
+  },
+  "all-congestion": {
+   "auc": 0.8798,
+   "brier": 0.1291,
+   "log_loss": 0.4069,
+   "groups": [
+    "calendar",
+    "history",
+    "realtime",
+    "weather",
+    "situations",
+    "alerts"
+   ],
+   "seconds": 44,
+   "top_features": {
+    "predicted_delay_s": 0.4643,
+    "hist_late_rate": 0.2176,
+    "line_late_rate": 0.0875,
+    "hour_local": 0.062,
+    "hist_calls": 0.0466,
+    "call_order": 0.0406,
+    "site_distance_km": 0.0336,
+    "visibility_m": 0.0074
+   }
+  },
+  "all-alerts": {
+   "auc": 0.8797,
+   "brier": 0.1293,
+   "log_loss": 0.4074,
+   "groups": [
+    "calendar",
+    "history",
+    "realtime",
+    "weather",
+    "situations",
+    "congestion"
+   ],
+   "seconds": 42,
+   "top_features": {
+    "predicted_delay_s": 0.4669,
+    "hist_late_rate": 0.215,
+    "line_late_rate": 0.0908,
+    "hour_local": 0.0625,
+    "hist_calls": 0.0471,
+    "call_order": 0.0406,
+    "site_distance_km": 0.032,
+    "visibility_m": 0.0069
+   }
+  }
+ },
+ "rows": {
+  "train": 654824,
+  "test": 325629
+ },
+ "late_share": {
+  "train": 0.339228556070028,
+  "test": 0.3563933187768903
+ },
+ "coverage": {
+  "has_prediction": 0.9881920836289151,
+  "has_weather": 0.7950950314621855,
+  "has_congestion": 0.15141157575031708,
+  "any_situation": 0.10361485002871366,
+  "history": 0.9965390060467587
+ },
+ "stratified": {
+  "slippery road": {
+   "calls": 1210,
+   "late_pct": 15.9,
+   "median_delay_s": 51.0
+  },
+  "dry or wet road": {
+   "calls": 55398,
+   "late_pct": 37.1,
+   "median_delay_s": 127.0
+  },
+  "precipitation >= 1 mm/h": {
+   "calls": 5801,
+   "late_pct": 34.1,
+   "median_delay_s": 120.0
+  },
+  "no precipitation": {
+   "calls": 234281,
+   "late_pct": 35.5,
+   "median_delay_s": 123.0
+  },
+  "incident within 500 m": {
+   "calls": 623,
+   "late_pct": 35.5,
+   "median_delay_s": 125.31100010871887
+  },
+  "no situation nearby": {
+   "calls": 291889,
+   "late_pct": 35.6,
+   "median_delay_s": 122.0
+  },
+  "road works within 500 m": {
+   "calls": 33140,
+   "late_pct": 36.4,
+   "median_delay_s": 127.88700008392334
+  },
+  "road closure within 500 m": {
+   "calls": 16972,
+   "late_pct": 34.7,
+   "median_delay_s": 123.0
+  },
+  "congested road (ratio >= 1.5)": {
+   "calls": 9741,
+   "late_pct": 42.2,
+   "median_delay_s": 145.0
+  },
+  "free road (ratio < 1.1)": {
+   "calls": 21634,
+   "late_pct": 29.5,
+   "median_delay_s": 104.0
+  },
+  "alert on the line": {
+   "calls": 60169,
+   "late_pct": 35.7,
+   "median_delay_s": 122.0
+  },
+  "no alert on the line": {
+   "calls": 265460,
+   "late_pct": 35.6,
+   "median_delay_s": 123.0
+  },
+  "Entur predicts >= 3 min late": {
+   "calls": 68100,
+   "late_pct": 84.2,
+   "median_delay_s": 329.8029999732971
+  },
+  "Entur predicts < 3 min late": {
+   "calls": 253684,
+   "late_pct": 22.9,
+   "median_delay_s": 95.0
+  }
+ },
+ "entur_rule": {
+  "calls": 321784,
+  "accuracy": 0.7856698903612361,
+  "precision": 0.8419970631424376,
+  "recall": 0.4962439851836466
+ },
+ "finished_at": "2026-11-07T06:47:55.292Z"
+}
