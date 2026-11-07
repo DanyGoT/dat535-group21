@@ -386,7 +386,9 @@ route (10 % at the first stop, 47 % after stop 16) and peaks at 15-16 local, and
 field of vehicle positions agrees per operator (ATB 31 % vs 35 %, Brakar 34 % vs 36 %).
 
 The main product, **departure risk**, comes after Silver has proven itself: see
-[pipeline/gold.md](../pipeline/gold.md).
+[pipeline/gold.md](../pipeline/gold.md). A first test, an ablation of the Silver sources on that
+question, is kept off `main` (branch `experiments/silver-ablation`): Entur's history and estimate
+carry the signal; DATEX and SX alerts change its AUC by at most 0.0005.
 
 ## 6. Running it
 
