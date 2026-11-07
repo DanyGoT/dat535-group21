@@ -20,6 +20,28 @@ Entry template:
 
 ---
 
+## 2026-11-07 — A Spark bug lost join matches against cached data
+
+- **Area:** Silver
+- **Symptom:** In the first run of the Silver ablation (branch `experiments/silver-ablation`)
+  only 19.96 % of test calls had a stop-level history, although 99.6 % of their keys (line,
+  quay, hour, day type) exist in the profile days. The loss was the same in every hour, and
+  computing the same features again gave 43.7 %.
+- **Evidence:** The join with the profile not cached: 99.65 %, every time. Cached: right the
+  first time (while the cache fills), then 43.69 %; all 200 sampled misses exist in the cache. The
+  plan shuffles the calls into 4 partitions and reads the cache with no shuffle at all. AQE off:
+  99.65 %. AQE on with `canChangeCachedPlanOutputPartitioning=false`: 99.65 % three times.
+- **Cause:** Spark 3.5.0 bug SPARK-45282 ("Join loses records for cached datasets"): a cached plan
+  is optimised by AQE, its real partitioning differs from what the join assumes, and matching rows
+  end up in different partitions. A left join hides it: rows are not lost, their columns are null.
+- **Fix:** `spark.sql.optimizer.canChangeCachedPlanOutputPartitioning=false` in `create_spark`,
+  so every job has it. Entur Silver caches nothing. DATEX Silver caches the quays before its
+  spatial joins: rebuilt for 2026-11-02 to 11-04, its quay links are identical. The ablation
+  cached its profile: only it was wrong, and it was rerun.
+- **Lesson:** A grain check (rows in = rows out) does not catch a left join that finds too few
+  matches; check coverage too. What made us look: 19.96 % looked like the 20 % sample rate (it
+  was a coincidence).
+
 ## 2026-11-07 — DATEX Silver hung after running out of heap
 
 - **Area:** Silver
