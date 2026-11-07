@@ -20,6 +20,25 @@ Entry template:
 
 ---
 
+## 2026-11-07 — DATEX Silver hung after running out of heap
+
+- **Area:** Silver
+- **Symptom:** DATEX Silver for 2026-11-03 stayed at stage 4, `(5 + 1) / 6`, for 27 minutes with
+  the JVM and Python idle, holding the Spark lock; 2026-11-02 had taken 128 s.
+- **Evidence:** `java.lang.OutOfMemoryError: Java heap space` in the thread
+  `stdout writer for python`, while decompressing a payload page
+  (`HeapBytesDecompressor.decompress` under `VectorizedColumnReader.readPage`). 3 GB heap, four
+  tasks. The day's situation snapshots are up to 27.3 MB each, 2026-11-02's up to 25.3 MB.
+- **Cause:** Each task read 4 snapshots per Parquet batch into one column buffer that grows by
+  doubling, then copied them into rows for Arrow: four tasks hold most of the heap before a page is
+  decompressed. When the thread that feeds Python dies, Spark does not fail the task: Python waits
+  for input forever.
+- **Fix:** `columnarReaderBatchSize` 1 for the DATEX decode (`ONE_SNAPSHOT_AT_A_TIME`): the rerun took 107 s. About 285
+  snapshots a day, so batching bought nothing. The hung step was stopped by hand.
+- **Lesson:** Size buffers for the largest row, not the average; and a Spark job can hang instead
+  of fail, so a step that holds the lock needs someone watching the clock (the nightly run's
+  `flock -w` only protects the waiter).
+
 ## 2026-11-06 — Dropping repeated ET states changed 650 predictions
 
 - **Area:** Silver

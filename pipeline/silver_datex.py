@@ -29,10 +29,10 @@ SCHEMA_VERSION = 1
 SITUATION_KEY = ["record_id", "version", "version_at"]
 STREAMS = ("situation", "traveltime", "weather")
 REFERENCES = ("traveltime-locations", "weather-sites")
-# Every situation row is a ~26.6M-character snapshot: one Arrow record and a few rows per
-# Parquet read batch, or a task holds gigabytes (docs/report/problems.md, 2026-10-29).
+# Every situation row is a ~27 MB snapshot: one per Arrow record and per Parquet read batch.
+# Four per read batch filled a 3 GB heap on 2026-11-03 (docs/report/problems.md, 2026-11-07).
 ONE_SNAPSHOT_AT_A_TIME = {"spark.sql.execution.arrow.maxRecordsPerBatch": "1",
-                          "spark.sql.parquet.columnarReaderBatchSize": "4"}
+                          "spark.sql.parquet.columnarReaderBatchSize": "1"}
 
 
 def read_bronze(spark, output, feed, day, allow_partial, record):
