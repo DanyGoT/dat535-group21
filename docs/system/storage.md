@@ -66,6 +66,7 @@ jobs share 7.9 GB with the collectors, Grafana, Prometheus, the runner and any n
 | **Read payloads in small batches:** `spark.sql.parquet.columnarReaderBatchSize=256` (set in `create_spark`). | reading one ET hour's payloads with the default 4096 killed a 3 GB driver; 256 read it in 23 s |
 | **Lift Jackson's string cap:** `.option("maxStringLen", ...)` on every JSON read of landing. | ET pushes reach 22.8M characters, DATEX situations 28.6M; the default (20M) marked them corrupt |
 | **No `partitionBy` on a constant column.** Write the day directory directly. | it sorts the whole day and spilled to `/tmp` until the root disk filled (2026-10-24) |
+| **Cached plans keep their partitioning:** `spark.sql.optimizer.canChangeCachedPlanOutputPartitioning=false` (set in `create_spark`; not memory, but every job needs it). | Spark 3.5.0 bug SPARK-45282: a join with a cached DataFrame skipped a shuffle and found 44 % of its matches instead of 99.6 % (2026-11-07) |
 
 **Spill space.** `spark.local.dir` (Spark's temporary shuffle and sort files, not any table's
 output) defaults to `/tmp` on the root volume. Bronze no longer spills. Entur Silver explicitly

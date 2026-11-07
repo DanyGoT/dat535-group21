@@ -111,6 +111,8 @@ def create_spark(app_name="DAT535-Bronze", settings=None):
     # barely compresses multi-MB XML strings; zstd beats even the landing gzip.
     # Reader batch 256, not 4096: reading that hour's payloads back with the default batch
     # killed a 3 GB driver (4 tasks x 4096 rows of up to 15.9M characters); 256 read it in 23 s.
+    # Cached plans keep their partitioning: in Spark 3.5.0 a join with a cached DataFrame can
+    # skip a needed shuffle and lose matches (SPARK-45282; 2026-11-07, 44 % instead of 99.6 %).
     builder: SparkSession.Builder = SparkSession.builder # pyright: ignore[reportAssignmentType]
     builder = builder \
         .appName(app_name) \
@@ -118,6 +120,7 @@ def create_spark(app_name="DAT535-Bronze", settings=None):
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
         .config("spark.sql.parquet.compression.codec", "zstd") \
         .config("spark.sql.parquet.columnarReaderBatchSize", "256") \
+        .config("spark.sql.optimizer.canChangeCachedPlanOutputPartitioning", "false") \
         .config("spark.sql.session.timeZone", "UTC")
     for name, value in (settings or {}).items():
         builder = builder.config(name, value)
