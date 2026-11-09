@@ -69,7 +69,7 @@ polls, with their own marker `silver/_runs/datex/observation_date=D/latest.json`
 | `quay_road_situation` | a record within 500 m of a quay | `quay_id, record_id, version, version_at` |
 | `quay_road_section` | a section within 500 m of a quay | `quay_id, section_id` |
 | `quay_weather_site` | a quay's nearest usable station, at any distance | `quay_id` |
-| `datex_quarantine` | an unreadable poll | source locator; deliberately no dedup |
+| `datex_quarantine` | an unreadable poll, a well-formed one without the feed's content, or a row without its key | source locator + `entity_json`; deliberately no dedup |
 
 What the feeds' gaps mean, and which sensor values to distrust: [datex/content.md](../datex/content.md).
 A nearby road event is not a cause of a delay, and a link is only "near": whether it matters is

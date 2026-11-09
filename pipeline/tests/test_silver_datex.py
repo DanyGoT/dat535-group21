@@ -238,6 +238,16 @@ class ParseTest(unittest.TestCase):
         xml = container(f'<ns6:siteMeasurements><ns6:measurementSiteReference id="1"/>{quantity(9, "<ns6:wind><gale><v>1</v></gale></ns6:wind>")}</ns6:siteMeasurements>')
         self.assertEqual(self.decode("weather", bronze_row(xml))[0]["dq_issue"], ["unknown_weather_quantity_gale"])
 
+    def test_snapshot_without_content_is_a_contract_failure(self):
+        for feed in ("situation", "weather", "traveltime", "weather-sites", "traveltime-locations"):
+            rows = self.decode(feed, bronze_row(container("<error>no data</error>")))
+            self.assertEqual([(r["kind"], r["dq_issue"]) for r in rows], [("quarantine", ["unknown_message_shape"])], feed)
+
+    def test_non_numeric_quantity_index_is_flagged(self):
+        xml = container(site_measurements().replace('index="101"', 'index="x"'))
+        row = self.decode("weather", bronze_row(xml))[0]
+        self.assertEqual((row["air_temperature_c"], row["dq_issue"]), (6.0, ["invalid_quantity_index"]))
+
     def test_references(self):
         site = self.decode("weather-sites", bronze_row(SITES))[0]
         self.assertEqual((site["id"], site["name"], site["road_number"], site["county_code"], site["latitude"]),
@@ -338,6 +348,23 @@ class SparkTest(unittest.TestCase):
         self.assertEqual((site["id"], site["measurements"], site["usable"]), ("1629006", 1, False))
         section = self.table("road_section").first()
         self.assertIn("never_measured", section["dq_issue"])
+
+    def test_rows_without_their_key_are_quarantined(self):
+        self.full_day()
+        bad_time = record(rid="r3").replace("2026-06-09T12:52:15.6464439+02:00", "yesterday")
+        undated = site_measurements(site="4", at="")
+        for feed, payload in (("situation", situation(record(), bad_time)), ("weather", container(site_measurements() + undated))):
+            shutil.rmtree(self.output / "bronze" / f"datex-{feed}" / f"date={DAY}")
+            self.bronze(feed, [bronze_row(payload, received=f"2026-11-05T{h:02d}:00:00.000Z", digest=f"{feed}{h}") for h in range(24)])
+        result = self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+        self.assertEqual((result["status"], result["ready"]), ("complete", True))
+        self.assertEqual([r["record_id"] for r in self.table("road_situation").collect()], ["r1"])
+        self.assertEqual([r["site_id"] for r in self.table("road_weather").collect()], ["1629006"])
+        rows = self.table("datex_quarantine").collect()
+        situations = [r for r in rows if r["feed"] == "situation"]
+        self.assertTrue(situations and all(r["dq_issue"] == ["invalid_version_at", "missing_version_at"] for r in situations))
+        self.assertEqual(json.loads(situations[0]["entity_json"])["record_id"], "r3")
+        self.assertEqual([r["dq_issue"] for r in rows if r["feed"] == "weather"], [["missing_measurement_at"]] * 24)
 
     def test_spatial_links_stay_within_the_radius_and_on_their_grain(self):
         self.full_day()
