@@ -157,7 +157,10 @@ def says_something_new(last, key, state, recorded, actuals=0):
     A late replay of older data is dropped too: older than a copy already seen, with no actual
     time (`actuals`: 1 arrival, 2 departure) that the copy lacks. silver.asof_intervals and
     silver.latest would never pick it, but only while that newer copy exists. Seen on
-    2026-10-29: a copy dropped as a repeat let 621 such replays become predictions."""
+    2026-10-29: a copy dropped as a repeat let 621 such replays become predictions.
+
+    The first copy with a recorded time is kept even if it repeats: asof_intervals cannot place
+    an undated copy, so without it the state would never be known."""
     seen = last.get(key)
     if seen is None:
         last[key] = (state, recorded, actuals)
@@ -165,10 +168,11 @@ def says_something_new(last, key, state, recorded, actuals=0):
     previous, newest, newest_actuals = seen
     if recorded is not None and newest is not None and recorded < newest and (actuals & ~newest_actuals) == 0:
         return False
+    first_dated = recorded is not None and newest is None
     if recorded is not None and (newest is None or recorded >= newest):
         newest, newest_actuals = recorded, actuals
     last[key] = (state, newest, newest_actuals)
-    return previous != state
+    return previous != state or first_dated
 
 
 def parse_et(payload, base, last=None):
@@ -210,15 +214,15 @@ def parse_et(payload, base, last=None):
         state = hash(tuple((child.tag, child.text) for child in journey if child.tag not in ("RecordedAtTime", "RecordedCalls", "EstimatedCalls")))
         if says_something_new(last, (op, jid), state, recorded):
             mode = text(journey, "VehicleMode")
-            yield dict(shared, kind="journey", dq_issue=list(issues), entity_index=index, record_sha256=base.get("record_sha256"),
+            ji = list(issues)
+            flags = {field: boolean(text(journey, tag), ji, field) for field, tag in (
+                ("journey_cancelled", "Cancellation"), ("extra_journey", "ExtraJourney"), ("monitored", "Monitored"))}
+            yield dict(shared, kind="journey", dq_issue=ji, entity_index=index, record_sha256=base.get("record_sha256"),
                        recorded_at=recorded,
                        line_id=text(journey, "LineRef"), operator_id=text(journey, "OperatorRef"),
                        direction_id=text(journey, "DirectionRef"), mode=canonical_mode(mode), source_mode=mode,
                        codespace=text(journey, "DataSource") or (jid.split(":")[0] if jid else None),
-                       vehicle_id=text(journey, "VehicleRef"),
-                       journey_cancelled=boolean(text(journey, "Cancellation"), issues, "journey_cancelled"),
-                       extra_journey=boolean(text(journey, "ExtraJourney"), issues, "extra_journey"),
-                       monitored=boolean(text(journey, "Monitored"), issues, "monitored"))
+                       vehicle_id=text(journey, "VehicleRef"), **flags)
         calls = list(journey.iter("RecordedCall")) + list(journey.iter("EstimatedCall"))
         for call_index, call in enumerate(calls):
             raw_order = call.findtext("Order")
@@ -435,7 +439,6 @@ def schema(feed):
         fields.update(operating_date=DateType(), call_order=IntegerType(), monitored=BooleanType())
     if feed == "et":
         fields.update(derived_operating_date=DateType(), derived_date_source=StringType())
-    if feed == "et":
         fields.update({k: TimestampType() for k in ("recorded_at", "aimed_arrival_at", "aimed_departure_at",
                                                   "expected_arrival_at", "expected_departure_at",
                                                   "actual_arrival_at", "actual_departure_at")})
