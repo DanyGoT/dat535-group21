@@ -32,7 +32,8 @@ affects and when it is valid, so it links to calls through those, never as a sto
 
 ## 2. Tables
 
-Implemented Entur contracts (schema version **1**):
+Implemented Entur contracts (schema version **2**: `entity_index` became a long, it was an int in
+version 1; days written with 1 are rebuilt with a `silver_date` rerun before tables are read across days):
 
 | Table | One row = | Unique key within a partition | Partition |
 | ----- | --------- | ----------------------------- | --------- |
@@ -161,8 +162,9 @@ observation-based. Updates received beyond the ET window are a remaining backfil
 
 **Decoding is the expensive part, so it happens once.** `silver/_decoded/<feed>/source_date=D/`
 holds the typed versions of one UTC Bronze day, reused by all three operating days that read it
-until Bronze or `DECODER_VERSION` changes. It is rebuildable at any time, so it is the first thing
-to delete when disk runs short. Two more measured savings,
+until Bronze or the decoder changes (the stamp holds a hash of `silver_parse.py`). It is
+rebuildable at any time, so it is the first thing to delete when disk runs short
+([system/storage.md](../system/storage.md)). Two more measured savings,
 see `parse_et`: a state is emitted only when it differs from that entity's last one in the task
 (54 % of call versions and 96 % of journey versions repeat, 98 % of `RecordedCall`s), and call rows
 carry no journey attributes. Dropping a row must not change what the as-of rule sees: the memory
