@@ -21,7 +21,7 @@ from functools import partial
 from pathlib import Path
 
 from bronze import DATASETS, HOURS, create_spark as bronze_spark, iso, run_id, utcnow
-from silver_parse import DECODER_VERSION, arrow_decoder, decode_partition, schema
+from silver_parse import arrow_decoder, decode_partition, schema
 from silver_reference import (archived_file, nsr_partition, plan_members, plan_partition,
                               reference_schema)
 
@@ -29,7 +29,8 @@ log = logging.getLogger("silver")
 JOURNEY_KEY = ["operating_date", "journey_id"]
 CALL_KEY = JOURNEY_KEY + ["call_order"]
 LEAD_MINUTES = [1, 5, 10, 20, 30]
-SCHEMA_VERSION = 1
+# 2: entity_index is a long, it was an int. Days written with 1 are rebuilt before reading both.
+SCHEMA_VERSION = 2
 CONTRACT_ISSUES = frozenset({
     "bronze_corrupt", "bronze_incomplete", "bronze_wrong_endpoint", "invalid_vehicle_shape",
     "unknown_message_shape", "malformed_payload", "source_delivery_error", "graphql_error", "graphql_partial_error",
@@ -388,7 +389,9 @@ def decode_day(spark, root, stage, feed, source_day, source, evidence):
     F = functions()
     folder = root / "_decoded" / feed / f"source_date={source_day}"
     audit = evidence[str(source_day)]
-    stamp = dict(decoder=DECODER_VERSION, bronze_run_ids=audit["bronze_run_ids"], rows=audit["rows"], parquet_bytes=audit["parquet_bytes"])
+    # Any change to the decoder's source decodes again: no version number to forget to bump.
+    decoder = hashlib.sha256(Path(__file__).with_name("silver_parse.py").read_bytes()).hexdigest()
+    stamp = dict(decoder=decoder, bronze_run_ids=audit["bronze_run_ids"], rows=audit["rows"], parquet_bytes=audit["parquet_bytes"])
     marker = folder / "_decoded.json"
     if marker.exists() and json.loads(marker.read_text()) == stamp:
         return folder

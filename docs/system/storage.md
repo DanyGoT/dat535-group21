@@ -40,15 +40,16 @@ directories, in this order, and note what you removed in [report/problems.md](..
 
 | Order | What | Frees | What is lost |
 | ----- | ---- | ----: | ------------ |
-| 1 | `dev/` outputs older than a week | 36 GB today (full-day dev runs of 2026-10-15/16) | nothing: test output |
-| 2 | rerun old prod Bronze days with zstd (workflow_dispatch, one date each) | ~14 GB per pre-zstd day (2026-10-15…22: ~95 GB) | nothing |
-| 3 | prod Bronze days older than Silver needs (keep the last week) | ~9.7 GB per day | nothing: rerun Bronze from landing |
-| 4 | the oldest **ET** landing days | ~8.5 GB per day | raw messages; Entur's BigQuery still has the processed ET history ([entur/sources.md](../entur/sources.md)) |
+| 1 | `{dev,prod}/silver/_decoded/*/source_date=` days older than three days | ~1.9 GB per day (19 GB for ten, 2026-11-06) | nothing: a cache; a rerun of an old day decodes it again (~37 min per UTC day) |
+| 2 | `dev/` outputs older than a week | 36 GB today (full-day dev runs of 2026-10-15/16) | nothing: test output |
+| 3 | rerun old prod Bronze days with zstd (workflow_dispatch, one date each) | ~14 GB per pre-zstd day (2026-10-15…22: ~95 GB) | nothing |
+| 4 | prod Bronze days older than Silver needs (keep the last week) | ~9.7 GB per day | nothing: rerun Bronze from landing |
+| 5 | the oldest **ET** landing days | ~8.5 GB per day | raw messages; Entur's BigQuery still has the processed ET history ([entur/sources.md](../entur/sources.md)) |
 | never | DATEX, SX, NeTEx and NSR landing | | small, and no archive exists anywhere |
 
 ```sh
 du -sh /data/dat535/{dev,prod}/bronze/*/date=* | sort -h | tail     # what is big
-rm -rf /data/dat535/dev/bronze/siri-et/date=2026-10-1[56]           # example: step 1
+rm -rf /data/dat535/dev/bronze/siri-et/date=2026-10-1[56]           # example: step 2
 ```
 
 Keeping only a week of Bronze from late November leaves landing alone growing (10.9 GB/day),

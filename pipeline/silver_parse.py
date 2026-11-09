@@ -13,8 +13,6 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 OSLO = ZoneInfo("Europe/Oslo")
-# Bump when a decoded table's meaning changes: Silver then decodes Bronze again.
-DECODER_VERSION = 4
 # Consecutive ET messages are at most 9.5 s apart even at night, and the receiver's threads swap
 # them by at most 0.4 s (2026-10-29). A larger step, either way, means the next row does not
 # follow the previous one: another task read what lies between.
