@@ -326,18 +326,20 @@ nature rather than a fault in our collection (measured on all polls of 2026-11-0
 ### Applying a road event only when it applies
 
 Treating `overallStartTime..overallEndTime` as continuous would put night works in the morning rush,
-so each record is expanded into the spans that apply on that day:
+so each record is expanded into the spans that apply on that day. Applicable days without a time of
+day mean the whole local day:
 
 ```python
 # pipeline/silver_datex_parse.py, active_intervals
+time_from, time_to = period["time_from"] or "00:00:00", period["time_to"] or "00:00:00"
 for offset in (-1, 0, 1):
     local_day = day + timedelta(days=offset)
     if period["days"] and WEEKDAYS[local_day.weekday()] not in period["days"]:
         continue
-    begin = datetime.combine(local_day, wall_clock(period["time_from"]), OSLO)
-    finish = datetime.combine(local_day, wall_clock(period["time_to"]), OSLO)
+    begin = datetime.combine(local_day, wall_clock(time_from), OSLO)
+    finish = datetime.combine(local_day, wall_clock(time_to), OSLO)
     if finish <= begin:
-        finish = datetime.combine(local_day + timedelta(days=1), wall_clock(period["time_to"]), OSLO)
+        finish = datetime.combine(local_day + timedelta(days=1), wall_clock(time_to), OSLO)
     spans.append((max(low, begin.astimezone(timezone.utc)), min(high, finish.astimezone(timezone.utc))))
 ```
 

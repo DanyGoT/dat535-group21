@@ -163,6 +163,12 @@ class IntervalTest(unittest.TestCase):
         self.assertEqual(self.spans([self.period(days=("wednesday",))]), [(utc("2026-11-05T00:00:00"), utc("2026-11-05T05:00:00"))])
         self.assertEqual(self.spans([self.period(days=("monday",))]), [])
 
+    def test_applicable_days_without_a_time_are_whole_local_days(self):
+        # Thursday in Oslo is 4 Nov 23:00 to 5 Nov 23:00 UTC; Friday starts within this UTC day.
+        self.assertEqual(self.spans([self.period(None, None, days=("thursday",))]), [(utc("2026-11-05T00:00:00"), utc("2026-11-05T23:00:00"))])
+        self.assertEqual(self.spans([self.period(None, None, days=("friday",))]), [(utc("2026-11-05T23:00:00"), utc("2026-11-06T00:00:00"))])
+        self.assertEqual(self.spans([self.period(None, None, days=("monday",))]), [])
+
     def test_summer_time_window(self):
         summer = date(2026, 7, 1)
         self.assertEqual(self.spans([self.period("07:00:00.0000000+01:00", "16:00:00.0000000+01:00")], day=summer),

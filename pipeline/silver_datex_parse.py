@@ -99,7 +99,8 @@ def active_intervals(start, end, periods, day):
 
     overallStartTime..overallEndTime only bounds a record: 42 % of them apply in recurring
     windows (e.g. 20:00-06:00, Monday-Thursday). A window that crosses midnight belongs to the
-    weekday it starts on. A record without a start time has no known interval.
+    weekday it starts on, and applicable days without a time of day mean the whole local day. A
+    record without a start time has no known interval.
     """
     day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
@@ -110,15 +111,17 @@ def active_intervals(start, end, periods, day):
     for period in periods or [dict(start_at=None, end_at=None, time_from=None, time_to=None, days=[])]:
         low = max(lower, period["start_at"]) if period["start_at"] else lower
         high = min(upper, period["end_at"]) if period["end_at"] else upper
-        if period["time_from"] and period["time_to"]:
+        if (period["time_from"] and period["time_to"]) or period["days"]:
+            # From midnight to midnight: finish <= begin below makes it the next day's midnight.
+            time_from, time_to = period["time_from"] or "00:00:00", period["time_to"] or "00:00:00"
             for offset in (-1, 0, 1):
                 local_day = day + timedelta(days=offset)
                 if period["days"] and WEEKDAYS[local_day.weekday()] not in period["days"]:
                     continue
-                begin = datetime.combine(local_day, wall_clock(period["time_from"]), OSLO)
-                finish = datetime.combine(local_day, wall_clock(period["time_to"]), OSLO)
+                begin = datetime.combine(local_day, wall_clock(time_from), OSLO)
+                finish = datetime.combine(local_day, wall_clock(time_to), OSLO)
                 if finish <= begin:
-                    finish = datetime.combine(local_day + timedelta(days=1), wall_clock(period["time_to"]), OSLO)
+                    finish = datetime.combine(local_day + timedelta(days=1), wall_clock(time_to), OSLO)
                 spans.append((max(low, begin.astimezone(timezone.utc)), min(high, finish.astimezone(timezone.utc))))
         else:
             spans.append((low, high))
