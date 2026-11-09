@@ -20,6 +20,21 @@ Entry template:
 
 ---
 
+## 2026-11-09 — Failing loudly on an empty snapshot would have blocked a day for good
+
+- **Area:** Silver
+- **Symptom:** Review asked that a well-formed DATEX snapshot with no content fail the day, not
+  publish it empty and ready. Implemented as a contract error, it failed 2026-11-03.
+- **Evidence:** One weather poll at 19:21:36 UTC, 1 KB: `returnStatus fail`, "Delivery break", no
+  payload. The only one in ~12,000 polls of all five feeds, 2026-10-28 to 11-08.
+- **Cause:** NPRA reports its own delivery failures as valid messages. Bronze is immutable, so
+  every rerun of that day would have failed the same way.
+- **Fix:** That answer is recognised and quarantined as `source_delivery_failed`, which does not
+  block the day, like a `fetch_error` poll: the next snapshot repeats the data. Any other empty
+  snapshot is still `unknown_message_shape` and fails the day.
+- **Lesson:** Run a new failure rule over every day of real input before merging it. A rule that
+  fails a day must leave a way for that day to pass again.
+
 ## 2026-11-07 — A Spark bug lost join matches against cached data
 
 - **Area:** Silver

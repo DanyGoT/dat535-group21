@@ -79,7 +79,11 @@ what they contain is not evenly spread, and most of that is the source, not a fa
 | location tables | `traveltime-locations` hashes differently on every poll | only `publicationTime` changes; the sites table stayed the same for 1-2 days | yes |
 
 Failed polls are rare and short: a 10-minute gap on 2026-10-31, a 20-minute one on 2026-11-03,
-every feed at once. They stay in Bronze as `fetch_error`.
+every feed at once. They stay in Bronze as `fetch_error`. NPRA can also answer a poll with a valid
+message that says it failed: `exchangeInformation/.../returnStatus _extendedValue="fail"`, reason
+"Delivery break", and no payload. Once in ~12,000 polls (2026-10-28 to 11-08: weather, 2026-11-03
+19:21:36 UTC). Silver quarantines it as `source_delivery_failed`, a missed poll that does not block
+the day.
 
 ### Sensor values to distrust (2026-11-05, flagged in Silver, never changed)
 

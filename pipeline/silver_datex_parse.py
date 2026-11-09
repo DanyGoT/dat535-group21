@@ -355,6 +355,15 @@ def section_points(rows):
             yield dict(section_id=row["id"], **point)
 
 
+def failed_delivery(payload):
+    """NPRA's own answer that a poll failed (returnStatus fail, e.g. "Delivery break"), or None."""
+    info = strip_ns(ET.fromstring(payload)).find("exchangeInformation/dynamicInformation/returnInformation")
+    status = info.find("returnStatus") if info is not None else None
+    if status is None or status.get("_extendedValue") != "fail":
+        return None
+    return value_text(info, "returnStatusReason") or "fail"
+
+
 def decode_partition(rows, feed):
     seen = set()    # one task's situation versions (parse_situation), or snapshot hashes
     for source in rows:
@@ -386,8 +395,12 @@ def decode_partition(rows, feed):
                 empty = False
                 yield row
             if empty:
-                # Well-formed XML without the feed's content, e.g. an error body: a contract failure.
-                yield reject(dict(base, record_sha256=base["payload_sha256"]), "unknown_message_shape")
+                # NPRA saying a poll failed is a missed poll, like a fetch error: the next snapshot
+                # repeats the data (1 of ~12,000 polls, 2026-10-28 to 11-08). Any other
+                # well-formed XML without the feed's content is a contract failure.
+                reason = failed_delivery(source["payload"])
+                located = dict(base, record_sha256=base["payload_sha256"])
+                yield reject(located, "source_delivery_failed", {"reason": reason}) if reason else reject(located, "unknown_message_shape")
         except ET.ParseError:
             yield reject(dict(base, record_sha256=base["payload_sha256"]), "malformed_payload")
 
