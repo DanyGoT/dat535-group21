@@ -295,7 +295,8 @@ def parse_weather(payload, base):
                    site_version=ref.get("version") if ref is not None else None, publication_at=publication,
                    measurement_at=timestamp(text(site, "measurementTimeDefault/timeValue"), issues, "measurement_at"))
         taken = set()
-        for quantity in sorted(site.findall("physicalQuantity"), key=lambda q: int(q.get("index") or 0)):
+        for quantity in sorted(site.findall("physicalQuantity"),
+                               key=lambda q: number(q.get("index"), issues, "quantity_index", integer=True) or 0):
             data = quantity.find("physicalQuantity/basicData")
             if data is None:
                 continue
@@ -372,14 +373,21 @@ def decode_partition(rows, feed):
             continue
         try:
             if feed == "situation":
-                yield from parse_situation(source["payload"], dict(base, _seen=seen), date.fromisoformat(source["source_date"]))
+                decoded = parse_situation(source["payload"], dict(base, _seen=seen), date.fromisoformat(source["source_date"]))
             elif source["_bronze_payload_sha256"] in seen:
                 continue    # polled at twice NPRA's cadence: most snapshots repeat byte for byte
             else:
                 seen.add(source["_bronze_payload_sha256"])
                 parser = {"traveltime": parse_traveltime, "weather": parse_weather,
                           "weather-sites": parse_weather_sites, "traveltime-locations": parse_sections}[feed]
-                yield from parser(source["payload"], base)
+                decoded = parser(source["payload"], base)
+            empty = True
+            for row in decoded:
+                empty = False
+                yield row
+            if empty:
+                # Well-formed XML without the feed's content, e.g. an error body: a contract failure.
+                yield reject(dict(base, record_sha256=base["payload_sha256"]), "unknown_message_shape")
         except ET.ParseError:
             yield reject(dict(base, record_sha256=base["payload_sha256"]), "malformed_payload")
 

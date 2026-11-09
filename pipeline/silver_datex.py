@@ -29,6 +29,10 @@ SCHEMA_VERSION = 1
 SITUATION_KEY = ["record_id", "version", "version_at"]
 STREAMS = ("situation", "traveltime", "weather")
 REFERENCES = ("traveltime-locations", "weather-sites")
+# The kind of row each feed publishes, and its key. stage_table refuses a null key.
+KEYS = {"situation": ("record", SITUATION_KEY), "weather": ("value", ["site_id", "measurement_at"]),
+        "traveltime": ("value", ["section_id", "period_start_at"]),
+        "weather-sites": ("site", ["id"]), "traveltime-locations": ("section", ["id"])}
 # Every situation row is a ~27 MB snapshot: one per Arrow record and per Parquet read batch.
 # Four per read batch filled a 3 GB heap on 2026-11-03 (docs/report/problems.md, 2026-11-07).
 ONE_SNAPSHOT_AT_A_TIME = {"spark.sql.execution.arrow.maxRecordsPerBatch": "1",
@@ -74,6 +78,20 @@ def decode(spark, source, feed, work):
         for key, value in previous.items():
             spark.conf.set(key, value)
     return spark.read.parquet(str(work))
+
+
+def split_unkeyed(frame, feed):
+    """(rows with their whole key, quarantine rows). A row without its key cannot be published, so
+    it is quarantined, never silently dropped. A situation's sightings without a key are dropped:
+    the record they would join to is quarantined."""
+    F = functions()
+    kind, key = KEYS[feed]
+    unkeyed = F.exists(F.array(*[F.col(k).isNull() for k in key]), lambda x: x)
+    bad = issues(frame.filter((F.col("kind") == kind) & unkeyed), *[(f"missing_{k}", F.col(k).isNull()) for k in key]) \
+        .withColumn("entity_json", F.to_json(F.struct(*[c for c in frame.columns if c != "entity_json"])))
+    bad = frame.filter(F.col("kind") == "quarantine").unionByName(bad)
+    return frame.filter((F.col("kind") != "quarantine") & ~unkeyed), bad.select(
+        F.lit(feed).alias("feed"), "received_at", "source_file", "payload_sha256", "bronze_run_id", "dq_issue", "entity_json")
 
 
 def first_and_last(df, key):
@@ -262,19 +280,18 @@ def run(landing, output_dir, day, spark=None, allow_partial=False):
             return written
 
         rejected = None
-        for feed, frame in parsed.items():
-            bad = frame.filter(F.col("kind") == "quarantine").select(
-                F.lit(feed).alias("feed"), "received_at", "source_file", "payload_sha256", "bronze_run_id", "dq_issue", "entity_json")
+        for feed in list(parsed):
+            parsed[feed], bad = split_unkeyed(parsed[feed], feed)
             rejected = bad if rejected is None else rejected.unionByName(bad)
         if "situation" in parsed:
             situations = save(build_situations(parsed["situation"]), "road_situation", SITUATION_KEY)
             save(build_intervals(situations), "road_situation_interval", SITUATION_KEY + ["start_at"])
         if "weather" in parsed:
-            weather = save(build_weather(parsed["weather"].filter(F.col("measurement_at").isNotNull() & F.col("site_id").isNotNull())), "road_weather", ["site_id", "measurement_at"])
+            weather = save(build_weather(parsed["weather"]), "road_weather", ["site_id", "measurement_at"])
             if "weather-sites" in parsed:
                 save(build_sites(parsed["weather-sites"], weather), "weather_site", ["id"])
         if "traveltime" in parsed:
-            times = save(build_travel_times(parsed["traveltime"].filter(F.col("period_start_at").isNotNull() & F.col("section_id").isNotNull())), "road_travel_time", ["section_id", "period_start_at"])
+            times = save(build_travel_times(parsed["traveltime"]), "road_travel_time", ["section_id", "period_start_at"])
             if "traveltime-locations" in parsed:
                 save(build_sections(parsed["traveltime-locations"], times), "road_section", ["id"])
         if rejected is not None:
