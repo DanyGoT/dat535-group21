@@ -154,6 +154,21 @@ class ParseTest(unittest.TestCase):
         actual = list(P.parse_et(et(call(actual="2026-10-26T08:11:00Z"), recorded="2026-10-26T08:00:00Z"), base("2026-10-26T08:00:14Z"), last))
         self.assertEqual([r["kind"] for r in actual], ["call"])
 
+    def test_first_dated_copy_is_kept_after_an_undated_one(self):
+        # asof_intervals drops undated rows: the dated repeat is the state's only usable copy.
+        last = {}
+        undated = list(P.parse_et(et(call(), recorded=""), base(), last))
+        self.assertEqual([r["recorded_at"] for r in undated], [None, None])
+        dated = list(P.parse_et(et(call()), base("2026-10-26T08:00:05Z"), last))
+        self.assertEqual([r["kind"] for r in dated], ["journey", "call"])
+        self.assertEqual(list(P.parse_et(et(call(), recorded="2026-10-26T08:00:30Z"), base("2026-10-26T08:00:35Z"), last)), [])
+
+    def test_invalid_journey_flags_are_issues_of_the_journey_row(self):
+        journey, row = list(P.parse_et(et(call(), extra="<Cancellation>maybe</Cancellation><Monitored>yes</Monitored>"), base()))
+        self.assertIsNone(journey["journey_cancelled"])
+        self.assertEqual(sorted(journey["dq_issue"]), ["invalid_journey_cancelled", "invalid_monitored"])
+        self.assertEqual(row["dq_issue"], [])
+
     def test_call_rows_leave_journey_attributes_to_the_journey_row(self):
         journey, row = list(P.parse_et(et(call()), base()))
         self.assertEqual(journey["line_id"], "T:Line:1")
