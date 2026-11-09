@@ -106,6 +106,13 @@ SECTIONS = container("""<ns9:predefinedLocationReference xsi:type="ns9:Predefine
   </ns9:predefinedLocationReference>""")
 
 
+# The weather poll of 2026-11-03 19:21:36 UTC, whole: NPRA answering that it could not deliver.
+DELIVERY_BREAK = (f'<ns2:messageContainer {NS} xmlns:ns4="http://datex2.eu/schema/3/exchangeInformation" modelBaseVersion="3">'
+                  '<ns2:exchangeInformation><ns4:dynamicInformation><ns4:exchangeStatus _extendedValue="online"/><ns4:returnInformation>'
+                  '<ns4:returnStatus _extendedValue="fail"/><ns4:returnStatusReason><values><value lang="en-us">Delivery break</value></values>'
+                  '</ns4:returnStatusReason></ns4:returnInformation></ns4:dynamicInformation></ns2:exchangeInformation></ns2:messageContainer>')
+
+
 def bronze_row(payload, feed="situation", status="ok", received="2026-11-05T12:00:00.000Z", digest=None):
     return dict(received_at=received, payload=payload, _bronze_source_file="/landing/hour=12.jsonl.gz",
                 _bronze_payload_sha256=digest or str(hash(payload)), _bronze_run_id="fixture", _bronze_status=status, source_date=str(DAY))
@@ -243,6 +250,11 @@ class ParseTest(unittest.TestCase):
             rows = self.decode(feed, bronze_row(container("<error>no data</error>")))
             self.assertEqual([(r["kind"], r["dq_issue"]) for r in rows], [("quarantine", ["unknown_message_shape"])], feed)
 
+    def test_npra_delivery_break_is_a_missed_poll(self):
+        rows = self.decode("weather", bronze_row(DELIVERY_BREAK))
+        self.assertEqual([(r["kind"], r["dq_issue"], json.loads(r["entity_json"])) for r in rows],
+                         [("quarantine", ["source_delivery_failed"], {"reason": "Delivery break"})])
+
     def test_non_numeric_quantity_index_is_flagged(self):
         xml = container(site_measurements().replace('index="101"', 'index="x"'))
         row = self.decode("weather", bronze_row(xml))[0]
@@ -349,13 +361,15 @@ class SparkTest(unittest.TestCase):
         section = self.table("road_section").first()
         self.assertIn("never_measured", section["dq_issue"])
 
-    def test_rows_without_their_key_are_quarantined(self):
+    def test_rows_without_their_key_and_failed_polls_are_quarantined(self):
         self.full_day()
         bad_time = record(rid="r3").replace("2026-06-09T12:52:15.6464439+02:00", "yesterday")
         undated = site_measurements(site="4", at="")
         for feed, payload in (("situation", situation(record(), bad_time)), ("weather", container(site_measurements() + undated))):
             shutil.rmtree(self.output / "bronze" / f"datex-{feed}" / f"date={DAY}")
-            self.bronze(feed, [bronze_row(payload, received=f"2026-11-05T{h:02d}:00:00.000Z", digest=f"{feed}{h}") for h in range(24)])
+            # One weather poll is NPRA's delivery break: a missed poll, so the day stays ready.
+            self.bronze(feed, [bronze_row(DELIVERY_BREAK if (feed, h) == ("weather", 19) else payload,
+                                          received=f"2026-11-05T{h:02d}:00:00.000Z", digest=f"{feed}{h}") for h in range(24)])
         result = self.J.run(self.tmp, self.output, DAY, spark=self.spark)
         self.assertEqual((result["status"], result["ready"]), ("complete", True))
         self.assertEqual([r["record_id"] for r in self.table("road_situation").collect()], ["r1"])
@@ -364,7 +378,8 @@ class SparkTest(unittest.TestCase):
         situations = [r for r in rows if r["feed"] == "situation"]
         self.assertTrue(situations and all(r["dq_issue"] == ["invalid_version_at", "missing_version_at"] for r in situations))
         self.assertEqual(json.loads(situations[0]["entity_json"])["record_id"], "r3")
-        self.assertEqual([r["dq_issue"] for r in rows if r["feed"] == "weather"], [["missing_measurement_at"]] * 24)
+        self.assertEqual(sorted(r["dq_issue"][0] for r in rows if r["feed"] == "weather"),
+                         ["missing_measurement_at"] * 23 + ["source_delivery_failed"])
 
     def test_spatial_links_stay_within_the_radius_and_on_their_grain(self):
         self.full_day()
