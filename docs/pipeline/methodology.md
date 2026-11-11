@@ -55,13 +55,14 @@ for source drift.
 
 ## Gold: serve a use, not a layer
 
-- Name the consumer and materialise only what it uses. The delivered example is a
-  retrospective [line scorecard](gold-example.md). Departure-risk prediction is
-  [planned](gold.md#1-departure-risk-primary).
+- Name the consumer and materialise only what it uses. Delivered Gold is retrospective: a line
+  scorecard, a stop map, observed transfers and late departures under road conditions
+  ([what is built](gold-example.md)). Departure-risk prediction is [planned](gold.md#1-departure-risk-primary).
+- Store additive counts, so consumers sum days. A rate or percentile averaged over days is wrong.
 - Aggregate finer facts rather than joining grains. Define thresholds, cancellation semantics
   and denominators once. Missing real-time is neither punctuality nor cancellation.
-- ✓ The scorecard checks Silver readiness, reconciles totals and publishes a run marker.
-  It currently accepts only Silver schema 1, while Entur Silver writes schema 2.
+- ✓ Gold checks both Silver markers, reconciles every table's departures to the scorecard
+  and publishes a run marker.
 - → Cross-check the same day against Entur's BigQuery. Access and contents remain
   **UNVERIFIED**. See [Entur sources](../entur/sources.md#bigquery-history-reference).
 - → Validate a prediction model with time-based splits, a simple baseline and calibration.
@@ -69,7 +70,7 @@ for source drift.
 ## Spark layout
 
 - Partition by the date consumers filter on. Bronze uses UTC `date`. Silver uses
-  `operating_date` or UTC `observation_date`, and the scorecard uses `operating_date`.
+  `operating_date` or UTC `observation_date`, and Gold uses `operating_date`.
 - Parse and project before shuffles. Broadcast small references. Check skew and join coverage,
   especially because RUT and SKY dominate calls.
 - Size files from the input where useful, as DATEX Bronze does. Avoid sorting on a constant

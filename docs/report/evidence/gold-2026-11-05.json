@@ -1,0 +1,78 @@
+{
+  "run_id": "local-20261111T161642Z-fcdc0d31",
+  "operating_date": "2026-11-05",
+  "schema_version": 2,
+  "status": "complete",
+  "ready": true,
+  "started_at": "2026-11-11T16:16:42.490Z",
+  "silver_run_id": "gh-42595809419-1",
+  "silver_status": "complete",
+  "datex_run_id": "gh-42595809419-1",
+  "datex_status": "complete",
+  "late_seconds": 180,
+  "max_transfer_slack_s": 900,
+  "weather_max_m": 10000,
+  "tables": {
+    "line_scorecard": {
+      "rows": 4002,
+      "partition": "operating_date=2026-11-05",
+      "parquet_bytes": 227184
+    },
+    "stop_reliability": {
+      "rows": 405973,
+      "partition": "operating_date=2026-11-05",
+      "parquet_bytes": 7177443
+    },
+    "transfer_reliability": {
+      "rows": 1779641,
+      "partition": "operating_date=2026-11-05",
+      "parquet_bytes": 21383352
+    },
+    "departure_conditions": {
+      "rows": 2561,
+      "partition": "operating_date=2026-11-05",
+      "parquet_bytes": 35559
+    }
+  },
+  "condition_levels": {
+    "precipitation": {
+      "dry": 1122475,
+      "heavy": 44344,
+      "unknown": 414637,
+      "light": 42982
+    },
+    "road_surface": {
+      "above_zero": 1050135,
+      "unknown": 382774,
+      "freezing": 191529
+    },
+    "road_situation": {
+      "none": 1448684,
+      "roadworks": 165319,
+      "unknown": 4973,
+      "incident": 5462
+    },
+    "traffic": {
+      "no_section": 1304283,
+      "free_flow": 154810,
+      "unknown": 4973,
+      "unmeasured": 73736,
+      "slow": 38911,
+      "congested": 47725
+    }
+  },
+  "totals": {
+    "input_journeys": 76937,
+    "input_calls": 1868867,
+    "planned_journeys": 76458,
+    "reported_journeys": 73134,
+    "scored_departures": 1624438,
+    "late_departures": 609167,
+    "actual_equals_aimed_departures": 10379,
+    "transfer_connections": 4007852,
+    "cancelled_connections": 14122,
+    "unknown_connections": 437054
+  },
+  "finished_at": "2026-11-11T16:17:42.628Z",
+  "elapsed_s": 60.138
+}

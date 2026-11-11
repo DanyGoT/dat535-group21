@@ -12,7 +12,8 @@ flowchart LR
     C --> L[(Landing<br/>raw, hourly, never changed)]
     L --> B[Bronze<br/>every message, plus evidence]
     B --> SI[Silver<br/>trusted tables]
-    SI --> G[Gold<br/>line scorecard]
+    SI --> G[Gold<br/>scorecard, stops, transfers, road conditions]
+    G --> D[Dashboard<br/>static page]
 ```
 
 A weekday brings about 4.8 million SIRI ET messages, plus about 620,000 vehicle position
@@ -29,18 +30,19 @@ grading basis is [`PROJECT.md`](PROJECT.md).
 | Collection | Stores every message unchanged in hourly files | always on, first feed since 2026-10-15 | [`collector/`](collector/) |
 | Bronze | Loads each message as one Parquet row, with evidence of where it came from | every night | [`bronze.py`](pipeline/bronze.py), [`bronze_datex.py`](pipeline/bronze_datex.py) |
 | Silver | Builds trusted tables with a stated grain, keys and quality flags | every night | [`silver.py`](pipeline/silver.py), [`silver_datex.py`](pipeline/silver_datex.py) |
-| Gold | Scores every line for one day: journeys, delays, share late | by hand | [`gold_scorecard.py`](pipeline/gold_scorecard.py) |
+| Gold | Per day: line scorecard, late departures per stop and hour, observed transfer chances, late departures under road conditions | by hand | [`gold.py`](pipeline/gold.py) |
+| Dashboard | Map of stops, transfer explorer and road-conditions view over chosen Gold days | by hand | [`dashboard/`](dashboard/) |
 | Monitoring | Status page, push alerts, Prometheus and Grafana | always on | [`monitor.py`](collector/monitor.py) |
 
-The Gold scorecard is an example that was run by hand for two days. It still expects the first
-Silver schema version, so it needs a small update before it reads newer days. The main Gold
-product we planned, predicting whether a departure will be on time, is not built.
-[`docs/pipeline/gold.md`](docs/pipeline/gold.md) describes it.
+Gold has been run by hand for 2026-11-05, 08 and 09, the days with both Entur and road Silver.
+With 2 spare minutes a connection held 77 % of the time nationally. Departures near congested
+roads were late 10 percentage points more often than near free-flowing ones in the same mode and
+hour. The main Gold product we planned, predicting whether a departure will be on time, is not
+built. [`docs/pipeline/gold.md`](docs/pipeline/gold.md) describes it.
 
-![Line scorecard for 2026-10-29](docs/report/evidence/gold-dashboard-2026-10-29.png)
+![Transfer explorer at Lysaker stasjon](docs/report/evidence/gold-dashboard-2026-11-transfers.png)
 
-*The Gold scorecard for 2026-10-29 in the example viewer. The viewer lives on the branch
-`examples/gold-scorecard`.*
+*The dashboard's transfer explorer at Lysaker: how often each connection from bus 42 held.*
 
 ## Where to read
 
@@ -53,7 +55,7 @@ in one file, with the code that matters. Every section there links to the detail
 | The VM's disk and memory limits | [storage](docs/system/storage.md) |
 | Why each layer is built the way it is | [methodology](docs/pipeline/methodology.md) |
 | The Silver tables and their rules | [silver](docs/pipeline/silver.md) |
-| The Gold scorecard and the products we planned | [gold example](docs/pipeline/gold-example.md), [gold use cases](docs/pipeline/gold.md) |
+| What Gold builds and the products we planned | [what is built](docs/pipeline/gold-example.md), [gold use cases](docs/pipeline/gold.md) |
 | Entur's data | [sources](docs/entur/sources.md), [real-time feeds](docs/entur/realtime.md), [identifiers](docs/entur/identifiers.md) |
 | The road data (DATEX) | [sources](docs/datex/sources.md), [content](docs/datex/content.md) |
 | Other sources we considered | [external sources](docs/external/sources.md) |
@@ -67,6 +69,7 @@ in one file, with the code that matters. Every section there links to the detail
 | ---- | -------- |
 | [`collector/`](collector/) | The always-on collectors, monitor, metrics exporter and systemd units |
 | [`pipeline/`](pipeline/) | The Bronze, Silver and Gold Spark jobs and their tests |
+| [`dashboard/`](dashboard/) | The static Gold dashboard and the script that packages it |
 | [`.github/workflows/`](.github/workflows/) | `dat535-dev.yml` tests and runs a one-hour sample. `dat535-prod.yml` deploys and runs the nightly pipeline |
 | [`docs/`](docs/) | Everything in the table above |
 | [`notebooks/`](notebooks/) | Exploration |

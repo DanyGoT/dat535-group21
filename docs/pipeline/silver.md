@@ -94,9 +94,9 @@ can leave staging files and a `publishing` marker. Rerun the date under the same
   before reading across versions.
 - DATEX declares schema **1** in its marker, but shared `stage_table` stamps
   `_silver_schema_version=2` on its rows. These disagree in the current code.
-- [`gold_scorecard.py`](../../pipeline/gold_scorecard.py) accepts only schema 1 in both marker
-  and row checks. It cannot consume newly rebuilt Entur Silver. The tracked manual results cover
-  2026-10-26's sample and 2026-10-29. See the [Gold example](gold-example.md#validated).
+- [`gold.py`](../../pipeline/gold.py) checks the marker versions, Entur 2 and DATEX 1, and ties
+  every row to the marker by `_silver_run_id`, so the row stamp does not matter to it.
+  See [what Gold builds](gold-example.md#shared-rules).
 
 ## Shared semantics
 

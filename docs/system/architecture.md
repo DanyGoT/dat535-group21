@@ -21,8 +21,8 @@ flowchart LR
     L --> X[exporter.py :8752] --> P[Prometheus :8754] --> G[Grafana :8753]
     ST -. /grafana/ proxy .-> G
 
-    L --> BE[Bronze Entur] --> SE[Silver Entur] --> GO[Gold scorecard<br/>manual]
-    L --> BD[Bronze DATEX] --> SD[Silver DATEX]
+    L --> BE[Bronze Entur] --> SE[Silver Entur] --> GO[Gold<br/>manual] --> DB[Static dashboard]
+    L --> BD[Bronze DATEX] --> SD[Silver DATEX] --> GO
     L -. NeTEx and NSR .-> SE
 ```
 
@@ -130,10 +130,10 @@ yesterday and `--allow-partial`, leaving the sample not ready.
 Both workflows upload Bronze and Silver run records. [Silver](../pipeline/silver.md#reading-safely) owns
 publication and readiness contracts.
 
-[Gold](../../pipeline/gold_scorecard.py) is a manual example, run for the 2026-10-26 sample and
-2026-10-29. It accepts only Silver schema version 1, while current Entur Silver writes version 2.
-It cannot consume newly rebuilt Silver. See the [Gold example](../pipeline/gold-example.md#run-on-the-vm)
-and [evidence](../report/evidence/README.md).
+[Gold](../../pipeline/gold.py) runs by hand for an operating day once both its Entur Silver and
+the same UTC day of DATEX Silver are ready. It publishes four tables, and
+[dashboard/build.py](../../dashboard/build.py) packages chosen days as a static site. See
+[what is built](../pipeline/gold-example.md#run-on-the-vm) and [evidence](../report/evidence/README.md).
 
 ## Monitoring
 
