@@ -5,14 +5,27 @@ The week log records failures, fixes and resource measurements.
 
 Up: [system overview](../overview.md) · Related: [problem log](../problems.md),
 [Silver](../../pipeline/silver.md#evidence-and-measurements),
-[Gold example](../../pipeline/gold-example.md#validated)
+[Gold](../../pipeline/gold-example.md#validated)
 
-These are historical artifacts, not validation of the current code revision.
-The archived Silver/Gold runs use schema 1 and predate today's implausible-delay exclusion.
-Current Entur Silver writes schema 2, which the Gold job does not yet accept.
+Except for the 2026-11-05 to 11-09 Gold runs, these are historical artifacts, not validation of
+the current code revision. The October Silver/Gold runs use schema 1 and predate today's
+implausible-delay exclusion.
+
+## Gold with road data, 2026-11-05, 08 and 09
+
+Run on 2026-11-11 with the current [`gold.py`](../../../pipeline/gold.py) against prod Silver
+(Entur schema 2 and DATEX, all `complete, ready=true`), written to a separate output root.
+
+| File | Shows |
+| ---- | ----- |
+| [`gold-2026-11-05.json`](gold-2026-11-05.json), [`-08`](gold-2026-11-08.json), [`-09`](gold-2026-11-09.json) | Run records: Silver and DATEX run IDs, four table sizes, totals, condition coverage, runtime |
+| [`gold-dashboard-2026-11-transfers.png`](gold-dashboard-2026-11-transfers.png) | Dashboard over the three days: transfers from bus 42 at Lysaker |
+| [`gold-dashboard-2026-11-roads.png`](gold-dashboard-2026-11-roads.png) | Late departures under road conditions, matched on mode and hour |
+| [`gold-dashboard-2026-11-mobile.png`](gold-dashboard-2026-11-mobile.png) | A transfer's chance by spare minutes and hour at 390 px |
 
 ## Complete day, 2026-10-29
 
+These records come from the first scorecard job, before it became [`gold.py`](../../../pipeline/gold.py).
 This operating day was validated end to end on 2026-11-05.
 Both publication records say `complete`, `ready=true`.
 

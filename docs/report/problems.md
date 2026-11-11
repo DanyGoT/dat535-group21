@@ -10,6 +10,8 @@ Entries:
 
 | Date | Incident |
 | ---- | -------- |
+| 2026-11-11 | [Dashboard builder memory](#2026-11-11--the-dashboard-builder-needed-more-memory-than-the-spark-job) |
+| 2026-11-11 | [Travel-time periods off by 10 ms](#2026-11-11--npra-travel-time-periods-start-10-ms-after-the-boundary) |
 | 2026-11-09 | [Empty DATEX delivery](#2026-11-09--failing-loudly-on-an-empty-snapshot-would-have-blocked-a-day-for-good) |
 | 2026-11-07 | [Cached-data join lost matches](#2026-11-07--a-spark-bug-lost-join-matches-against-cached-data) |
 | 2026-11-07 | [DATEX decode heap exhaustion](#2026-11-07--datex-silver-hung-after-running-out-of-heap) |
@@ -41,6 +43,42 @@ Entry template:
 ```
 
 ---
+
+## 2026-11-11 — The dashboard builder needed more memory than the Spark job
+
+- **Area:** Gold
+- **Symptom:** The first dashboard build over three Gold days peaked at 5.2 GB RSS in pandas.
+  Moving the aggregation to Arrow made it worse: 7.1 GB after 35 s, then a join type error.
+  The Gold Spark job that wrote the same data peaked at 2.9 GB.
+- **Evidence:** `/usr/bin/time -f "%e s, %M KB"` on the VM: 114 s and 5,192,164 KB in pandas,
+  35 s and 7,056,816 KB in Arrow. Input: 4.17 M `transfer_reliability` rows, each with a
+  22-element histogram, about 49 MB of Parquet.
+- **Cause:** Decoding all rows at once materialises every string key and every histogram. Pandas
+  holds the histograms as Python objects, and a hash group-by over five string keys copies them again.
+- **Fix:** [dashboard/build.py](../../dashboard/build.py) builds each of its 32 output shards from
+  its own filtered scan (`pyarrow.dataset` with `hub_id in shard`). The check of run IDs and row
+  counts reads only `_gold_run_id`, once per table. Peak 2.1 GB, 166 s, identical output.
+- **Trade-off:** 32 scans of the same files, because hubs are spread over shards by size and
+  Parquet statistics cannot skip row groups for them.
+- **Lesson:** A small driver-side step is not small when it reads a fact-sized table. Bound it
+  by the size of what it writes.
+
+## 2026-11-11 — NPRA travel-time periods start 10 ms after the boundary
+
+- **Area:** Gold
+- **Symptom:** The first Gold run classed every departure near a road section as `unmeasured`.
+  Not one of 316,642 found a travel-time period, although 58 % of periods had a measurement.
+- **Evidence:** Gold run on 2026-11-09, `condition_levels.traffic`: `no_section` 1,305,872,
+  `unmeasured` 316,642, nothing else. Silver `road_travel_time` for that day: all 58,176
+  `period_start_at` values end in `:00.010` or `:05.010`.
+- **Cause:** The join matched a departure's 5-minute floor to `period_start_at` exactly. NPRA's
+  periods start 10 ms after the boundary.
+- **Fix:** Both sides are joined on `floor(epoch / 300)` in
+  [pipeline/gold.py](../../pipeline/gold.py), and the test fixture now carries the 10 ms offset.
+  Rerun: free flow 164,045, slow 35,825, congested 44,269, unmeasured 72,503.
+- **Trade-off:** None. Periods are unique per section and bucket.
+- **Lesson:** An enrichment that returns no match for one level is a bug until shown otherwise.
+  The run record's per-level coverage made this visible in one look.
 
 ## 2026-11-09 — Failing loudly on an empty snapshot would have blocked a day for good
 
@@ -215,7 +253,7 @@ Entry template:
   Spark did not discover the partition key. Fact files and reference files need not have
   the same physical representation of a partition column.
 - **Fix:** Declare `basePath` for each Silver table read in
-  [pipeline/gold_scorecard.py](../../pipeline/gold_scorecard.py), so Spark recovers the partition
+  [pipeline/gold_scorecard.py](../../pipeline/gold.py) (now `gold.py`), so Spark recovers the partition
   date. The regression fixture now omits the physical date column. No Silver files were changed.
 - **Validation:** All 5 Gold tests passed. The VM run reconciled 76,186 journeys and
   1,855,992 calls into 3,953 line/day rows. See the

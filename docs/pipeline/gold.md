@@ -1,8 +1,8 @@
 # Gold: product plan
 
 This page defines proposed Gold products and their consumers. The manual
-[line scorecard](gold-example.md) delivers a first slice of #2. Departure risk and the
-other products remain future work.
+[Gold job](gold-example.md) delivers #2, a hub map for #3, an observed version of #8 and a
+first slice of #4 and #5. Departure risk and the other products remain future work.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
 Related: [Silver](silver.md#tables), [methodology](methodology.md#gold-serve-a-use-not-a-layer),
@@ -78,7 +78,7 @@ Days-ahead predictions would need forecasts from NPRA or MET rather than current
 
 **Output.** Proposed daily and weekly aggregates give on-time and cancellation shares,
 mean/p90 delay and reporting coverage. Grain is operator × line × mode × operating day.
-The [example](gold-example.md#metrics) aggregates by line/day.
+The [delivered scorecard](gold-example.md#line_scorecard) aggregates by line/day.
 
 **Inputs.** Final calls and journeys, with archived NeTEx for the planned denominator.
 The 2026-10-23 exploratory sample found 0–8 % of planned journeys absent from real-time.
@@ -171,6 +171,11 @@ Measure first observation across UTC partitions, as described in
 
 **Validation and limits.** Define the transfer window before estimating success.
 
+**Delivered.** [`transfer_reliability`](gold-example.md#transfer_reliability) pairs each arrival
+with the first departure of every other line aimed 0–15 min later at the same hub, and stores
+the gap change per hour. NeTEx planned interchanges and walking times are not used yet; the
+reader supplies spare minutes.
+
 ## 9. Crowding
 
 **Consumer.** Travellers want to know whether seats are available.
@@ -199,6 +204,7 @@ webcams. Costs are in [DATEX sources](../datex/sources.md#cost-per-day) and
 ## Order of work
 
 1. Daily reference archives and Entur/DATEX Silver are implemented. BigQuery checks remain planned.
-2. The manual #2 example exists. Fix its schema-version incompatibility with current Silver.
+2. Done: Gold reads schema-2 Silver and DATEX, and publishes #2, the #3 map, #8 and a condition
+   comparison for #4/#5 ([what is built](gold-example.md)).
 3. Build the #1 profile, then the model and its planned-time baselines.
-4. Evaluate #5 or #4 using the existing DATEX Silver facts and mappings.
+4. Turn the condition comparison into per-line #4/#5 products, with Frost for ferries.

@@ -1,8 +1,8 @@
 # System overview
 
 A guided tour with code and evidence for the report and presentation.
-Delivered Gold is a retrospective line scorecard over Entur Silver, while departure-risk
-prediction is planned.
+Delivered Gold describes past days: a line scorecard, a stop map, observed transfer chances and
+late departures under road conditions, shown in a static dashboard. Departure-risk prediction is planned.
 
 Up: [README](../../README.md) · Related: [evidence](evidence/README.md), [problem log](problems.md)
 
@@ -12,7 +12,7 @@ Snippets omit code only where marked with `...`.
 ## The project in one paragraph
 
 Collectors preserve Entur's transport feeds, timetable and stops, plus NPRA's road data.
-Spark builds Bronze, Silver and Gold on one VM. The scorecard describes past performance.
+Spark builds Bronze, Silver and Gold on one VM. Gold describes past performance.
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,9 @@ flowchart LR
     B --> SE[Silver Entur<br/>journeys, stop calls, predictions]
     B --> SD[Silver DATEX<br/>situations, weather, travel times]
     L -. plan and stops .-> SE
-    SE --> G[Gold delivered<br/>retrospective line scorecard]
+    SE --> G[Gold delivered<br/>scorecard, stops, transfers, conditions]
+    SD --> G
+    G --> DB[Static dashboard]
     SE -.-> P[Gold planned<br/>departure-risk prediction]
     SD -.-> P
 ```
@@ -400,40 +402,68 @@ More: [DATEX content](../datex/content.md#in-silver),
 
 ## 5. Gold: answering a question
 
-[`gold_scorecard.py`](../../pipeline/gold_scorecard.py) delivers one retrospective line/day row.
-It aggregates journeys and calls separately.
-Missing reports stay unknown and zero denominators give blank rates.
+[`gold.py`](../../pipeline/gold.py) reads one day of ready Entur Silver and the same UTC day of
+DATEX Silver and publishes four tables. Every count is additive, so the
+[dashboard](../../dashboard/README.md) sums days instead of averaging rates.
+
+| Table | One row is | Question |
+| ----- | ---------- | -------- |
+| `line_scorecard` | Line × day | Which lines run on time or cancel? |
+| `stop_reliability` | Hub × local hour | Where and when do departures leave late? |
+| `transfer_reliability` | Hub × arriving line × departing line × hour | Will my connection hold? |
+| `departure_conditions` | Mode × hour × weather, surface, situation and traffic level | Do late departures go with road conditions? |
+
+All four use one definition of a timed departure, and late means 3 minutes or more:
 
 ```python
-# pipeline/gold_scorecard.py, build_scorecard
-scored = reported & ~cancelled & F.coalesce(F.col("for_boarding"), F.lit(True)) & \
+# pipeline/gold.py, scored_departure
+return F.col("has_realtime") & ~cancelled_call() & F.coalesce(F.col("for_boarding"), F.lit(True)) & \
     F.col("actual_departure_at").isNotNull() & F.col("aimed_departure_at").isNotNull() & \
     delay.isNotNull() & ~F.isnan(delay) & \
     ~F.array_contains("dq_issue", "departure_before_arrival") & \
     ~F.array_contains("dq_issue", "implausible_departure_delay")
 ```
 
-Tracked manual runs cover a 2026-10-26 partial sample and the complete-input day 2026-10-29.
-**Compatibility limit:** Gold accepts only Silver `schema_version=1`.
-Current Entur Silver writes version 2, so newly rebuilt days cannot feed this job.
+Transfers are observed rather than modelled. Each arrival at a hub is paired with the first
+departure of every other line aimed 0–15 minutes later. A range join would compare every arrival
+with every departure at the hub, so it becomes an equi-join on 15-minute buckets:
 
-The [2026-10-29 result](evidence/gold-2026-10-29.json), produced 2026-11-05, contains 3,992 lines
-and 1,618,184 scored departures. 35.5 % were at least 3 minutes late.
-It predates today's implausible-delay exclusion.
+```python
+# pipeline/gold.py, build_transfers
+bucket = F.floor(F.col("a_at") / MAX_SLACK_S)
+arrivals = arrivals.withColumn("_bucket", F.explode(F.array(bucket, bucket + 1)))
+departures = departures.withColumn("_bucket", F.floor(F.col("b_at") / MAX_SLACK_S))
+pairs = arrivals.join(departures, ["operating_date", "hub_id", "_bucket"]).filter(
+    (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S) & (F.col("from_line_id") != F.col("to_line_id")))
+first = Window.partitionBy("a_journey", "a_order", "to_line_id", "to_destination_id").orderBy("b_at", "b_journey")
+```
 
-Earlier checks reported a smooth histogram around +1 min, lateness of 10 % at the first stop and
-47 % after stop 16, and a 15–16 local peak.
-Vehicle-delay comparisons were ATB 31 % vs 35 % and Brakar 34 % vs 36 %.
-These checks have no saved reproducible evidence.
+Gold stores a histogram of the gap change, departure delay minus arrival delay in minutes. A
+connection with *b* spare minutes held when the change was at least −b, so one histogram answers
+every b. Road conditions come from DATEX Silver's quay links: the nearest station within 10 km,
+situations active within 500 m and the travel-time period on sections within 500 m.
+
+Before publishing, scorecard totals reconcile to Silver's rows, and the map and conditions tables
+must split exactly the scorecard's timed and late departures.
+
+On 2026-11-05, 08 and 09 ([run records](evidence/README.md#gold-with-road-data-2026-11-05-08-and-09)),
+each day took 43–64 s and at most 2.94 GiB RSS. Nationally, a connection held 52 % of the time
+with no spare minute and 84 % with three. Matched on mode and hour, departures near congested
+road sections were late 10.0 points more often than near free-flowing ones; heavy precipitation
+added 1.1 and incidents 2.1. Proximity is not causation.
+
+![Transfer explorer at Lysaker stasjon](evidence/gold-dashboard-2026-11-transfers.png)
+
+The NPRA travel-time periods start 10 ms after each 5-minute boundary, which at first matched no
+departure. See the [problem log](problems.md#2026-11-11--npra-travel-time-periods-start-10-ms-after-the-boundary).
 
 Departure-risk prediction remains planned.
 The separate [ablation report](https://github.com/DanyGoT/dat535-group21/blob/experiments/silver-ablation/docs/report/silver-ablation.md)
 tests Silver's sources on 2026-11-04. Entur history and estimates carry the signal.
 Adding DATEX and SX to those features changed AUC by at most 0.0005 in that experiment.
 
-More: [scorecard contract](../pipeline/gold-example.md#metrics),
-[planned products](../pipeline/gold.md#at-a-glance),
-[evidence](evidence/README.md), [Gold code](../../pipeline/gold_scorecard.py).
+More: [Gold contract](../pipeline/gold-example.md), [planned products](../pipeline/gold.md#at-a-glance),
+[evidence](evidence/README.md), [Gold code](../../pipeline/gold.py), [dashboard](../../dashboard/README.md).
 
 ## 6. Running it
 
@@ -447,7 +477,7 @@ Both workflows use the VM's self-hosted runner.
 | Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver, Entur Silver for two days ago |
 
 The 2026-11-11 VM probe found recent starts at about 09:20–10:50 UTC despite the cron.
-Gold has no scheduled step.
+Gold and the dashboard build have no scheduled step; they run by hand.
 Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
 Spark steps and pipeline tests share `flock /data/dat535/.spark.lock`.
 

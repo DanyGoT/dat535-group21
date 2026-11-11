@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transit reliability</title>
+<meta name="description" content="Departures, transfer chances and road conditions from the DAT535 Gold layer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="title">
+    <h1>Will the connection hold?</h1>
+    <p id="coverage">Loading Gold data…</p>
+  </div>
+  <nav class="views" aria-label="Views">
+    <button type="button" data-view="network" aria-pressed="true">Stops and transfers</button>
+    <button type="button" data-view="roads" aria-pressed="false">Road conditions</button>
+  </nav>
+</header>
+
+<main id="network" class="network">
+  <div id="map" role="region" aria-label="Map of hubs coloured by share of late departures"></div>
+  <aside id="panel" class="panel" aria-live="polite">
+    <div class="search">
+      <label for="find">Find a stop</label>
+      <input id="find" type="search" autocomplete="off" placeholder="Stavanger busstasjon, Lysaker…">
+      <ul id="matches" class="matches" role="listbox" hidden></ul>
+    </div>
+    <div id="hub"></div>
+  </aside>
+</main>
+
+<main id="roads" class="roads" hidden>
+  <div class="roads-head">
+    <div>
+      <h2>Do road conditions go with late departures?</h2>
+      <p class="lede">Each timed departure is matched to the road data at its stop and aimed time: weather from the
+        nearest road weather station within 10 km, active road situations within 500 m, and traffic on measured road
+        sections within 500 m. Bars compare each condition with its reference within the same mode and hour of day,
+        so rush hour does not pass for congestion. Nearby is not a cause.</p>
+    </div>
+    <label class="mode">Mode <select id="mode"></select></label>
+  </div>
+  <div id="factors" class="factors"></div>
+</main>
+
+<footer class="foot" id="foot"></footer>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>window.goldData = function (data) { window.GOLD = data; };</script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
