@@ -2,7 +2,9 @@ name: DAT535 — Dev Pipeline
 
 on:
   push:
-    branches: [dev]
+    # Every branch of this repo except main. Forks cannot push here, so outside code never
+    # reaches the self-hosted runner. For the same reason there is no pull_request trigger.
+    branches-ignore: [main]
   workflow_dispatch:
 
 jobs:
