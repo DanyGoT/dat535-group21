@@ -1,63 +1,92 @@
 # DAT535 Group 21: public transport reliability
 
-A Spark pipeline (Medallion: Bronze → Silver → Gold) over Norwegian public transport data:
-which departures run late or get cancelled, and why. We collect Entur's real-time feeds
-(SIRI ET and SX, vehicle positions) and Statens vegvesen's road data (DATEX: road works,
-accidents, road weather) around the clock, because neither source keeps the raw history.
-The main Gold product answers a traveller's question: *will my departure be on time?*
+Which Norwegian buses, trains and ferries run late or get cancelled, and why?
 
-Course spec and grading basis: [`PROJECT.md`](PROJECT.md).
+We collect Entur's real-time transport feeds and Statens vegvesen's road data around the
+clock, because neither source keeps the raw history. A Spark pipeline on one small VM then
+turns the raw messages into trusted tables, layer by layer: Bronze, Silver, Gold.
 
-## Status
+```mermaid
+flowchart LR
+    S[Entur real-time and timetable<br/>NPRA road data] --> C[Collectors<br/>always on]
+    C --> L[(Landing<br/>raw, hourly, never changed)]
+    L --> B[Bronze<br/>every message, plus evidence]
+    B --> SI[Silver<br/>trusted tables]
+    SI --> G[Gold<br/>line scorecard]
+```
 
-| Part | State |
-| ---- | ----- |
-| SIRI ET/SX and vehicle position collection | running on the VM since 2026-10-15 / 10-17 |
-| DATEX collection | built and tested against NPRA; credentials are on the VM, starts with the next deploy |
-| NeTEx and NSR daily archive | first day archived 2026-10-26; daily timer starts with the next deploy |
-| Monitoring: status page, ntfy alerts, Prometheus, Grafana | running |
-| Bronze (SIRI, vehicles, DATEX) | SIRI daily at 03:00 UTC; vehicles and DATEX added |
-| Silver | Entur implemented; complete 2026-10-29 validated on the VM, regular deployment pending; [contracts](docs/pipeline/silver.md) · [run evidence](docs/report/evidence/silver-week-2026-10-26-to-2026-11-01.md) |
-| Gold | full-day [line scorecard example](docs/pipeline/gold-example.md) with a simple frontend (branch `examples/gold-scorecard`, kept off `main`); other [use cases](docs/pipeline/gold.md) remain future work |
+A weekday brings about 4.8 million real-time messages. For 2026-10-29, Silver reduced 280 million
+stop-call versions to 1.87 million stop calls, one row per journey at each stop.
 
-## Docs
+This is a course project for DAT535 at the University of Stavanger. The assignment and
+grading basis is [`PROJECT.md`](PROJECT.md).
 
-Start with [`docs/report/overview.md`](docs/report/overview.md): the whole system in one file, with
-code snippets, for the report and the presentation.
+## What is built
 
-| Folder | Docs |
-| ------ | ---- |
-| [`docs/system/`](docs/system/) | [architecture](docs/system/architecture.md): components, landing zone, pipeline, monitoring · [storage](docs/system/storage.md): VM capacity, volumes, runway, manual cleanup, Spark memory rules · [switchboard-style](docs/system/switchboard-style.md): look of the status page |
-| [`docs/pipeline/`](docs/pipeline/) | [methodology](docs/pipeline/methodology.md): how we decide, layer by layer · [silver](docs/pipeline/silver.md): contracts and operation · [gold](docs/pipeline/gold.md): use cases, the prediction product |
-| [`docs/entur/`](docs/entur/) | [sources](docs/entur/sources.md): every Entur source, limits, licence · [realtime](docs/entur/realtime.md): SIRI pub/sub and vehicle positions · [identifiers](docs/entur/identifiers.md): ids and join keys |
-| [`docs/datex/`](docs/datex/) | [sources](docs/datex/sources.md): access, feeds, collection, costs · [content](docs/datex/content.md): what the payloads contain, pitfalls |
-| [`docs/external/`](docs/external/) | [sources](docs/external/sources.md): weather, traffic and other enrichment |
-| [`docs/report/`](docs/report/) | [overview](docs/report/overview.md): core components and snippets · [problems](docs/report/problems.md): raw log of problems we hit, with evidence |
-| [`collector/`](collector/README.md) | operating the VM: units, setup, commands, credentials, tunnel |
+| Part | What it does | Runs | Code |
+| ---- | ------------ | ---- | ---- |
+| Collection | Stores every message unchanged in hourly files | always on, first feed since 2026-10-15 | [`collector/`](collector/) |
+| Bronze | Loads each message as one Parquet row, with evidence of where it came from | every night | [`bronze.py`](pipeline/bronze.py), [`bronze_datex.py`](pipeline/bronze_datex.py) |
+| Silver | Builds trusted tables with a stated grain, keys and quality flags | every night | [`silver.py`](pipeline/silver.py), [`silver_datex.py`](pipeline/silver_datex.py) |
+| Gold | Scores every line for one day: journeys, delays, share late | by hand | [`gold_scorecard.py`](pipeline/gold_scorecard.py) |
+| Monitoring | Status page, push alerts, Prometheus and Grafana | always on | [`monitor.py`](collector/monitor.py) |
+
+The Gold scorecard is an example that was run by hand for two days. It still expects the first
+Silver schema version, so it needs a small update before it reads newer days. The main Gold
+product we planned, predicting whether a departure will be on time, is not built.
+[`docs/pipeline/gold.md`](docs/pipeline/gold.md) describes it.
+
+![Line scorecard for 2026-10-29](docs/report/evidence/gold-dashboard-2026-10-29.png)
+
+*The Gold scorecard for 2026-10-29 in the example viewer. The viewer lives on the branch
+`examples/gold-scorecard`.*
+
+## Where to read
+
+Start with the [system overview](docs/report/overview.md). It walks through the whole system
+in one file, with the code that matters. Every section there links to the detail below.
+
+| To understand | Read |
+| ------------- | ---- |
+| How the components connect | [architecture](docs/system/architecture.md) |
+| The VM's disk and memory limits | [storage](docs/system/storage.md) |
+| Why each layer is built the way it is | [methodology](docs/pipeline/methodology.md) |
+| The Silver tables and their rules | [silver](docs/pipeline/silver.md) |
+| The Gold scorecard and the products we planned | [gold example](docs/pipeline/gold-example.md), [gold use cases](docs/pipeline/gold.md) |
+| Entur's data | [sources](docs/entur/sources.md), [real-time feeds](docs/entur/realtime.md), [identifiers](docs/entur/identifiers.md) |
+| The road data (DATEX) | [sources](docs/datex/sources.md), [content](docs/datex/content.md) |
+| Other sources we considered | [external sources](docs/external/sources.md) |
+| What went wrong and what we learned | [problem log](docs/report/problems.md) |
+| The run records behind our numbers | [evidence](docs/report/evidence/) |
+| How to operate the VM | [collector runbook](collector/README.md) |
 
 ## Repository
 
 | Path | Contents |
 | ---- | -------- |
-| `collector/` | always-on collectors, monitor, exporter, systemd units, Grafana dashboard |
-| `pipeline/` | Bronze jobs, Entur Silver (`silver.py`, `silver_parse.py`, `silver_reference.py`), manual Gold scorecard (`gold_scorecard.py`), offline tests |
-| `.github/workflows/` | `dat535-dev.yml` (tests + partial Bronze/Silver), `dat535-prod.yml` (approved deploy; daily Bronze + Entur Silver) |
-| `notebooks/` | exploration (`peek.ipynb`) |
-| `entur-ai-docs/` | Entur's generated BigQuery catalog (reference, don't edit) |
-| `labs/` | course lab material |
+| [`collector/`](collector/) | The always-on collectors, monitor, metrics exporter and systemd units |
+| [`pipeline/`](pipeline/) | The Bronze, Silver and Gold Spark jobs and their tests |
+| [`.github/workflows/`](.github/workflows/) | `dat535-dev.yml` tests and runs a one-hour sample. `dat535-prod.yml` deploys and runs the nightly pipeline |
+| [`docs/`](docs/) | Everything in the table above |
+| [`notebooks/`](notebooks/) | Exploration |
+| [`entur-ai-docs/`](entur-ai-docs/) | Entur's generated BigQuery catalog, kept as reference |
+| [`labs/`](labs/) | Course lab material |
 
 ## Tests
 
 ```sh
+# Collectors. Localhost only, and pinned to the VM's websockets version.
 uv run --python 3.11 --with-requirements requirements-dev.txt --with websockets==10.4 \
-  python -m unittest discover -s collector/tests    # localhost only, matches the VM's websockets
+  python -m unittest discover -s collector/tests
+
+# Pipeline. Needs Java 8 or 17, and no external services.
 uv run --python 3.11 --with-requirements requirements-dev.txt \
-  python -m unittest discover -s pipeline/tests     # needs Java 8/17; no external services
+  python -m unittest discover -s pipeline/tests
 ```
 
-Both run in CI on every push and PR to `dev`, and before every deploy. On the VM the
-pipeline suite uses `~/spark-env` under the shared Spark lock. Local collector tests need
-the VM's websocket version: newer websocket APIs reject its `extra_headers` argument.
+Both suites run on the VM on every push to `dev`, and again before every deploy from `main`.
+The pipeline suite also needs PyArrow, which `requirements-dev.txt` does not install yet. The VM's
+`~/spark-env` has it.
 
 ## Data credits
 

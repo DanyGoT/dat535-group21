@@ -1,19 +1,18 @@
 # System overview
 
-The system in one file: what each core component does, why it is built that way, the code that
-matters, and the numbers behind it. Meant to be read on its own and lifted into the report and the
-presentation. Snippets are real code, shortened only where marked with `...`.
+A guided tour with code and evidence for the report and presentation.
+Delivered Gold is a retrospective line scorecard over Entur Silver, while departure-risk
+prediction is planned.
 
-**Keep it current:** when a core component is added or changes, change it here in the same PR.
-`problems.md` is the raw log of what went wrong; this is the picture of what exists.
+Up: [README](../../README.md) · Related: [evidence](evidence/README.md), [problem log](problems.md)
+
+**Keep it current:** update this file in the same PR as any core component change.
+Snippets omit code only where marked with `...`.
 
 ## The project in one paragraph
 
-We collect Norwegian public transport data around the clock, because nobody keeps the raw history:
-Entur's real-time feeds (where every bus, train and ferry is, and when it is expected), the
-timetable, and the road authority's road works, accidents and road weather. A Spark pipeline on one
-small VM turns this into trusted tables (Medallion: Bronze → Silver → Gold). The main question
-it answers for a traveller: *will my departure be on time?*
+Collectors preserve Entur's transport feeds, timetable and stops, plus NPRA's road data.
+Spark builds Bronze, Silver and Gold on one VM. The scorecard describes past performance.
 
 ```mermaid
 flowchart LR
@@ -21,56 +20,63 @@ flowchart LR
     V[Entur vehicles<br/>websocket] --> W[vehicles.py]
     N[NPRA DATEX<br/>poll] --> D[datex.py]
     T[Entur NeTEx + NSR<br/>daily zip] --> S[static.py]
-    R & W & D --> L[(Landing<br/>hourly gzip, immutable)]
+    R & W & D --> L[(Landing<br/>raw, immutable)]
     S --> L
     L --> B[Bronze<br/>payload unchanged + evidence]
     B --> SE[Silver Entur<br/>journeys, stop calls, predictions]
     B --> SD[Silver DATEX<br/>situations, weather, travel times]
     L -. plan and stops .-> SE
-    SE --> G[Gold<br/>scorecard, departure risk]
-    SD --> G
+    SE --> G[Gold delivered<br/>retrospective line scorecard]
+    SE -.-> P[Gold planned<br/>departure-risk prediction]
+    SD -.-> P
 ```
 
 ### Words you need
 
 | Word | Meaning |
 | ---- | ------- |
-| SIRI ET | real-time times per journey: aimed, expected, actual. The main feed |
-| SIRI SX | disruption messages written for passengers |
-| NeTEx, NSR | the timetable, and the register of stops and their coordinates |
-| DATEX | the road authority's (NPRA) format for road events, weather and travel times |
-| Quay | one platform or stop position. A stop place has several |
-| Operating day | the day a journey belongs to. A night bus at 00:30 belongs to yesterday |
-| Stop call | one journey at one stop position on one operating day. Our finest grain |
-| Grain | what one row of a table means. Every table states it |
+| SIRI ET | Aimed, expected and actual times per journey, our main feed |
+| SIRI SX | Disruption messages for passengers |
+| NeTEx, NSR | Timetable and stop register |
+| DATEX | NPRA's format for road events, weather and travel times |
+| Quay | One platform or stop position within a stop place |
+| Operating day | The day a journey belongs to, which can precede its UTC observation day |
+| Stop call | One journey at one stop position on one operating day |
+| Grain | What one row represents |
+
+A 00:30 night bus can belong to the previous operating day.
 
 ### The numbers
 
-| | |
-| - | - |
-| Machine | one VM: 4 vCPU, 7.9 GB RAM, 984 GB data disk, Spark 3.5 in local mode |
-| Collected per weekday | 8.9 GB SIRI ET, 1.3 GB vehicles, 0.8 GB DATEX, 0.3 GB timetable and stops (gzip) |
+These are scale estimates. Some original collection measurements are undated.
+The reduction is consistent with the archived complete-day
+[2026-10-29 run](evidence/silver-2026-10-29.json), not a daily guarantee.
+
+| Measure | Value |
+| ------- | ----- |
+| Machine | One VM, 4 vCPU, 7.9 GB RAM, 984 GB data disk, Spark 3.5.0 in local mode |
+| Collected per weekday | 8.9 GB SIRI ET, 1.3 GB vehicles, 0.8 GB DATEX, 0.3 GB timetable and stops |
 | Scale of ET | 4.8 M messages a day, 160 GB of XML text, about 280 M call versions |
 | Plan | 76,000 journeys and 1.86 M stop calls a day, 101,000 quays |
 | Reduction | 280 M call versions become 1.87 M stop calls |
 
+Collection sizes are compressed landing data, with gzip for messages and ZIP for static archives.
+[Storage](../system/storage.md#what-a-day-costs) owns capacity figures and their measurement dates.
+
 ## 1. Collection: nobody keeps the raw history
 
-**In one sentence:** small always-on Python services write every message, unchanged, to one gzip
-file per hour; nothing else may ever touch those files.
+Collectors keep payloads unchanged in hourly gzip files or daily static zips.
 
-| Service | Source | How | Volume |
-| ------- | ------ | --- | ------ |
-| `collector/receiver.py` | SIRI ET, SX | Entur pushes to us over a reverse SSH tunnel | 4.8 M messages a day |
-| `collector/vehicles.py` | vehicle positions | GraphQL websocket subscription | 620,000 messages a day |
-| `collector/datex.py` | NPRA DATEX | polls five feeds, every 2.5 min to 6 h | 8.2 GB downloaded a day |
-| `collector/static.py` | NeTEx, NSR | one zip each per day, daily timer | 330 MB a day |
+| Service | Source and transport | Volume |
+| ------- | -------------------- | ------ |
+| [`receiver.py`](../../collector/receiver.py) | SIRI ET/SX pushes through a reverse SSH tunnel | 4.8 M messages/day |
+| [`vehicles.py`](../../collector/vehicles.py) | GraphQL websocket | 620,000 messages/day |
+| [`datex.py`](../../collector/datex.py) | Five NPRA feeds, polled every 2.5 min to 6 h | Situations alone download 8.2 GB/day |
+| [`static.py`](../../collector/static.py) | NeTEx and NSR, one zip each per day | 330 MB/day |
 
-Why hourly files: a day of raw text is too big for one file and a line every message is too small;
-an hour is the unit we can close, compress, count and rerun. A running hour is `*.part` and readers
-never touch it.
-
-All three streaming collectors share one writer. A closed hour is never reopened:
+Hourly files give a bounded unit to close, compress, count and rerun.
+Readers skip open `*.part` files. The streaming collectors share
+[`hourly.py`](../../collector/hourly.py), which never reopens a closed hour.
 
 ```python
 # collector/hourly.py
@@ -86,27 +92,27 @@ def finalize(part):
         raw.flush()
         os.fsync(raw.fileno())
     os.rename(tmp, final)
+    ...
 ```
 
-`gz` then `rename` means a reader sees the whole file or none of it. A landing line is our own small
-envelope around the untouched payload:
+Atomic rename exposes the complete compressed file. Each line wraps the untouched payload.
 
 ```json
 {"received_at": "2026-11-05T08:00:00.153Z", "endpoint": "vehicles", "payload": "<raw XML or JSON>"}
 ```
 
-**Why it matters:** Entur's timetable export keeps at most 48 h of past days, and no raw SIRI
-archive exists anywhere. A day we fail to collect is gone. Everything downstream can be rebuilt from
-landing.
+Entur retains at most 48 h of past timetable days. Its documented historical ET source is
+processed BigQuery data, without a raw SIRI archive. Landing can rebuild downstream tables,
+but the sources cannot reconstruct a missed day of raw message history.
 
-Monitoring is a small script every 2 minutes: are the services alive, are the files growing, is
-disk fine. It writes a status page and sends a push on change. Reruns and disk cleanup stay manual
-(section 6).
+More: [landing contract](../system/architecture.md#landing-zone),
+[Entur sources](../entur/sources.md#why-archive-timetables-and-stops),
+[DATEX sources](../datex/sources.md#feeds), [collector code](../../collector/).
 
 ## 2. Bronze: load first, interpret later
 
-**In one sentence:** every landing line becomes one Parquet row with the payload unchanged, plus
-evidence of where it came from; a line that can't be read is kept and labelled, never dropped.
+[`bronze.py`](../../pipeline/bronze.py) keeps one landing line per Parquet row.
+Unreadable lines remain labelled evidence.
 
 ```python
 # pipeline/bronze.py, ingest_feed
@@ -130,49 +136,57 @@ status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
     .otherwise("ok")
 ```
 
-Each row also gets the source file, hour, payload SHA-256 and size, status, and run id. Each run
-writes a JSON record: files, rows, bad rows, missing and open hours.
+Rows add source file, hour, payload SHA-256 and size, status and run ID.
+Run records count files, rows, errors and hour coverage.
 
 | Decision | Evidence |
 | -------- | -------- |
-| zstd, not Snappy | one ET hour: 1,621 MB Snappy, 558 MB zstd, same write time |
-| Reader batch of 256, not 4096 | the default killed a 3 GB driver on 4 × 4096 rows of up to 16M characters; 256 read the hour in 23 s |
-| `maxStringLen` lifted | ET pushes reach 22.8M characters, DATEX snapshots 28.6M; Jackson's default of 20M marked them corrupt |
-| Write the day's folder, no `partitionBy` | `partitionBy` on a constant still sorts the whole day; it filled the root disk |
-| DATEX: `parquet.page.size.row.check.min` = 1 | Parquet measures its buffer only after 100 rows; every row is 26.6M characters, and the first full day ran out of heap |
+| zstd over Snappy | 2026-10-22 08 UTC input wrote 1,621 MB Snappy or 558 MB zstd in 126 s or 129 s |
+| Reader batch 256 | 2026-10-24 test killed a 3 GB driver at 4096. Batch 256 read the hour in 23 s |
+| Lift `maxStringLen` | ET reaches 22.8M characters and DATEX 28.6M. Jackson's 20M default marked them corrupt |
+| Write the day directly | `partitionBy` on a constant sorted the whole day and filled the root disk on 2026-10-24 |
+| DATEX `parquet.page.size.row.check.min=1` | First full-day write buffered 26.6M-character snapshots until heap exhaustion on 2026-10-29 |
 
-**Is it sound?** Audited 2026-11-06: Bronze rows equal landing lines on every feed checked, and the only
-collection dip is 2026-10-21, 15-17 UTC. SIRI for 2026-10-23 was never ingested; one manual rerun
-restored it from landing (2026-11-06, prod run 78: 4,808,892 ET, 4,605 SX and 643,233 vehicle rows,
-equal to the landing lines). Vehicle positions reach Bronze from 2026-10-26, plus that 2026-10-23;
-landing has them from 2026-10-17.
+The 2026-11-06 audit matched Bronze rows to landing lines on every checked feed.
+The only collection dip found in that audit was 2026-10-21, 15–17 UTC.
+Prod run 78 restored 2026-10-23 Bronze, with 4,808,892 ET, 4,605 SX and 643,233 vehicle rows.
 
-DATEX has its own Bronze job, `pipeline/bronze_datex.py`, because one row is one poll and failed polls
-are evidence: a run reports polls by outcome, distinct snapshots and the longest gap.
+At that audit, other vehicle Bronze began 2026-10-26, against landing from 2026-10-17.
+The 2026-11-11 VM probe found vehicle Bronze date folders spanning 2026-10-23 to
+2026-11-09. These are different snapshots of coverage, not contradictory start dates.
+
+[`bronze_datex.py`](../../pipeline/bronze_datex.py) also counts poll outcomes, distinct snapshots
+and the longest successful-poll gap.
+
+More: [Bronze methodology](../pipeline/methodology.md#bronze-load-first-interpret-later),
+[storage](../system/storage.md#what-a-day-costs),
+[Bronze code](../../pipeline/bronze.py), [DATEX Bronze](../../pipeline/bronze_datex.py).
 
 ## 3. Silver for Entur: where trust is built
 
-**In one sentence:** turn every version of every message into one trusted row per stop call, without
-losing what was planned but never reported, and without letting future knowledge leak into the
-past.
+Silver keeps unreported planned calls, final reported states and past knowledge.
+Keys below are within date partitions. Calls, journeys and references use operating dates.
+Vehicles and SX use UTC observation dates.
 
 | Table | One row is | Key |
 | ----- | ---------- | --- |
-| `stop_call` | final state of one journey at one stop position, or a planned call never reported | operating date, journey, order |
-| `journey` | final state of one journey on one day | operating date, journey |
-| `call_prediction` | what was known of a call at 1, 5, 10, 20, 30 min before it | call, event, reference, lead |
-| `vehicle_position` | one position report | codespace, vehicle, time |
-| `sx_situation` | one revision of a disruption message | participant, situation, revision |
-| `quay`, `stop_place`, `line`, `operator`, `dated_journey` | one entity in that day's plan or stop archive | id |
-| `quarantine` | a message or version with no usable identity | source locator |
+| `stop_call` | Final reported call or unreported planned call | `journey_id, call_order` |
+| `journey` | Final journey state, including plan-only journeys | `journey_id` |
+| `call_prediction` | Call state at a fixed arrival/departure cutoff | Call key, `event, reference, lead_minutes` |
+| `vehicle_position` | One position report | `codespace, vehicle_id, last_updated_at` |
+| `sx_situation` | One disruption revision | `participant_id, situation_id, version_key` |
+| `quay`, `stop_place`, `line`, `operator` | One reference entity | `id` |
+| `dated_journey` | Dated alias mapped to a journey | `dated_journey_id` |
+| `quarantine` | Unreadable message or unusable identity | No asserted unique key |
+
+Prediction cutoffs are 1, 5, 10, 20 and 30 minutes before planned or final actual time.
 
 ### Decode each day once, keep only what changed
 
-ET restates a whole journey on every change, so most rows say nothing new. Measured on one hour:
-**98 % of `RecordedCall`s, 54 % of all call versions and 96 % of journey versions repeat the previous
-one.** An operating day needs three UTC days of messages, so decoding per operating day would parse
-everything three times. Instead each UTC day is decoded once into `silver/_decoded/`, and a state is
-emitted only when it differs from that entity's last one:
+An operating day reads three UTC days. [`silver.py`](../../pipeline/silver.py) caches their decoded
+rows in `silver/_decoded/` until Bronze or the decoder changes.
+In one measured hour, 98 % of `RecordedCall`s, 54 % of call versions and 96 % of journey versions
+repeated. [`parse_et`](../../pipeline/silver_parse.py) skips repeated states.
 
 ```python
 # pipeline/silver_parse.py, parse_et
@@ -185,19 +199,14 @@ for call_index, call in enumerate(calls):
     ...
 ```
 
-Dropping a repeat loses (almost) nothing: a state holds until the next one, and the first copy has the
-earliest time. Two things make that true, both found by comparing with the slow version key by key
-(`problems.md`, 2026-11-06): the memory keeps the newest copy it dropped, so a late replay of older
-data still loses to it, and it starts over wherever a task's input breaks, because Spark packs
-pieces of several hours into one task, largest first. What is left is measured: memory does not
-cross a task boundary, so a replay right after one can still count: on 2026-10-29, 2 of 33.0 M
-predictions moved by 3 s and 100 got a later `available_at` (seconds). Rows leave Python through Arrow
-(`mapInArrow`) instead of being pickled one by one.
+The decoder remembers dropped copies and resets across input gaps.
+The [2026-10-29 comparison](problems.md#2026-11-06--dropping-repeated-et-states-changed-650-predictions)
+found a task-boundary limit. Of 33.0 M predictions, 2 moved by 3 s and 100 received a later
+`available_at`. Rows leave Python through Arrow's `mapInArrow`.
 
 ### Every version gets an operating day
 
-The key is `operating date + journey + order`. Most messages name their day, but VY trains, Bane NOR
-trains and extra journeys don't. Resolving them in order, and saying how:
+[`normalize_journeys`](../../pipeline/silver.py) records the chosen date source.
 
 ```python
 # pipeline/silver.py, normalize_journeys
@@ -207,15 +216,17 @@ joined = joined.withColumn("date_source", F.when(F.col("operating_date").isNotNu
     .drop("derived_operating_date", "derived_date_source")
 ```
 
-`framed` is the message itself, `alias` the plan's dated journey, then a date inside the id
-(`VYG:DatedServiceJourney:1614_DAL-DRM_26-11-05`), then the Oslo date of the first aimed time. The two
-guesses are flagged. Before this, 4.4 M rows a day sat in quarantine as "unknown identity", 83 % of
-them simply trains of another day, and real extra journeys never reached the tables.
+Precedence is explicit `framed` day, plan `alias`, date inside the ID, then the Oslo date of the
+first aimed time. The last two are flagged because they are derived.
+Before this, the earlier processing quarantined about 4.4 M rows as unknown identities.
+83 % were trains of another day, and extra journeys never reached the tables.
+The archived [2026-10-29 record](evidence/silver-2026-10-29.json) counts 4,441,088 unresolved
+versions across its three-day input window, rather than per UTC input day.
 
 ### The final state of a call
 
-An actual time beats any estimate, then the producer's time decides, then ours. Same input, same
-winner, on every rerun:
+[`latest`](../../pipeline/silver.py) prefers a row with an actual arrival or departure,
+then producer time, receipt time and deterministic tie-breakers.
 
 ```python
 # pipeline/silver.py
@@ -236,8 +247,8 @@ def latest(df, key, actual_first=False):
 
 ### The denominator: planned but never reported
 
-A journey that never reports is neither on time nor cancelled. A full outer join at the same grain
-keeps both sides and says which is which:
+[`merge_plan`](../../pipeline/silver.py) preserves the union of planned and reported keys.
+An unreported call is unknown.
 
 ```python
 # pipeline/silver.py, merge_plan
@@ -247,14 +258,18 @@ merged = rt.withColumn("has_realtime", F.lit(True)).join(planned, key, "full")
             .when(~F.col("has_plan"), "realtime_only").otherwise("matched"))
 ```
 
-2026-10-29: 1,802,968 calls matched, 52,423 planned but unreported, 14,308 reported but not planned.
-Without NeTEx the unreported ones are invisible, which biases punctuality per operator by up to 8 %.
+The [2026-10-29 run](evidence/silver-2026-10-29.json) had 1,802,968 matched calls,
+52,423 planned but unreported and 14,308 reported but unplanned.
+
+Without NeTEx the unreported ones are invisible. A separate
+[2026-10-23 sample](../pipeline/silver.md#planned-journeys-unseen-in-et-2026-10-23)
+found up to 8 % of planned journeys absent from ET.
+That measures a reporting gap, not an 8 % punctuality bias.
 
 ### What was known, when
 
-For prediction, a final state is the answer, not an input. `call_prediction` samples what was
-available at fixed times before each call. A version counts only after both the producer's and our
-own timestamp, and a late replay of old data can't undo newer knowledge:
+[`asof_intervals`](../../pipeline/silver.py) admits a version only after both timestamps.
+Late replays cannot undo newer knowledge.
 
 ```python
 # pipeline/silver.py, asof_intervals
@@ -268,11 +283,12 @@ df = df.withColumn("_best_seen", F.max("_priority").over(seen)) \
 return df.withColumn("next_available_at", F.lead("available_at").over(knowledge))
 ```
 
-A join on `available_at <= cutoff < next_available_at` then avoids a versions × cutoffs explosion.
+Joining `available_at <= cutoff < next_available_at` avoids expanding every version against every cutoff.
+The `actual` reference is retrospective. Planned departure-risk features must use planned cutoffs.
 
-### Flag, don't delete; publish last
+### Flag, don't delete and publish last
 
-A failed rule adds a name to the row's `dq_issue` array; the row stays countable:
+[`issues`](../../pipeline/silver.py) records field failures without removing the row.
 
 ```python
 # pipeline/silver.py
@@ -286,48 +302,59 @@ def issues(df, *rules):
     ))))
 ```
 
-Every table is written to a staging folder, its key checked for uniqueness, its issues counted, and
-only then moved into place. `latest.json` is written last: `status=complete, ready=true` is what Gold
-checks, and a failed run leaves the previous day published.
+Tables are staged, declared keys checked and issues counted before publication.
+Quarantine has no uniqueness check. Source-contract failures block strict publication.
+A successful strict run publishes `latest.json` with `status=complete, ready=true` last.
+Ordinary failures preserve prior partitions. A killed process may need manual recovery.
 
-**Example of what the flags catch:** one ferry journey with all 8 calls stamped 9 h before departure
-(`implausible_departure_delay`). `actual_departure_equals_aimed` shows where an operator copies the
-aimed time into the actual one, which would hide delay.
+One ferry journey had all 8 calls stamped 9 h early, caught by `implausible_departure_delay`.
+`actual_departure_equals_aimed` records equality, which does not prove punctuality or copying.
+
+More: [Silver contracts](../pipeline/silver.md#reading-safely),
+[identifiers](../entur/identifiers.md#keys),
+[evidence](evidence/README.md), [Silver code](../../pipeline/silver.py).
 
 ## 4. Silver for DATEX: the road, joined by place and time
 
-**In one sentence:** typed tables of road situations, weather and travel times, plus links from each
-quay to what is nearby, so that Gold never has to parse a road format.
+Typed road tables and quay links support future Gold products.
+All use UTC observation dates. Keys below are within each partition.
 
 | Table | One row is | Key |
 | ----- | ---------- | --- |
-| `road_situation` | one version of a situation record seen that day | record, version, version time |
-| `road_situation_interval` | one span in which it applies | + start |
-| `road_weather` | one station at one measurement time | site, time |
-| `road_travel_time` | one road section and 5-minute period | section, period |
-| `weather_site`, `road_section` | a station or section, and how it behaved that day | id |
-| `quay_road_situation`, `quay_road_section` | something within 500 m of a quay | both ids |
-| `quay_weather_site` | a quay's nearest working station | quay |
+| `road_situation` | One situation-record version | `record_id, version, version_at` |
+| `road_situation_interval` | One applicable span | Situation key + `start_at` |
+| `road_weather` | One station measurement | `site_id, measurement_at` |
+| `road_travel_time` | One section and 5-minute period | `section_id, period_start_at` |
+| `weather_site`, `road_section` | One reference plus daily behaviour | `id` |
+| `quay_road_situation`, `quay_road_section` | Road item within 500 m of sampled geometry | Quay ID + road item key |
+| `quay_weather_site` | Quay's nearest usable station | `quay_id` |
+| `datex_quarantine` | Unreadable poll, failed delivery or unusable identity | No asserted unique key |
+
+The [full contracts](../pipeline/silver.md#roads) distinguish sampled road geometry from
+distance to a complete road line. They also describe the current DATEX
+[schema-stamp mismatch](../pipeline/silver.md#schema-compatibility).
 
 ### What the data taught us
 
-All feeds cover all 24 hours, but what they contain is not evenly spread, and that is the source's
-nature rather than a fault in our collection (measured on all polls of 2026-11-05):
+All feeds had polls across all 24 hours on 2026-11-05.
+[Source findings](../datex/content.md#when-things-appear-what-the-gaps-mean) explain the gaps.
 
-- **Road events cluster in working hours.** 8-11 new record versions an hour at night, 49-76 from 08
-  to 16 local: operators register road works during the day.
-- **Most road works are not always on.** 42 % of records apply in recurring windows, such as
-  20:00-06:00 Monday to Thursday, inside dates that span months.
-- **Travel time has real holes.** A section has a value for 26-43 % of periods at night and 60-65 % by
-  day: no value means no vehicles were measured. 55 of 202 sections reported nothing all day.
-- **Some stations are dead or broken.** 19 stations never updated, one still lists a measurement 1.6
-  years old; others report -39.9 °C or a constant 80.3 mm/h of rain.
+| Finding | Measurement |
+| ------- | ----------- |
+| New road-event versions cluster in working hours | 8–11/hour at night, 49–76/hour at 08–16 local |
+| Recurring windows matter | 42 % of records apply only in recurring windows |
+| Travel times have gaps | 26–43 % measured at night, 60–65 % by day |
+| Weather includes stale or suspect values | Oldest unchanged station reading was 1.6 years old |
+
+Of 202 travel-time sections, 55 never reported that day. Nineteen weather stations never
+updated. Suspect readings included -39.9 °C and constant 80.3 mm/h rain.
+These are source-data limitations, not evidence that the collector missed those polls.
 
 ### Applying a road event only when it applies
 
-Treating `overallStartTime..overallEndTime` as continuous would put night works in the morning rush,
-so each record is expanded into the spans that apply on that day. Applicable days without a time of
-day mean the whole local day:
+[`active_intervals`](../../pipeline/silver_datex_parse.py) expands recurring windows.
+Treating `overallStartTime..overallEndTime` as continuous would put night works in rush hour.
+Applicable days without a time mean the whole local day.
 
 ```python
 # pipeline/silver_datex_parse.py, active_intervals
@@ -345,8 +372,8 @@ for offset in (-1, 0, 1):
 
 ### Joining by place without comparing everything
 
-There is no id to join a quay to a road event. Comparing 100,000 quays with 100,000 road points is 10
-billion distances, so both sides get a grid cell, and only neighbouring cells are compared:
+[`near`](../../pipeline/silver_datex.py) compares neighbouring grid cells before measuring distance.
+A full comparison of 100,000 quays with 100,000 road points would need 10 billion distances.
 
 ```python
 # pipeline/silver_datex.py, near
@@ -360,18 +387,22 @@ joined = q.join(p, ["_cell_lat", "_cell_lon"]).withColumn(
 return joined.filter(F.col("distance_m") <= radius_m).groupBy("quay_id", *key).agg(F.round(F.min("distance_m"), 1).alias("distance_m"))
 ```
 
-Road geometry comes in UTM 33 (metres) and is projected to latitude and longitude in about ten lines
-(`utm33_to_wgs84`), checked against `pyproj` to the centimetre.
+[`utm33_to_wgs84`](../../pipeline/silver_datex_parse.py) projects UTM 33 metres to latitude/longitude.
+[Tests](../../pipeline/tests/test_silver_datex.py) match four `pyproj` reference coordinates
+at six decimal places. They do not establish centimetre accuracy.
 
-**Cost:** a full day takes 116 s and turns 500 MB of Bronze into about 7 MB of tables.
+Recorded full-day cost is 116 s, from 500 MB Bronze to about 7 MB of tables.
+The measurement date is unrecorded.
+
+More: [DATEX content](../datex/content.md#in-silver),
+[Silver contracts](../pipeline/silver.md#roads),
+[DATEX Silver code](../../pipeline/silver_datex.py).
 
 ## 5. Gold: answering a question
 
-**In one sentence:** Gold serves one named consumer per table and never parses raw data.
-
-Built so far, the **daily line scorecard** (`pipeline/gold_scorecard.py`): one row per line per day.
-Journeys and stop calls are counted separately and then joined, so a journey with 30 stops still counts
-as one journey. A missing report stays unknown, and a line with nothing to measure gets a blank, not 0 %.
+[`gold_scorecard.py`](../../pipeline/gold_scorecard.py) delivers one retrospective line/day row.
+It aggregates journeys and calls separately.
+Missing reports stay unknown and zero denominators give blank rates.
 
 ```python
 # pipeline/gold_scorecard.py, build_scorecard
@@ -382,38 +413,77 @@ scored = reported & ~cancelled & F.coalesce(F.col("for_boarding"), F.lit(True)) 
     ~F.array_contains("dq_issue", "implausible_departure_delay")
 ```
 
-2026-10-29: 3,992 lines; 1,618,184 scored departures; 35.5 % at least 3 minutes late. That looked high,
-so we checked it: the delay histogram is one smooth curve around +1 min, lateness grows along the
-route (10 % at the first stop, 47 % after stop 16) and peaks at 15-16 local, and the independent `delay`
-field of vehicle positions agrees per operator (ATB 31 % vs 35 %, Brakar 34 % vs 36 %).
+Tracked manual runs cover a 2026-10-26 partial sample and the complete-input day 2026-10-29.
+**Compatibility limit:** Gold accepts only Silver `schema_version=1`.
+Current Entur Silver writes version 2, so newly rebuilt days cannot feed this job.
 
-The main product, **departure risk**, comes after Silver has proven itself: see
-[pipeline/gold.md](../pipeline/gold.md). A first test, an ablation of the Silver sources on that
-question, is kept off `main` (branch `experiments/silver-ablation`): Entur's history and estimate
-carry the signal; DATEX and SX alerts change its AUC by at most 0.0005.
+The [2026-10-29 result](evidence/gold-2026-10-29.json), produced 2026-11-05, contains 3,992 lines
+and 1,618,184 scored departures. 35.5 % were at least 3 minutes late.
+It predates today's implausible-delay exclusion.
+
+Earlier checks reported a smooth histogram around +1 min, lateness of 10 % at the first stop and
+47 % after stop 16, and a 15–16 local peak.
+Vehicle-delay comparisons were ATB 31 % vs 35 % and Brakar 34 % vs 36 %.
+These checks have no saved reproducible evidence.
+
+Departure-risk prediction remains planned.
+The separate [ablation report](https://github.com/DanyGoT/dat535-group21/blob/experiments/silver-ablation/docs/report/silver-ablation.md)
+tests Silver's sources on 2026-11-04. Entur history and estimates carry the signal.
+Adding DATEX and SX to those features changed AUC by at most 0.0005 in that experiment.
+
+More: [scorecard contract](../pipeline/gold-example.md#metrics),
+[planned products](../pipeline/gold.md#at-a-glance),
+[evidence](evidence/README.md), [Gold code](../../pipeline/gold_scorecard.py).
 
 ## 6. Running it
 
-| Thing | How |
-| ----- | --- |
-| Collectors, monitor, archive | systemd user services on the VM, deployed by the prod workflow |
-| Bronze, Silver | GitHub Actions on a self-hosted runner: nightly on `main`, one job at a time |
-| One Spark job at a time | every step runs under `flock /data/dat535/.spark.lock`; two 4 GB drivers don't fit in 8 GB |
-| Environments | `dat535-dev.yml` writes to `/data/dat535/dev`, `dat535-prod.yml` to `/data/dat535/prod`, deploys need manual approval |
-| A failed day | rerun by hand: `gh workflow run dat535-prod.yml --ref main -f bronze_date=YYYY-MM-DD` (or `silver_date`) |
-| Disk | delete by hand, cheapest loss first: [system/storage.md](../system/storage.md) |
-| Status | status page, Grafana, push notification on any failure |
+Both workflows use the VM's self-hosted runner.
 
-Deliberately manual: reruns and disk cleanup. Less code to run, and less to explain.
+| Trigger | Behaviour |
+| ------- | --------- |
+| Push to `dev` or manual dev dispatch | Tests, yesterday's 08 UTC Bronze sample, partial Silver |
+| Push to `main` | Approved deployment, tests and collector installation |
+| Prod schedule or manual dispatch | Bronze and both Silver jobs, without deployment tests or approval |
+| Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver, Entur Silver for two days ago |
+
+The 2026-11-11 VM probe found recent starts at about 09:20–10:50 UTC despite the cron.
+Gold has no scheduled step.
+Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
+Spark steps and pipeline tests share `flock /data/dat535/.spark.lock`.
+
+For a Bronze-only rerun, dispatch `gh workflow run dat535-prod.yml --ref main -f bronze_date=YYYY-MM-DD`.
+A `silver_date` dispatch also runs preceding Bronze steps.
+It passes the same date to Entur operating-day Silver and DATEX UTC-day Silver.
+Without `bronze_date`, the preceding Bronze steps still process yesterday.
+Ensure Entur's three required Bronze days exist before rerunning Silver.
+
+The monitor checks collection and disk every 2 minutes, with pushes on overall health changes.
+It does not cover batch failures. Reruns and disk cleanup remain manual.
+Local Silver needs PyArrow, which [`requirements-dev.txt`](../../requirements-dev.txt) omits.
+
+More: [dev workflow](../../.github/workflows/dat535-dev.yml),
+[prod workflow](../../.github/workflows/dat535-prod.yml),
+[runbook](../../collector/README.md#everyday-commands),
+[storage](../system/storage.md#memory).
 
 ## 7. Decisions worth defending
 
-| Decision | Why | What it costs |
-| -------- | --- | ------------- |
-| Collect raw ourselves | no raw archive exists; BigQuery has only Entur's processed ET | a VM running non-stop |
-| Keep landing and Bronze unchanged | every later bug can be fixed by rerunning | disk: 19.5 GB a weekday before cleanup |
-| Stop call as the grain, not the message | the finest grain people still understand | version history needs its own table |
-| Flag, never delete | quality must be measurable | consumers must read the flags |
-| Python's XML parser in Spark tasks, not `spark-xml` | no extra dependency; one decoder used everywhere | 37 min per UTC day |
-| One VM, one Spark job at a time | what we have | a long job blocks the next: a 4-hour run cost a Bronze day (`problems.md`) |
-| Time-split validation, as-of features | neighbouring departures leak, and final states are the future | less training data |
+| Decision | Why | Cost |
+| -------- | --- | ---- |
+| Collect raw ourselves | BigQuery contains processed ET rather than raw message history | Always-on VM |
+| Preserve landing and Bronze payloads | Downstream bugs can be fixed by rerunning | Disk capacity |
+| Stop-call grain | Reusable journey-position facts | Separate prediction history |
+| Flag field failures | Quality remains measurable | Consumers must interpret flags |
+| Python XML parsing in Spark tasks | Standard-library parser shared across decoders | Historical estimate of 37 min/UTC day |
+| One Spark job at a time | Fit 7.9 GB RAM | Long runs block other jobs |
+| Time-split validation and as-of features | Prevent future knowledge leaking into features | Less training data |
+
+An earlier undated estimate put landing plus Bronze at 19.5 GB/weekday before cleanup.
+The [storage baseline](../system/storage.md#what-a-day-costs) gives about 20.5 GB/day before
+substantial Silver. Neither is a measurement of today's full pipeline growth.
+
+The [four-hour Silver incident](problems.md#2026-11-05--a-long-silver-run-cost-us-a-day-of-bronze-and-nothing-said-so)
+shows the operational cost of sharing one lock.
+
+More: [methodology](../pipeline/methodology.md), [storage](../system/storage.md),
+[problem log](problems.md), [shared Spark setup](../../pipeline/bronze.py).

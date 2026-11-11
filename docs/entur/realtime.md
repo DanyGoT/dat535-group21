@@ -1,123 +1,130 @@
 # Entur real-time: SIRI and vehicle positions
 
-What we collect from Entur in real time, how each channel behaves, and what the messages
-contain. Sources: https://developer.entur.no/open-data/realtime.md, Entur's SIRI hub
-`entur/anshar` (code read 2026-10-15), and our own data. Limits and licence: [entur/sources.md](sources.md).
+This page explains collection protocols, payloads and coverage using our data and
+`entur/anshar` code read on 2026-10-15.
+
+Up: [Entur sources](sources.md) · Related: [identifiers](identifiers.md),
+[Silver](../pipeline/silver.md)
 
 ## What we collect
 
-| Feed | What it carries | Channel | Collector | Daily volume |
-| ---- | --------------- | ------- | --------- | ------------ |
-| **SIRI ET** (Estimated Timetable) | planned, expected and recorded times per call; cancellations; extra journeys | SIRI 2.0 pub/sub (push) | `receiver.py` | ~8.5 GB gzipped |
-| **SIRI SX** (Situation Exchange) | disruption messages for lines and stops | SIRI 2.0 pub/sub (push) | `receiver.py` | ~2 MB |
-| **Vehicle positions** | location, delay, occupancy, next stop per vehicle | GraphQL subscription (websocket) | `vehicles.py` | ~1.27 GB |
+October weekday landing volumes are approximate. See the dated [storage baseline](../system/storage.md#what-a-day-costs)
+for weekday/weekend variation.
 
-Not used: SIRI VM (vehicle positions as SIRI; the GraphQL API is richer) and GTFS-RT (no
-national feed; partial per codespace, e.g. BNR only ET, SJN only SX).
+| Feed | Content | Channel / collector | Daily volume |
+| ---- | ------- | ------------------- | -----------: |
+| SIRI ET, Estimated Timetable | aimed, expected, recorded call times, cancellations, extra journeys | SIRI 2.0 push / [`receiver.py`](../../collector/receiver.py) | ~8.5 GB gzipped |
+| SIRI SX, Situation Exchange | line and stop disruptions | SIRI 2.0 push / same receiver | ~2 MB |
+| Vehicle positions | location, delay, occupancy, next stop | GraphQL websocket / [`vehicles.py`](../../collector/vehicles.py) | ~1.27 GB |
+
+Documentation: https://developer.entur.no/open-data/realtime.md.
+
+SIRI VM is unused because GraphQL is richer. GTFS-RT has no national feed and partial
+codespace coverage, e.g. BNR only ET and SJN only SX.
 
 ## SIRI ET in one paragraph
 
-ET holds the **current operating day only**. Each push restates whole journeys
-(`EstimatedVehicleJourney`) that changed; as a vehicle passes a stop, its call moves from
-`EstimatedCall` to `RecordedCall`. A call is restated on every change, about 57 times on
-average ([pipeline/silver.md](../pipeline/silver.md)), so the raw stream is very redundant and Silver keeps the final state.
+ET serves the current operating day, but observed pushes also contain other-day records and
+following-day replays. Each push restates changed `EstimatedVehicleJourney` elements.
+Passed stops move from `EstimatedCall` to `RecordedCall`. In the exploratory 2026-10-22
+sample, calls repeated about 57 times on average. See [the measurement](../pipeline/silver.md#exploratory-plan-matching-2026-10-22).
+Silver selects final states and preserves prediction history.
 
 ## Pub/sub: how the subscription works
 
-Verified in `entur/anshar` (`Usage.md`, `Subscription-lifecycle.md`, the outbound routes and
-`ServerSubscriptionManager`); the developer portal documents none of it. Values are the code's
-defaults; production may override them (**UNVERIFIED**).
+Provider defaults come from `entur/anshar`'s `Usage.md`, `Subscription-lifecycle.md`,
+outbound routes and `ServerSubscriptionManager`. The portal omits them.
+Production overrides remain **UNVERIFIED**.
 
-**Subscribe.** `POST https://api.entur.io/realtime/v1/subscribe` (or `/subscribe/<codespace>`)
-with a SIRI 2.0 `SubscriptionRequest`. One subscription per data type, each with its own
-`SubscriptionIdentifier`. Our request (built in `receiver.py`):
+[`receiver.py`](../../collector/receiver.py) posts a SIRI 2.0 `SubscriptionRequest` per
+type to `https://api.entur.io/realtime/v1/subscribe`. A `/subscribe/<codespace>` suffix
+can filter subscriptions. Each request needs its own `SubscriptionIdentifier`, callback
+`Address` and future `InitialTerminationTime`. Ours use `<ET_CLIENT_NAME>-et` and
+`<ET_CLIENT_NAME>-sx` as subscription ids. Our callbacks are `/siri/et` and `/siri/sx`.
+It supplies timestamps, requestor/subscriber ids, a UUID, `HeartbeatInterval=PT60S`
+and ET `ChangeBeforeUpdates=PT10S`. SIRI's namespace is `http://www.siri.org.uk/siri`.
+An example callback address is `https://our-host/siri/et`.
+The type-specific element is `EstimatedTimetableSubscriptionRequest` or
+`SituationExchangeSubscriptionRequest`. Its inner request uses version `2.0` and a
+`RequestTimestamp`.
 
-```xml
-<Siri version="2.0" xmlns="http://www.siri.org.uk/siri">
-  <SubscriptionRequest>
-    <RequestTimestamp>…</RequestTimestamp>
-    <Address>https://our-host/siri/et</Address>        <!-- required -->
-    <RequestorRef>uis-dat535group21-collector</RequestorRef>
-    <MessageIdentifier>uuid</MessageIdentifier>
-    <SubscriptionContext><HeartbeatInterval>PT60S</HeartbeatInterval></SubscriptionContext>
-    <EstimatedTimetableSubscriptionRequest>         <!-- or SituationExchangeSubscriptionRequest -->
-      <SubscriberRef>…</SubscriberRef>
-      <SubscriptionIdentifier>uis-dat535group21-collector-et</SubscriptionIdentifier>
-      <InitialTerminationTime>…</InitialTerminationTime>   <!-- required, in the future -->
-      <EstimatedTimetableRequest version="2.0"><RequestTimestamp>…</RequestTimestamp></EstimatedTimetableRequest>
-      <ChangeBeforeUpdates>PT10S</ChangeBeforeUpdates>
-    </EstimatedTimetableSubscriptionRequest>
-  </SubscriptionRequest>
-</Siri>
-```
+| Topic | Provider behaviour | Our receiver |
+| ----- | ------------------ | ------------ |
+| Reply | `SubscriptionResponse` with `Status` and error text | logs failures, attempts at least 5 min apart |
+| Duration | no maximum termination time, expires when reached | requests 7 days, renews after 24 h |
+| Initial data | current ET journeys and all open SX messages, split with `MoreData` | stores all, including resubscription duplicates |
+| Push | HTTP POST, `application/xml`, extra `subscriptionId` header, any 2xx accepted | appends before returning 200 |
+| Heartbeat | `HeartbeatNotification`, interval clamped to 30–60 s | stores it as coverage evidence |
+| Delivery failures | 15 s timeout, one retry, backoff 10→60 s after 5 consecutive failures | accepts pushes and HEAD probes |
+| Cancellation | after max(3 × heartbeat, 5 min) of delivery failure | presumes dead after 3 heartbeat intervals without any push |
+| Re-acceptance | same id within 30 min of cancellation requires a successful HEAD connection | returns 200 on callback HEAD |
+| Termination | `TerminateSubscriptionRequest` with `RequestorRef` and `SubscriptionRef` | sends on shutdown |
 
-| Topic | Behaviour | What the receiver does |
-| ----- | --------- | ---------------------- |
-| Reply | `SubscriptionResponse` with `Status` true/false and an error text | logs and retries no sooner than 5 min |
-| Duration | no maximum `InitialTerminationTime`; terminated once it passes | asks for 7 days, renews every 24 h |
-| Initial data | right after accepting: everything current (ET: running, about to start, or changed; SX: all open messages), split into several POSTs (`MoreData`) | stores it like any push: **expect duplicates after every (re)subscribe** |
-| Pushes | `HTTP POST`, `Content-Type: application/xml`, extra `subscriptionId` header; any 2xx accepted | appends, then answers 200 |
-| Heartbeat | `HeartbeatNotification` to the same address, interval clamped to 30–60 s | stores it (coverage evidence); 3 missed = dead, re-subscribe |
-| Failures | 15 s timeout per POST, one retry; after 5 failures in a row, backoff (10→60 s); cancelled after max(3 × heartbeat, 5 min) | answers fast; accepts `HEAD` |
-| Re-accept | for 30 min after a cancellation, the same id is accepted only if a `HEAD` to our address connects | answers `HEAD` with 200 |
-| Terminate | `TerminateSubscriptionRequest` (`RequestorRef` + `SubscriptionRef`) | sends it on shutdown |
-
-Keep `useOriginalId` at its default (false): Entur then remaps ids to match the timetable, and
-mixing settings would break joins ([entur/identifiers.md](identifiers.md)).
+Initial ET includes running, about-to-start or changed journeys.
+Id remapping follows [identifiers](identifiers.md#ids).
 
 ## Other SIRI channels (not used for collection)
 
-- **Request/response:** `POST /services` (or `/services/<codespace>`). Reusing a `RequestorRef`
-  returns only changes since the last call; `MoreData=true` means ask again.
-- **SIRI Lite:** `GET /rest/et|sx|vm`, **4 requests/min**. Without `requestorId` the full
-  dataset each time; with one (a UUID), changes since the last call (session ~5 min).
-  `maxSize` defaults to 1500; `datasetId=<codespace>` filters. Since ET holds the whole
-  current day, one full fetch can **recover a same-day receiver outage**; earlier days cannot
-  be recovered. Response format (XML vs JSON): **UNVERIFIED**.
+- Request/response uses `POST /services` or `/services/<codespace>`. Reuse `RequestorRef`
+  for changes since the previous call. Ask again while `MoreData=true`.
+- SIRI Lite uses `GET /rest/et|sx|vm`. Without `requestorId` it returns the full dataset.
+  A UUID gives changes within a session of ~5 min.
+- `maxSize` defaults to 1500. `datasetId=<codespace>` filters. Limits are in
+  [sources](sources.md#usage-rules). XML versus JSON format remains **UNVERIFIED**.
+
+A current-day fetch can recover ET's latest available state after an outage. It cannot
+recover missed intermediate predictions or serve as an earlier-day raw archive.
 
 ## Vehicle positions (GraphQL)
 
 https://developer.entur.no/apis/graphql/vehicle-positions, verified 2026-10-17.
 
-- Subscription: `wss://api.entur.io/realtime/v2/vehicles/subscriptions`, subprotocol
-  `graphql-transport-ws` (the docs say "graphql-ws"). Queries:
-  `POST https://api.entur.io/realtime/v2/vehicles/graphql`. `ET-Client-Name` required.
-- `subscription { vehicles { ... } }` without a filter = all of Norway. The server batches
-  updates (`bufferSize` 20, `bufferTime` 250 ms). Every new subscription starts with a
-  snapshot of all current vehicles.
-- **Ruter (RUT) publishes no positions**: `vehicles(codespaceId: "RUT")` is empty. Oslo is
-  covered by ET only.
-- Introspection works per type (`__type(name: ...)`); a full `__schema` dump is refused.
-- Rate limits and history: not documented (**UNVERIFIED**).
+| Item | Value |
+| ---- | ----- |
+| Subscription | `wss://api.entur.io/realtime/v2/vehicles/subscriptions` |
+| Query | `POST https://api.entur.io/realtime/v2/vehicles/graphql` |
+| Websocket subprotocol | `graphql-transport-ws`, despite the docs saying "graphql-ws" |
+| Request header | `ET-Client-Name` |
+| Unfiltered subscription | `subscription { vehicles { ... } }`, all Norway |
+| Batching defaults | `bufferSize=20`, `bufferTime=250 ms` |
 
-First closed hour (2026-10-17 12:20–13:00 UTC, a Saturday): ~150 updates/s from 1,706
-vehicles in 22 codespaces; 0.2 % exact repeats; received 5 s after `lastUpdated` at the median
-(p99 24 s); 39 min = 369 MB raw, 39 MB gzipped. Field coverage: location, delay, line,
-serviceJourney, occupancyStatus ~100 %; monitoredCall 92 %; progressBetweenStops 69 %;
-datedServiceJourney 44 %; speed 10 %.
+Every subscription starts with all current vehicles. `vehicles(codespaceId: "RUT")` is
+empty because Ruter publishes no positions. Oslo is covered by ET only.
+Type introspection with `__type(name: ...)` works, but full `__schema` is refused.
+Rate limits and history remain **UNVERIFIED**.
+
+First closed hour, 2026-10-17 12:20–13:00 UTC, a Saturday:
+
+| Measurement | Result |
+| ----------- | ------ |
+| Throughput / coverage | ~150 updates/s, 1,706 vehicles, 22 codespaces |
+| Exact repeats | 0.2 % |
+| Receive latency from `lastUpdated` | median 5 s, p99 24 s |
+| Size over 39 min | 369 MB raw, 39 MB gzipped |
+| Location, delay, line, serviceJourney, occupancyStatus | ~100 % |
+| monitoredCall / progressBetweenStops | 92 % / 69 % |
+| datedServiceJourney / speed | 44 % / 10 % |
 
 ## What the messages contain
 
-Verified on our data:
+| Observation | Evidence |
+| ----------- | -------- |
+| ET modes, journey versions | bus 70 %, ferry 18 %, rail 11 %, tram 0.4 %, 2026-10-22 08 UTC |
+| Vehicle modes, updates | bus 93 %, ferry 4 %, coach 2 %, rail 1 %, tram 0.3 %, same hour |
+| Journey and call `Cancellation` exist | 59 journey-level `true`, 2026-10-22 06 UTC |
+| `ExtraJourney=true` uses `EstimatedVehicleJourneyCode`, without `FramedVehicleJourneyRef` | 69 journeys, same hour |
+| Some ET calls carry `Occupancy` | `seatsAvailable`, `standingAvailable`, 2026-10-22 08 UTC |
+| Pushes reach 22.8M characters | 2026-10-22 prod Bronze, needs `maxStringLen` |
 
-| Fact | Evidence |
-| ---- | -------- |
-| Modes in ET: bus 70 %, ferry 18 %, rail 11 %, tram 0.4 % of journey versions | 2026-10-22 08 UTC |
-| Modes in vehicle positions: bus 93 %, ferry 4 %, coach 2 %, rail 1 %, tram 0.3 % of updates | same hour |
-| Cancellations exist per journey (`EstimatedVehicleJourney/Cancellation`) and per call (`Cancellation`) | 59 journey-level `true` in 2026-10-22 06 UTC |
-| Extra journeys: `ExtraJourney=true`, id in `EstimatedVehicleJourneyCode`, no `FramedVehicleJourneyRef` | 69 in the same hour |
-| Some ET calls carry `Occupancy` (`seatsAvailable`, `standingAvailable`); which operators is not yet counted | 2026-10-22 08 UTC |
-| Pushes reach 22.8M characters (Spark's JSON reader needs `maxStringLen`) | 2026-10-22, prod Bronze |
+Occupancy coverage by operator has not been counted.
 
-From Entur's BigQuery docs ([entur-ai-docs/realtime_siri_et/README.md](../../entur-ai-docs/realtime_siri_et/README.md)), same stream:
+The [BigQuery catalog](../../entur-ai-docs/realtime_siri_et/README.md#gotchas) defines delay as actual
+minus aimed. `RecordedAtTime` is publication time.
+Some operators fill missing actuals with aimed times, pulling averages towards zero.
+Check operator quality.
 
-- Delay = actual − aimed. `RecordedAtTime` is when the message was published, not an arrival
-  or departure time.
-- **Some operators fill missing actual times with the aimed times**, which pulls delay
-  averages toward zero. Check per operator before trusting punctuality numbers.
-- Train data used to come only from Bane NOR (`BNR`); train companies later got their own
-  streams.
-- Per-operator data quality over time: https://data-quality.entur.no/SIRI_ET
+Train data originally came only from Bane NOR, `BNR`. Train companies later added streams.
+Quality history: https://data-quality.entur.no/SIRI_ET.
 
-Still **UNVERIFIED**: whether every operator sets the journey-level cancellation flag, and how
-a stop passed without a `RecordedCall` shows up.
+Still **UNVERIFIED** are universal journey-cancellation coverage and how passing a stop
+without a `RecordedCall` appears.
