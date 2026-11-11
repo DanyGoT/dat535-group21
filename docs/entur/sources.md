@@ -1,113 +1,129 @@
 # Entur data sources
 
-Every Entur source we use or considered, how to get it, and the rules for using it. Portal:
-https://developer.entur.no/ (any page can be fetched as `.md`, e.g.
-`https://developer.entur.no/open-data/realtime.md`). GitHub: https://github.com/entur.
-Researched from 2026-10-15; dates mark when a fact was checked.
+This page covers access, refresh patterns and usage rules for Entur's transport data. Read this before fetching
+anything.
+
+Up: [overview](../report/overview.md) · Related: [real-time feeds](realtime.md),
+[identifiers](identifiers.md), [architecture](../system/architecture.md)
 
 ## Catalog
 
-| Source | Gives us | How | Status |
-| ------ | -------- | --- | ------ |
-| SIRI ET | real-time times, cancellations, extra journeys | pub/sub push | **collected** ([entur/realtime.md](realtime.md)) |
-| SIRI SX | disruption messages | pub/sub push | **collected** |
-| Vehicle positions | location, delay, occupancy per vehicle | GraphQL websocket | **collected** ([entur/realtime.md](realtime.md)) |
-| NeTEx timetable | planned journeys, lines, operators, stop sequences | daily zip download | **archived daily** since 2026-10-26 (`collector/static.py`) |
-| NSR stop register | quays, stop places, coordinates | daily zip download | **archived daily** since 2026-10-26 |
-| BigQuery SIRI-ET history | processed ET since 2020 | SQL (own GCP project) | reference only, not pipeline input |
-| GTFS / GTFS-RT | derived subsets of NeTEx / SIRI | download / feed | not used: partial coverage |
+| Source | Content | Access | Use |
+| ------ | ------- | ------ | --- |
+| SIRI ET | times, cancellations, extra journeys | pub/sub push | collected since 2026-10-15 |
+| SIRI SX | disruptions | pub/sub push | collected since 2026-10-15 |
+| Vehicle positions | location, delay, occupancy | GraphQL websocket | collected since 2026-10-17 |
+| NeTEx | journeys, lines, operators, stop sequences | daily zip | archived since 2026-10-26 |
+| NSR | quays, stop places, coordinates | daily zip | archived since 2026-10-26 |
+| BigQuery SIRI-ET | processed ET since 2020 | SQL in own GCP project | reference only |
+| GTFS / GTFS-RT | derived NeTEx / SIRI subsets | download / feed | unused, partial coverage |
 
-## Do we need the plan (NeTEx, NSR) next to real-time?
-
-The plan and the stop register are not where real-time comes from; they describe what *should*
-happen and where stops *are*. ET alone is enough for delay at the stops it reports (it carries
-aimed and actual times). What we miss without them, measured:
-
-| Without | We miss | Evidence |
-| ------- | ------- | -------- |
-| NSR | **every coordinate**: ET has quay ids but no position, so nothing can be joined to weather, road events or a map | 0 `Latitude` in 176,630 ET calls (2026-10-26 08 UTC); vehicle positions have coordinates but not for Ruter |
-| NeTEx | journeys that never appear in real-time, incl. cancellations planned in advance: punctuality and cancellation rates from ET alone are biased per operator | 0–8 % of planned journeys never seen in ET, VYG 8 % (36 of 60 planned cancellations) ([pipeline/silver.md](../pipeline/silver.md) §4) |
-| NeTEx | line names, operators and modes for many journeys | in one ET hour: `VehicleMode` on 34 % of journeys, `PublishedLineName` 25 %, `OperatorRef` 64 % |
-
-Cost: NeTEx 280 MB and NSR 41 MB a day (2026-10-26), ~4 % of ET's daily volume; one download
-each per day is within Entur's limit. They can't be fetched later (≤ 48 h of past data). So we
-archive both daily as raw landing data ([system/architecture.md](../system/architecture.md)).
-**Never download them by hand from the VM:** a second download within 24 h risks the VM's IP
-being blocked. Read `landing/netex/` and `landing/nsr/` instead.
-
-## Is real-time redundant with the plan and BigQuery?
-
-No. NeTEx, GTFS and NSR are the plan and the stops, not what happened. BigQuery's
-`realtime_siri_et_last_recorded` is close to our future Silver `stop_call` table (final times
-per call, back to 2020), but it is Entur's processed product: ET only (no SX, no vehicle
-positions), no intermediate predictions except fixed lead times, refreshed once a day, and not
-something we build ourselves (the course grades our Bronze and Silver). It is valuable as a
-cross-check for our Silver, and possibly as years of extra training history for the departure
-risk model ([pipeline/gold.md](../pipeline/gold.md) #1), if we decide to use it.
+Portal: https://developer.entur.no/. Pages have Markdown versions, e.g.
+`https://developer.entur.no/open-data/realtime.md`. GitHub: https://github.com/entur.
+Research began 2026-10-15. Dates below identify checks.
 
 ## Usage rules
 
-- **`ET-Client-Name` on every request** to every Entur API: `<org>-<application>`, lowercase,
-  no spaces; ours is `uis-dat535group21-collector`. Faked values are prohibited; without it
-  limits are lower (https://developer.entur.no/terms-of-service.md).
-- No authentication or API key for open data.
-- Limits: SIRI Lite 4 requests/min; static dumps **one download per 24 h** (or the IP may be
-  blocked); Journey Planner 500 trip / 1000 other requests per min.
-- **Licence NLOD 2.0** (reuse, also commercial). Name Entur, link the licence, say if the data
-  was modified, don't imply endorsement. Default text: *"Inneholder data under Norsk lisens for
-  offentlige data (NLOD) tilgjengeliggjort av Entur AS"*.
+- Send **`ET-Client-Name`** on every request. Use `<org>-<application>`, lowercase, without
+  spaces. Ours is `uis-dat535group21-collector`.
+- Faked values are prohibited. Requests without the header get lower limits
+  (https://developer.entur.no/terms-of-service.md).
+- Open APIs need no authentication or key.
+- [NLOD 2.0](https://data.norge.no/nlod/en/2.0) permits commercial reuse. Name Entur, link the licence, identify modifications and
+  imply no endorsement. Credit text follows.
+
+> Inneholder data under Norsk lisens for offentlige data (NLOD) tilgjengeliggjort av Entur AS
+
+| API | Limit |
+| --- | ----- |
+| SIRI Lite | 4 requests/min |
+| NeTEx, NSR | one download per 24 h, or the IP may be blocked |
+| Journey Planner | 500 trip requests and 1000 other requests/min |
+
+## Why archive timetables and stops?
+
+ET alone gives delay where it reports aimed and actual times. NeTEx supplies the planned
+denominator and attributes. NSR places stops on a map.
+
+| Missing reference | What ET lacks | Measurement |
+| ----------------- | ------------- | ----------- |
+| NSR | coordinates | 0 `Latitude` in 176,630 calls, 2026-10-26 08 UTC |
+| NeTEx | journeys never reported in ET | 0–8 % of planned journeys, VYG 8 % |
+| NeTEx | attributes | `VehicleMode` 34 %, `PublishedLineName` 25 %, `OperatorRef` 64 % in one ET hour |
+
+The missing-journey check covered departures before 14:00 local on 2026-10-23. Of VYG's
+60 unseen trains, 36 were planned cancellations or replacements. These gaps risk bias in
+ET-only rates. See [Silver's missing-journey check](../pipeline/silver.md#planned-journeys-unseen-in-et-2026-10-23)
+for the sample and join evidence.
+Vehicle positions supply coordinates, but Ruter publishes none.
+
+NeTEx was 280 MB and NSR 41 MB on 2026-10-26, ~4 % of ET's daily volume.
+[`static.py`](../../collector/static.py) archives them at 04:15 UTC using
+[`dat535-static.timer`](../../collector/systemd/dat535-static.timer). It skips existing
+daily files and downloads less than 20 h apart. **That guard does not enforce a rolling 24 h
+limit.** On 2026-11-11, each archive had 15 day folders across 2026-10-26 to 2026-11-11,
+with two days missing.
+
+**Never download these archives by hand from the VM.** Read `landing/netex/` and
+`landing/nsr/`. [Identifiers](identifiers.md#time) explains archive selection.
 
 ## Timetable (NeTEx, GTFS)
 
 https://developer.entur.no/open-data/timetable
 
-- Exported nightly with the current and future plan and **at most 48 h of past data** (in
-  practice less: the 2026-10-23 export no longer held 2026-10-22 journeys for VYG and SKY).
-  We must archive our own copy **on the day** it applies.
-- NeTEx (Nordic profile) is the master; GTFS is derived and loses detail. Join on NeTEx
-  ([entur/identifiers.md](identifiers.md)).
+Nightly exports contain current and future plans and at most 48 h of past data. The
+2026-10-23 export already lacked 2026-10-22 VYG and SKY journeys. Archive on the applicable day.
+NeTEx's Nordic profile is the master. Derived GTFS loses detail.
 
 | File | URL | Size |
 | ---- | --- | ---: |
-| NeTEx, all of Norway | `https://storage.googleapis.com/marduk-production/outbound/netex/rb_norway-aggregated-netex.zip` | 280 MB (2026-10-26) |
-| NeTEx, one codespace | `.../outbound/netex/rb_<codespace>-aggregated-netex.zip` (e.g. `rb_sky-…`, 2026-10-22) | ~40 MB (SKY) |
+| National NeTEx | `https://storage.googleapis.com/marduk-production/outbound/netex/rb_norway-aggregated-netex.zip` | 280 MB, 2026-10-26 |
+| Codespace NeTEx | `.../outbound/netex/rb_<codespace>-aggregated-netex.zip` | ~40 MB for SKY, e.g. `rb_sky-…`, 2026-10-22 |
 | GTFS basic | `.../outbound/gtfs/rb_norway-aggregated-gtfs-basic.zip` | ~94 MB |
 | GTFS extended | `.../outbound/gtfs/rb_norway-aggregated-gtfs.zip` | ~523 MB |
 
-- URLs confirmed with `curl -I`; found via the Mobility Database (Entur's own table renders
-  client-side). Per-codespace files are handy for tests.
-- GTFS quirks: empty columns omitted, `shape_dist_traveled` rounded to metres, unused stops
-  not exported.
+URLs were confirmed with `curl -I`, after discovery through the Mobility Database.
+Entur's table renders client-side. Codespace files suit tests.
+GTFS omits empty columns and unused stops, and rounds `shape_dist_traveled` to metres.
 
 ## Stops (NSR)
 
-https://developer.entur.no/open-data/stops, updated daily. Base:
-`https://storage.googleapis.com/marduk-production/tiamat/`
+https://developer.entur.no/open-data/stops
 
-- `Current_latest.zip`: current stops as NeTEx, 41 MB (2026-10-26). **Use this.**
-- Also: `Current_latest-gtfs.zip`, `CurrentAndFuture_latest.zip`, `Full_latest.zip`, regional
-  (`03_Oslo_latest.zip`), `RailStations_latest.zip`.
+Daily exports use `https://storage.googleapis.com/marduk-production/tiamat/`.
+We use `Current_latest.zip`, current stops as NeTEx, 41 MB on 2026-10-26.
+Alternatives include `Current_latest-gtfs.zip`, `CurrentAndFuture_latest.zip`,
+`Full_latest.zip`, regional files such as `03_Oslo_latest.zip`, and `RailStations_latest.zip`.
 
 ## BigQuery history (reference)
 
-Processed SIRI-ET history as open BigQuery tables (NLOD, refreshed daily, from Q1 2020).
-Catalog: `entur-ai-docs/` (generated by Entur, don't edit) and https://data.entur.no/public/datasets.
-Queries need your own GCP project (the free sandbox gives 1 TB of queries/month) and must
-filter on `operatingDate`.
+Entur's processed SIRI-ET history is NLOD, refreshed daily, from Q1 2020.
+Generated catalogs describe [last-recorded calls](../../entur-ai-docs/realtime_siri_et/README.md#quick-reference)
+and [fixed-lead estimates](../../entur-ai-docs/estimated_siri_et/README.md#quick-reference).
+See also https://data.entur.no/public/datasets. Do not edit the generated catalogs.
 
-| Table (`ent-data-sharing-ext-prd.realtime_siri_et.`) | Content | Grain |
-| --------------------------------------------------- | ------- | ----- |
-| `realtime_siri_et_last_recorded` | last message per journey: aimed and actual times, cancellations, extra journeys and calls | operatingDate, datedServiceJourneyId, sequenceNr |
-| `siri_et_estimated_times` | estimate vs actual at fixed lead times (1–45 min) | + timeDeltaMinutes |
+Queries require your own GCP project and an `operatingDate` filter.
+The free sandbox allows 1 TB/month. No query has run, so access and contents remain
+**UNVERIFIED**.
 
-- Entur's own product: a subset of fields, ET only. We use it to design Silver, to cross-check
-  our Silver and Gold numbers for the same day, and as a baseline for predictions ([pipeline/gold.md](../pipeline/gold.md)).
-- It also means old raw ET is the least irreplaceable thing we store ([system/storage.md](../system/storage.md)).
-- No query run yet: access and contents are **UNVERIFIED**.
-- No raw SIRI archive or bulk download exists. Raw-data depth = how long we have collected.
+Both tables are under `ent-data-sharing-ext-prd.realtime_siri_et.`:
+
+| Table | Content | Grain |
+| ----- | ------- | ----- |
+| `realtime_siri_et_last_recorded` | final aimed/actual times, cancellations, extra journeys/calls | `operatingDate, datedServiceJourneyId, sequenceNr` |
+| `siri_et_estimated_times` | estimate versus actual at 1–45 min lead times | same key plus `timeDeltaMinutes` |
+
+The catalogs inform Silver design. Same-day Silver/Gold cross-checks, prediction baselines
+and possible training history remain planned ([departure-risk plan](../pipeline/gold.md#1-departure-risk-primary)).
+
+BigQuery resembles our existing `stop_call`, but supplies processed fields rather than our
+own Bronze/Silver work. It omits SX, vehicle positions and intermediate predictions outside
+fixed lead times. No raw SIRI archive or bulk download exists. Our raw history starts when
+collection starts. Old raw ET is therefore the least irreplaceable feed
+([cleanup order](../system/storage.md#when-it-fills-delete-by-hand-cheapest-loss-first)).
 
 ## Useful repos
 
-- `entur/anshar`: the SIRI pub/sub hub (subscription behaviour, [entur/realtime.md](realtime.md)).
-- `entur/netex-java-model`: NeTEx schema classes.
-- `entur/tiamat`: the NSR backend.
+- `entur/anshar` implements pub/sub. See [subscription behaviour](realtime.md#pubsub-how-the-subscription-works).
+- `entur/netex-java-model` contains NeTEx schema classes.
+- `entur/tiamat` is the NSR backend.

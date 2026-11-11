@@ -1,172 +1,181 @@
 # Architecture
 
-Neither source keeps the raw data we need: Entur has no archive of raw real-time messages
-(only processed BigQuery tables, [entur/sources.md](../entur/sources.md)), and NPRA's DATEX only serves the current
-snapshot ([datex/sources.md](../datex/sources.md)). So always-on collectors store everything as it arrives, and scheduled
-Spark jobs turn it into Medallion layers. Everything runs on one UiS VM ([system/storage.md](storage.md)).
+This page explains component boundaries, the landing contract and batch schedules on the UiS VM.
 
+Up: [project](../../README.md) · Related: [runbook](../../collector/README.md),
+[storage](storage.md), [overview](../report/overview.md)
+
+```mermaid
+flowchart LR
+    ET[Entur SIRI ET/SX] -- push --> PH[Public host]
+    PH -- reverse SSH --> R[receiver.py :8750]
+    VP[Entur vehicles] -- websocket --> V[vehicles.py]
+    DX[NPRA DATEX] -- poll --> D[datex.py]
+    NT[Entur NeTEx and NSR] -- daily download --> S[static.py]
+    R & V & D & S --> L[(Landing)]
+
+    L --> M[monitor.py<br/>every 2 min]
+    M --> N[ntfy push]
+    M --> ST[serve_status.py :8751<br/>status page]
+    ST -- reverse SSH --> PH
+    L --> X[exporter.py :8752] --> P[Prometheus :8754] --> G[Grafana :8753]
+    ST -. /grafana/ proxy .-> G
+
+    L --> BE[Bronze Entur] --> SE[Silver Entur] --> GO[Gold scorecard<br/>manual]
+    L --> BD[Bronze DATEX] --> SD[Silver DATEX]
+    L -. NeTEx and NSR .-> SE
 ```
-Entur SIRI ET/SX ──push──────▶ receiver.py ──┐
-Entur vehicles ───websocket──▶ vehicles.py ──┼──▶ landing/<dataset>/date=D/hour=HH.jsonl.gz
-NPRA DATEX ◀─────poll (GET)── datex.py ──────┘     raw, hourly, UTC, never modified
-Entur NeTEx + NSR ── daily download ── static.py ──▶ landing/netex, landing/nsr
-                                                   │
-  monitor.py   (reads) ◀───────────────────────────┤──▶ status page + ntfy on OK↔FAIL
-  exporter.py  (reads) ◀───────────────────────────┤──▶ Prometheus ──▶ Grafana (/grafana/)
-                                                   ▼
-  Spark (GitHub Actions, 03:00 UTC): Bronze ──▶ Silver ──▶ Gold      /data/dat535/{prod,dev}
-```
+
+All five application ports shown above bind to `127.0.0.1`. Only receiver and status ports cross the tunnel.
+The [README](../../README.md) owns current deployment status.
 
 ## Components
 
-| Component | Code | Runs as | State |
-| --------- | ---- | ------- | ------------------ |
-| SIRI receiver | `collector/receiver.py` | `dat535-receiver.service` | running since 2026-10-15 |
-| Vehicle positions | `collector/vehicles.py` | `dat535-vehicles.service` | running since 2026-10-17 |
-| DATEX poller | `collector/datex.py` | `dat535-datex.service` | ready; credentials on the VM since 2026-10-26, starts with the next deploy |
-| NeTEx + NSR archive | `collector/static.py` | `dat535-static.timer` (04:15 UTC) | first day archived 2026-10-26; timer starts with the next deploy |
-| Monitor + status page | `collector/monitor.py`, `serve_status.py` | timer (2 min), `dat535-status` | running |
-| Metrics | `collector/exporter.py` + Prometheus + Grafana | `dat535-exporter`, `-prometheus`, `-grafana` | running |
-| Tunnel | `systemd/dat535-tunnel.service` | reverse SSH to a public host | running |
-| Bronze | `pipeline/bronze.py` (SIRI, vehicles), `pipeline/bronze_datex.py` | workflow step | running (SIRI), new (vehicles, DATEX) |
-| Entur Silver | `pipeline/silver.py`, `silver_parse.py`, `silver_reference.py` | workflow step | implemented and locally validated 2026-10-28; deployment pending ([contracts](../pipeline/silver.md)) |
-| Gold | — | — | not built ([pipeline/gold.md](../pipeline/gold.md)) |
+| Component | Code | Boundary |
+| --------- | ---- | -------- |
+| SIRI | [receiver.py](../../collector/receiver.py) | ET/SX pushes |
+| Vehicles | [vehicles.py](../../collector/vehicles.py) | National GraphQL subscription |
+| DATEX | [datex.py](../../collector/datex.py) | One thread per feed |
+| Static | [static.py](../../collector/static.py) | NeTEx/NSR daily, 04:15 UTC |
+| Monitor | [monitor.py](../../collector/monitor.py) | Collection checks and status |
+| Status | [serve_status.py](../../collector/serve_status.py) | Status and Grafana proxy |
+| Metrics | [exporter.py](../../collector/exporter.py) | Landing metadata and state |
 
 ## Collectors
 
-The three streaming collectors follow the same rules:
+Collectors preserve payloads without domain parsing or filtering. SIRI heartbeats, repeated
+snapshots and failed DATEX polls remain as coverage evidence. Vehicle protocol pings are
+answered without being stored.
 
-- **Dumb.** No parsing, no filtering. Every message (or poll) becomes one JSON line, with the
-  payload unchanged inside it.
-- **One writer.** `collector/hourly.py` appends to `hour=HH.jsonl.part` and, when the hour
-  ends, gzips it to `hour=HH.jsonl.gz` (via `.gz.tmp` and an atomic rename). Closed files are
-  never touched again; a restart adopts the open `.part` and closes stale ones.
-- **Coverage evidence is data too.** SIRI heartbeats, failed DATEX polls and every repeated
-  snapshot are stored, so gaps can be measured later.
+The [SIRI receiver](../../collector/receiver.py) renews subscriptions after 24 h or three
+missed heartbeats. Retries are at least five minutes apart. The vehicle collector reconnects
+with backoff and receives a full snapshot on each new subscription. Ruter supplies no
+positions in this feed. See [subscription behaviour](../entur/realtime.md#pubsub-how-the-subscription-works).
 
-**SIRI receiver.** Holds SIRI 2.0 pub/sub subscriptions (ET, SX) with Entur, which POSTs to
-our public address (via the tunnel). Re-subscribes on silence (3 missed heartbeats) and every
-24 h. Protocol details: [entur/realtime.md](../entur/realtime.md).
+The [DATEX poller](../../collector/datex.py) uses Basic Auth and stays idle without credentials.
+See [DATEX sources](../datex/sources.md#feeds) for feeds, intervals and access terms.
 
-**Vehicle positions.** One GraphQL subscription over a websocket to all vehicles in Norway;
-reconnects with backoff; every reconnect starts with a full snapshot. Ruter publishes no
-positions there.
-
-**DATEX poller.** One thread per feed polls NPRA's pull services with Basic Auth; one line per
-poll, failures included. Without credentials it runs idle (not a failure). Feeds, intervals
-and sizes: [datex/sources.md](../datex/sources.md).
-
-**NeTEx and NSR archive.** Once a day at 04:15 UTC, `static.py` downloads the national
-timetable (280 MB) and the stop register (41 MB) unchanged, with a `.meta.json` next to each
-(Last-Modified, ETag, size, SHA-256). Entur keeps at most ~48 h of past days, so this is the
-only way to have the plan for a day later. It never downloads a file twice within 20 h
-(Entur allows one a day); each export also holds the coming days, so Silver uses the newest
-archive on or before an operating day. Why we need it: [entur/sources.md](../entur/sources.md).
+The [static archive](../../collector/static.py) stores unchanged ZIPs and manifests.
+It applies a **20-hour guard**, which does not enforce Entur's rolling 24-hour limit.
+Never download these files by hand. See [Entur timetable exports](../entur/sources.md#timetable-netex-gtfs) for availability.
 
 ## Landing zone
 
-The contract between the collectors and Spark.
+Only collectors write here.
 
-```
+```text
 /data/dat535/landing/
-├── siri-et/date=YYYY-MM-DD/hour=HH.jsonl.gz       (hour=HH.jsonl.part while open)
+├── siri-et/date=YYYY-MM-DD/hour=HH.jsonl.gz
 ├── siri-sx/...
 ├── vehicles/...
-├── datex-<feed>/...   situation, traveltime, weather, traveltime-locations, weather-sites
-├── netex/date=YYYY-MM-DD/rb_norway-aggregated-netex.zip    (+ .meta.json; .part while downloading)
-└── nsr/date=YYYY-MM-DD/Current_latest.zip                  (+ .meta.json)
+├── datex-<feed>/...  situation, traveltime, weather, traveltime-locations, weather-sites
+├── netex/date=YYYY-MM-DD/rb_norway-aggregated-netex.zip
+└── nsr/date=YYYY-MM-DD/Current_latest.zip
 ```
 
-| Source | Line |
-| ------ | ---- |
-| SIRI, vehicles | `{"received_at": "<UTC>", "endpoint": "et\|sx\|vehicles", "payload": "<raw XML or JSON message>"}` |
-| DATEX | `{"requested_at", "received_at", "endpoint": "<feed>", "http_status", "last_modified", "error", "payload": "<XML or null>"}` |
+| Source | JSON-line fields |
+| ------ | ---------------- |
+| SIRI, vehicles | `received_at`, `endpoint` (`et`, `sx`, `vehicles`), `payload` |
+| DATEX | `requested_at`, `received_at`, `endpoint`, `http_status`, `last_modified`, `error`, `payload` |
 
-- `date=` and `hour=` are **UTC**, from `received_at`: no DST duplicates or gaps. Operating
-  days are Norwegian local time; Silver maps between them.
-- **Readers take closed files only** (`*.jsonl.gz`, and plain `*.jsonl` for hours closed before
-  2026-10-15); never `*.part` or `*.tmp`.
-- **JSON Lines, not concatenated XML:** each message stays one valid record, and a day can be
-  split by hour.
-- **Hourly files:** few enough for Spark to list, small enough to rerun one day or read while
-  the collectors write. Gzip is not splittable; one task per hour is fine at this size.
-- Payloads can exceed 20M characters: every Spark JSON read needs `maxStringLen` ([system/storage.md](storage.md)).
-- **Immutable.** Only the collectors write here, and nothing modifies or deletes files
-  automatically. When the disk fills, a person deletes whole old days, cheapest loss first
-  ([system/storage.md](storage.md)).
+`payload` is an XML or JSON string. DATEX uses null for failures and HTTP 304 responses.
+
+[hourly.py](../../collector/hourly.py) appends to `hour=HH.jsonl.part`. After the hour closes,
+it compresses through `.jsonl.gz.tmp` and atomically renames to `.jsonl.gz`. A restart adopts
+the current `.part` and queues older ones for compression. Closed files are never overwritten.
+
+- Dates and hours are UTC. At rotation boundaries, a delayed append stays in the open hour.
+  Silver maps UTC partitions to Norwegian operating days.
+- Readers accept only closed `hour=HH.jsonl.gz` and legacy `hour=HH.jsonl` files.
+  The plain files are legacy hours closed before 2026-10-15. Never read `.part` or `.tmp` files.
+- Static downloads use `.part` until ZIP validation succeeds. Each ZIP has a `.meta.json`
+  recording URL, HTTP Last-Modified, ETag, size, SHA-256 and download times.
+- Hourly JSON Lines keep messages separate. Gzip is not splittable, so each hour is one read task.
+- Payloads exceed Jackson's default string cap. Use the JSON reader setting in [storage](storage.md#memory).
+- Landing is immutable after closure. Cleanup is manual and follows the [storage order](storage.md#when-it-fills-delete-by-hand-cheapest-loss-first).
 
 ## Batch pipeline
 
-- The prod workflow runs at 03:00 UTC for the previous UTC day (after hour 23 has closed);
-  manual reruns take a date. The dev workflow runs one hour of yesterday on every push and PR
-  to `dev`. Outputs: `/data/dat535/prod` and `/data/dat535/dev`, next to the landing zone.
-- **Bronze**: closed hourly files → zstd Parquet per dataset and day, payload unchanged, plus
-  evidence columns (`_bronze_*`: source file, status, payload hash and size, run id) and a run
-  record per run under `bronze/_runs/`. `bronze.py` reads SIRI and vehicle positions; `bronze_datex.py` reads DATEX
-  and also reports polls by outcome, distinct snapshots and the longest gap. Rerunning a day
-  replaces that day only.
-- **Entur Silver**: archived NeTEx/NSR + Bronze ET/SX/vehicles → typed facts, reference
-  snapshots and quality evidence. After yesterday's Bronze, process the operating day two
-  days ago, reading ET from its three adjacent UTC partitions; SX and positions keep UTC
-  observation-day grains. Stage and check all tables, then publish the readiness marker.
-  Dev's one-hour input is explicitly partial. Contracts: [pipeline/silver.md](../pipeline/silver.md).
-  DATEX Silver remains future work.
-- **Gold**: products for named consumers, [pipeline/gold.md](../pipeline/gold.md).
-- **Spark on this VM**: one job at a time (workflow steps hold a `flock`), zstd, small reader
-  batches, no `partitionBy` on constants. Why: [system/storage.md](storage.md).
+Workflows use the self-hosted runner, `~/spark-env`, `/opt/spark` and Java 8.
+Landing comes from `~/.config/dat535/collector.env`. Outputs go beside it in `prod/` or `dev/`.
+Spark steps share the [storage lock](storage.md#memory).
+
+| Trigger | Behaviour |
+| ------- | --------- |
+| Production push to `main` | Approval through environment `main`, both test suites, collector deployment |
+| Production schedule or dispatch | Batch processing without deployment or test reruns |
+| Dev push to `dev` or dispatch | Both test suites, then yesterday's 08:00–09:00 UTC sample |
+
+The [production workflow](../../.github/workflows/dat535-prod.yml) schedules `0 3 * * *`.
+Actual starts were about 09:20–10:50 UTC in the 2026-11-11 VM audit. Its steps run sequentially:
+
+1. [Entur Bronze](../../pipeline/bronze.py) and [DATEX Bronze](../../pipeline/bronze_datex.py)
+   ingest yesterday's UTC files. Payloads stay unchanged in zstd Parquet with provenance and run records.
+   Reruns replace only the selected day.
+2. [DATEX Silver](../../pipeline/silver_datex.py) processes yesterday's UTC observation day.
+3. [Entur Silver](../../pipeline/silver.py) processes the operating day two days ago.
+   ET reads three adjacent UTC days and the newest references archived on or before the operating day.
+   SX and vehicles retain UTC grains.
+
+DATEX Bronze is attempted even if Entur Bronze fails. Each Silver step depends on its own
+Bronze step. A failure in the other source does not suppress it.
+
+On dispatch, `bronze_date` selects both Bronze days. Setting it alone skips Silver.
+`silver_date` selects both Silver dates, UTC for DATEX and Norwegian operating date for Entur.
+Preceding Bronze steps still run. Missing days require manual reruns.
+
+The [dev workflow](../../.github/workflows/dat535-dev.yml) has no PR trigger. Silver uses yesterday
+and `--allow-partial`, leaving the sample not ready.
+Both workflows upload Bronze and Silver run records. [Silver](../pipeline/silver.md#reading-safely) owns
+publication and readiness contracts.
+
+[Gold](../../pipeline/gold_scorecard.py) is a manual example, run for the 2026-10-26 sample and
+2026-10-29. It accepts only Silver schema version 1, while current Entur Silver writes version 2.
+It cannot consume newly rebuilt Silver. See the [Gold example](../pipeline/gold-example.md#run-on-the-vm)
+and [evidence](../report/evidence/README.md).
 
 ## Monitoring
 
-**Monitor** (`monitor.py`, every 2 min, read-only). Checks, each with a one-line reason:
+[monitor.py](../../collector/monitor.py) runs every two minutes and checks:
 
-1. Receiver process alive.
-2. Per feed (SIRI, vehicles): newest landing file written recently and still growing.
-3. DATEX poller alive and its login accepted (skipped while idle).
-4. Per DATEX feed: last successful poll and last write within two poll intervals; travel
-   times and weather still changing (NPRA still publishing).
-5. NeTEx and NSR: newest archived file younger than 30 h.
-6. Data volume and root volume below `MONITOR_DISK_MAX_PCT` (90 %).
+- Receiver process, SIRI and vehicle landing freshness and growth, with a default five-minute limit.
+- DATEX process and login, successful polls and landing writes. The default limit is the larger
+  of five minutes or two poll intervals plus 60 s. Unchanged snapshots fail after 30 min for
+  travel time and 60 min for weather.
+- NeTEx and NSR archive freshness, with a 30-hour limit.
+- Data and root volumes against `MONITOR_DISK_MAX_PCT`, default 90 %.
 
-It writes the status page ([system/switchboard-style.md](switchboard-style.md)) and sends an ntfy push on state change
-only (OK→FAIL, FAIL→OK).
+Idle DATEX skips feed checks. The monitor sends ntfy.sh notifications on overall OK/FAIL
+transitions, so additional failures while already unhealthy send no new alert.
+The topic name is the secret. Batch failures are not covered. See the [status-page style](switchboard-style.md).
 
-**Metrics.** The exporter turns file names and sizes (never contents), the state files, the
-monitor result, disk and memory into Prometheus metrics. Prometheus
-scrapes every 30 s and keeps a year. Grafana shows one dashboard (`DAT535 Collector`),
-provisioned from the repo and read-only (anonymous viewers, no login). Prometheus also
-accepts OTLP pushes on localhost, so Spark jobs can report metrics later.
-
-**What is public.** `serve_status.py` serves the status page at `/` and proxies `/grafana/`;
-the tunnel exposes only it (port 8751) and the receiver (8750). Never the landing data,
-Prometheus or the exporter, and no controls.
+[exporter.py](../../collector/exporter.py) reads landing names and sizes, state files, monitor
+results, disk and memory. [Prometheus](../../collector/observability/prometheus.yml) scrapes
+every 30 s. Retention is limited to 365 days or 5 GB. Its localhost OTLP receiver is available
+for future job metrics. Grafana's `DAT535 Collector` dashboard is provisioned from the repo
+and available anonymously, read-only, through `/grafana/`.
+Landing data, Prometheus and the exporter are not exposed by the tunnel.
 
 ## Operations
 
-- Ports, all on 127.0.0.1: receiver 8750, status page 8751, exporter 8752, Grafana 8753,
-  Prometheus 8754.
-- Deploy: the prod workflow runs the tests, then `collector/deploy.sh`, which copies
-  `collector/` to `~/dat535-collector`, installs pinned, checksum-verified Prometheus and
-  Grafana into `~/dat535-tools`, and restarts only the systemd user units whose files changed
-  (a receiver restart means a collection gap and a re-subscribe). No repo clone on the VM.
-- Setup, credentials, commands: [collector/README.md](../../collector/README.md). Capacity: [system/storage.md](storage.md).
+Actions checks out the repository on the VM. [deploy.sh](../../collector/deploy.sh) copies
+collectors into their service installation. Setup, credentials, pinned monitoring tools and
+selective restarts belong in the [runbook](../../collector/README.md#what-runs).
 
 ## Decisions
 
-- `ET-Client-Name`: `uis-dat535group21-collector` (also SIRI `RequestorRef`/`SubscriberRef`,
-  and the DATEX `User-Agent`).
-- The receiver runs on the VM, reachable through a reverse SSH tunnel to a public host.
-- Push notifications: ntfy.sh; the topic name is the secret.
-- DATEX credentials only in `~/.config/dat535/collector.env` (NPRA's terms make them
-  confidential); sent over https only, redirects not followed.
-- Bronze Parquet is zstd. Nothing deletes data automatically: when the disk fills we delete
-  by hand, knowing what we lose ([system/storage.md](storage.md)).
-- Silver parses the XML (SIRI, DATEX) with Python's `xml` package inside Spark tasks, not the
-  `spark-xml` package (Spark 3.5 has no native `from_xml`).
-- Every layer writes to `/data/dat535/{prod,dev}/<layer>/`, never to the root disk.
+- `ET_CLIENT_NAME` defaults to `uis-dat535group21-collector`. It identifies Entur requests,
+  SIRI requestor/subscriber and the DATEX User-Agent.
+- DATEX credentials stay in the VM environment file. Requests use HTTPS and do not follow redirects.
+- Silver parses XML inside Spark tasks with Python's `xml` package instead of `spark-xml`,
+  because Spark 3.5 has no native `from_xml`.
+- Layer outputs use `/data/dat535/{prod,dev}/<layer>/`. Memory and spill rules live in [storage](storage.md#memory).
+
+The course template [pipeline.yml](../../.github/workflows/pipeline.yml) also declares manual
+and monthly triggers, but its only job is disabled with `if: false`.
 
 ## Open decisions
 
-- Full-day Silver performance: its scratch defaults to `/data/dat535/spark-scratch` to protect
-  the root disk. Measure shuffle spill and network-volume latency before tuning the initial
-  partition count ([system/storage.md](storage.md)).
-- Which Gold products to build beyond #1 ([pipeline/gold.md](../pipeline/gold.md)).
+See [evidence](../report/evidence/README.md) for full-day Silver measurements.
+Spill and network-volume latency measurements should guide partition tuning.
+Other products remain [Gold proposals](../pipeline/gold.md#at-a-glance).

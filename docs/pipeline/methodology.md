@@ -1,77 +1,79 @@
 # Methodology
 
-The decision rules we apply layer by layer: Bronze keeps evidence, Silver builds trust, Gold
-serves a purpose. `✓` = in place, `→` = to do. Specifics live in [pipeline/silver.md](silver.md), [pipeline/gold.md](gold.md) and
-[system/storage.md](../system/storage.md); this page is the "why".
+Bronze preserves evidence, Silver defines reusable facts, and Gold answers a consumer's question.
+This page records the decision rules. `✓` means implemented and `→` means planned.
+
+Up: [overview](../report/overview.md) · Related: [Silver](silver.md), [Gold](gold.md),
+[storage](../system/storage.md)
 
 ## General
 
-- **Batch first.** One run per operating day is enough. Go fresher only when a named
-  consumer acts on fresher data.
-- **Ask what breaks at 2 AM before asking what is fast.** Every job is safe to rerun and
-  fails loudly.
-- **Profile before tuning.** Every optimisation comes with its evidence (Spark UI, row
-  counts, timings, sizes). The report needs it. Example: Bronze switched to zstd after one
-  real hour measured 1,621 MB as snappy and 558 MB as zstd in the same write time.
-- **Fit the machine.** One 8 GB VM with a 38 GB root disk: memory and spill space are design
-  constraints, not afterthoughts ([system/storage.md](../system/storage.md)).
+- Start with daily batches. Require a named consumer before adding fresher processing.
+- Design failure and manual reruns before tuning speed. Keep landing immutable.
+- Profile before tuning. Support changes with row counts, timings, sizes or a Spark profile.
+- Fit the VM's 4 vCPU, 7.9 GB RAM and 38 GB root disk. Follow the
+  [storage rules](../system/storage.md#memory).
 
 ## Bronze: load first, interpret later
 
-| Principle | Here |
-| --------- | ---- |
-| Keep the payload as it arrived | ✓ collectors don't parse; raw XML/JSON per line, unchanged in Bronze |
-| Payload plus evidence | ✓ `received_at`, source file, payload hash and size, status, run id |
-| Prove complete delivery (a green run isn't proof) | ✓ missing and open hours per run; DATEX: polls by outcome, distinct snapshots, longest gap. → expected vs received journeys (needs the archived plan) |
-| Never lose a line | ✓ unreadable lines kept with `_bronze_status` and the raw line; payloads > 20M characters read in full (`maxStringLen`) |
-| Retain for recovery | ✓ landing is never modified by code; a rerun replaces only its day; cleanup is manual, rebuildable Bronze before any raw data |
-| Contract with the source | ✓ field inventories in [entur/](../entur/) and [datex/content.md](../datex/content.md). → detect schema drift (a new or vanished element) |
+| Rule | Application |
+| ---- | ----------- |
+| Preserve source evidence | ✓ Store XML/JSON payloads unchanged, plus receipt time, file, hash, size, status and run ID. |
+| Keep unreadable input | ✓ Retain corrupt lines and their raw text. Raise the JSON string limit for large payloads. |
+| Measure delivery | ✓ Report missing/open hours and DATEX poll outcomes, distinct snapshots and longest gap. |
+| Keep recovery manual | ✓ Replace only the requested output date. Never modify landing. |
+| Understand the source contract | ✓ Document field inventories. → Detect new or vanished XML elements automatically. |
+
+The implementations are [Entur Bronze](../../pipeline/bronze.py) and
+[DATEX Bronze](../../pipeline/bronze_datex.py). Hour coverage does not prove that every source
+message arrived. Planned-versus-reported coverage belongs to
+[Silver](silver.md#planned-journeys-unseen-in-et-2026-10-23).
+Manual cleanup removes rebuildable data before raw history, following the
+[storage order](../system/storage.md#when-it-fills-delete-by-hand-cheapest-loss-first).
 
 ## Silver: where trust is built
 
-**Boundary test:** facts about one record go in Silver, answers to questions go in Gold.
-Unsure? If two or more Gold products need it with the same definition, it is Silver.
-- `delay_s = actual − aimed` per call: Silver.
-- "On time = less than 3 min late": a business choice, so Gold.
+Put facts about one record in Silver and consumer choices in Gold. If several products need
+the same definition, it belongs in Silver. Actual minus aimed time belongs in Silver, while
+a three-minute on-time threshold belongs in Gold.
 
-**Five checks.** Each answers a question about every row:
+| Check | Decision rule |
+| ----- | ------------- |
+| Shape | Use explicit schemas and typed UTC timestamps. Make unfamiliar structures visible. |
+| Identity | Define the grain and key before transforming. Reduce versions before joining. |
+| Trust | Retain field flags on rows. Quarantine unusable identities or messages. Block publication on contract failures. |
+| Conformity | Check IDs against reference snapshots. Keep IDs in facts and add labels in Gold. |
+| Time | Separate operating dates from UTC observation dates. Replace only the requested partitions. |
 
-| | Question | Here |
-| - | -------- | ---- |
-| Shape | Is it readable? | explicit schema, typed UTC timestamps, flattened calls; unknown structure fails loudly |
-| Identity | Is it one record, once? | key from the grain, latest version kept ([pipeline/silver.md](silver.md) §5) |
-| Trust | Can we rely on it? | rules flag rows, never delete them; failures go to quarantine with a `dq_issue` reason |
-| Conformity | One vocabulary? | ids checked against NSR/NeTEx reference tables; ids in facts, labels in Gold |
-| Time | Can we rerun it safely? | per operating day, overwrite that partition, same input gives same output |
+Final ET calls have one row per journey and stop position on an operating day. Sampled
+predictions have their own grain. SX and road situations retain revisions, and decoded
+versions remain in a rebuildable cache. See the [Silver contracts](silver.md#tables).
 
-**Grain:** start from the finest grain people still understand, the stop call. Don't keep the
-version grain (~57 per call) in Silver; Bronze has it. The one exception is a sampled
-prediction table at fixed lead times (`call_prediction`), which is a grain of its own.
-
-**Model:** facts plus reference tables, not Data Vault: few sources, event-heavy data.
-
-**Operate it:** per run, rows in, rows out and rows quarantined by reason. Track the
-quarantine rate over days: a jump means the source changed.
+Use facts and reference tables rather than Data Vault for these few, event-heavy sources.
+Record input, output and quarantine counts by reason. Review quarantine rates across days
+for source drift.
 
 ## Gold: serve a use, not a layer
 
-- **No named consumer, no Gold table.** Ours: travellers asking "will my departure be on
-  time?" ([pipeline/gold.md](gold.md) #1), plus independent products on the same Silver.
-- **Define the semantics once:** on-time threshold, what counts as cancelled, and the
-  denominator (planned vs reported, [pipeline/silver.md](silver.md) §4).
-- **Materialise only what is used.** Anything else is a view or a query over Silver.
-- **Ready signal and quality gate:** publish only after the checks pass, and validate
-  aggregates against Silver totals and against Entur's BigQuery for the same day. The
-  consumer reads a marker (the run record), not "the file exists".
-- **Validate predictions honestly:** split by time, compare with a simple baseline, report
-  calibration.
+- Name the consumer and materialise only what it uses. The delivered example is a
+  retrospective [line scorecard](gold-example.md). Departure-risk prediction is
+  [planned](gold.md#1-departure-risk-primary).
+- Aggregate finer facts rather than joining grains. Define thresholds, cancellation semantics
+  and denominators once. Missing real-time is neither punctuality nor cancellation.
+- ✓ The scorecard checks Silver readiness, reconciles totals and publishes a run marker.
+  It currently accepts only Silver schema 1, while Entur Silver writes schema 2.
+- → Cross-check the same day against Entur's BigQuery. Access and contents remain
+  **UNVERIFIED**. See [Entur sources](../entur/sources.md#bigquery-history-reference).
+- → Validate a prediction model with time-based splits, a simple baseline and calibration.
 
 ## Spark layout
 
-- Partition by the column queries filter on: `operating_date` (Silver, Gold) or the UTC
-  `date` (Bronze). Avoid many small files: DATEX Bronze sizes its output from its input.
-- Narrow early: parse and project before shuffles. A raw ET day is ~9 GB gzipped, ~160 GB
-  of characters.
-- Broadcast small dimensions (stops, lines). Watch for skew: RUT and SKY dominate calls.
-- Settings with evidence behind them (zstd, reader batch 256, `maxStringLen`, no
-  `partitionBy` on constants, one job at a time): [system/storage.md](../system/storage.md).
+- Partition by the date consumers filter on. Bronze uses UTC `date`. Silver uses
+  `operating_date` or UTC `observation_date`, and the scorecard uses `operating_date`.
+- Parse and project before shuffles. Broadcast small references. Check skew and join coverage,
+  especially because RUT and SKY dominate calls.
+- Size files from the input where useful, as DATEX Bronze does. Avoid sorting on a constant
+  partition column.
+- Keep one Spark job at a time and spill on `/data`. The
+  [storage guide](../system/storage.md#memory) owns settings and their measurements.
+  Its [compression comparison](../system/storage.md#what-a-day-costs) explains the zstd choice.
