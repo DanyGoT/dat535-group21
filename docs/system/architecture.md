@@ -104,7 +104,7 @@ Spark steps share the [storage lock](storage.md#memory).
 | ------- | --------- |
 | Production push to `main` | Approval through environment `main`, both test suites, collector deployment |
 | Production schedule or dispatch | Batch processing without deployment or test reruns |
-| Dev push to `dev` or dispatch | Both test suites, then yesterday's 08:00–09:00 UTC sample |
+| Dev push to any branch except `main`, or dispatch | Both test suites, then yesterday's 08:00–09:00 UTC sample |
 
 The [production workflow](../../.github/workflows/dat535-prod.yml) schedules `0 3 * * *`.
 Actual starts were about 09:20–10:50 UTC in the 2026-11-11 VM audit. Its steps run sequentially:
@@ -124,8 +124,9 @@ On dispatch, `bronze_date` selects both Bronze days. Setting it alone skips Silv
 `silver_date` selects both Silver dates, UTC for DATEX and Norwegian operating date for Entur.
 Preceding Bronze steps still run. Missing days require manual reruns.
 
-The [dev workflow](../../.github/workflows/dat535-dev.yml) has no PR trigger. Silver uses yesterday
-and `--allow-partial`, leaving the sample not ready.
+The [dev workflow](../../.github/workflows/dat535-dev.yml) has no PR trigger, so code from a fork
+never reaches the runner. A PR branch in this repo gets its run from the push. Silver uses
+yesterday and `--allow-partial`, leaving the sample not ready.
 Both workflows upload Bronze and Silver run records. [Silver](../pipeline/silver.md#reading-safely) owns
 publication and readiness contracts.
 

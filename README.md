@@ -15,8 +15,9 @@ flowchart LR
     SI --> G[Gold<br/>line scorecard]
 ```
 
-A weekday brings about 4.8 million real-time messages. For 2026-10-29, Silver reduced 280 million
-stop-call versions to 1.87 million stop calls, one row per journey at each stop.
+A weekday brings about 4.8 million SIRI ET messages, plus about 620,000 vehicle position
+messages. For operating day 2026-10-29, Silver read three days of ET and reduced the 280 million
+stop-call versions for that day to 1.87 million stop calls, one row per journey at each stop.
 
 This is a course project for DAT535 at the University of Stavanger. The assignment and
 grading basis is [`PROJECT.md`](PROJECT.md).
@@ -79,14 +80,14 @@ in one file, with the code that matters. Every section there links to the detail
 uv run --python 3.11 --with-requirements requirements-dev.txt --with websockets==10.4 \
   python -m unittest discover -s collector/tests
 
-# Pipeline. Needs Java 8 or 17, and no external services.
-uv run --python 3.11 --with-requirements requirements-dev.txt \
+# Pipeline. Needs Java 8 or 17, and no external services. PyArrow and pandas are not in
+# requirements-dev.txt yet, and one test expects the VM's UTC clock.
+TZ=UTC uv run --python 3.11 --with-requirements requirements-dev.txt --with pyarrow --with pandas \
   python -m unittest discover -s pipeline/tests
 ```
 
-Both suites run on the VM on every push to `dev`, and again before every deploy from `main`.
-The pipeline suite also needs PyArrow, which `requirements-dev.txt` does not install yet. The VM's
-`~/spark-env` has it.
+Both suites run on the VM on every push to a branch other than `main`, and again before every
+deploy from `main`.
 
 ## Data credits
 
