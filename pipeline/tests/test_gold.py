@@ -180,10 +180,10 @@ class GoldTest(unittest.TestCase):
 
     def test_transfers_pair_each_arrival_with_the_first_departure_per_line(self):
         calls = [
-            # Feeder A: origin, then arrives at the hub's bus terminal 3 min late.
-            stop("f1", 1, "A", "Q:O", depart=-20), stop("f1", 2, "A", "Q:H1", arrive=0, depart=1, arrive_delay=180),
+            # Feeder A: from a quay missing in NSR, then arrives at the hub's bus terminal 3 min 0.5 s late.
+            stop("f1", 1, "A", "Q:X", depart=-20), stop("f1", 2, "A", "Q:H1", arrive=0, depart=1, arrive_delay=180.5),
             stop("f1", 3, "A", "Q:D", arrive=10),
-            # B leaves the station quay of the same hub 5 min later, 1 min late: the gap shrinks by 2 min.
+            # B leaves the station quay of the same hub 5 min later, 1 min late: the gap shrinks by 2 min 0.5 s.
             stop("b1", 1, "B", "Q:H2", depart=5, depart_delay=60), stop("b1", 2, "B", "Q:D", arrive=20),
             stop("b2", 1, "B", "Q:H2", depart=10), stop("b2", 2, "B", "Q:D", arrive=25),  # not the first B
             stop("c1", 1, "C", "Q:H2", depart=20), stop("c1", 2, "C", "Q:D", arrive=40),  # beyond 15 min
@@ -195,10 +195,10 @@ class GoldTest(unittest.TestCase):
         rows = {r.to_line_id: r for r in G.build_transfers(frames["stop_call"], *self.hubs(frames)).collect()}
         self.assertEqual(set(rows), {"B", "E", "U"})
         b = rows["B"]
-        self.assertEqual((b.hub_id, b.from_line_id, b.from_origin_name, b.to_destination_name, b.hour),
-                         ("P:H", "A", "Origin", "Destination", 9))
+        self.assertEqual((b.hub_id, b.from_line_id, b.from_origin_id, b.from_origin_name, b.to_destination_name, b.hour),
+                         ("P:H", "A", G.UNKNOWN_HUB, None, "Destination", 9))
         self.assertEqual((b.connections, b.cancelled_connections, b.unknown_connections), (1, 0, 0))
-        self.assertEqual(b.gap_change_counts[-2 - G.GAP_LOW], 1)
+        self.assertEqual(b.gap_change_counts[-3 - G.GAP_LOW], 1)  # -2.01 min floors to -3, not -2
         self.assertEqual(sum(b.gap_change_counts), 1)
         self.assertEqual((rows["E"].cancelled_connections, sum(rows["E"].gap_change_counts)), (1, 0))
         self.assertEqual((rows["U"].unknown_connections, sum(rows["U"].gap_change_counts)), (1, 0))
@@ -210,6 +210,9 @@ class GoldTest(unittest.TestCase):
             stop("d3", 1, "L", "Q:1", depart=-510),  # 23:30 UTC the day before: outside DATEX's day
             stop("d4", 1, "L", "Q:1", depart=90),
             stop("d5", 1, "L", "Q:1", depart=30, call_cancelled=True),
+            # Cancelled as a whole journey, no update for the call itself: still cancelled.
+            stop("d6", 1, "L", "Q:1", depart=30, depart_delay=None, reported=False, journey_cancelled=True),
+            stop("d7", 1, "L", "Q:1", depart=30, depart_delay=None, reported=False),  # unreported: unknown
         ]
         version = at(-600)
         roads = self.roads(
@@ -235,7 +238,7 @@ class GoldTest(unittest.TestCase):
         self.assertEqual(sum(r.late_departures for r in stops), sum(r.late_departures for r in conditions))
         busy = next(r for r in stops if (r.hub_id, r.hour) == ("SP:1", 9))
         self.assertEqual((busy.hub_name, busy.scored_departures, busy.departures_3_5_min, busy.cancelled_departures),
-                         ("Stop", 1, 1, 1))
+                         ("Stop", 1, 1, 2))
 
     def test_partial_gate_publication_and_rerun(self):
         with tempfile.TemporaryDirectory(prefix="gold-test-") as temp:

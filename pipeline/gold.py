@@ -205,7 +205,9 @@ def build_stops(calls, quay_hub, hub_labels):
     F = functions()
     scored = scored_departure()
     at = F.coalesce("aimed_departure_at", "planned_departure_at")
-    cancelled = F.col("has_realtime") & cancelled_call() & F.coalesce(F.col("for_boarding"), F.lit(True)) & at.isNotNull()
+    # A journey-level cancellation reaches planned calls that got no update of their own (silver.build_calls).
+    reported_cancel = F.coalesce(F.col("journey_cancelled"), F.lit(False)) | (F.col("has_realtime") & cancelled_call())
+    cancelled = reported_cancel & F.coalesce(F.col("for_boarding"), F.lit(True)) & at.isNotNull()
     rows = calls.filter(scored | cancelled).join(F.broadcast(quay_hub), "quay_id", "left") \
         .withColumn("hub_id", F.coalesce("hub_id", F.lit(UNKNOWN_HUB))).withColumn("hour", local_hour(at))
     return rows.groupBy(*KEYS["stop_reliability"]).agg(*departure_measures(scored), count_if(cancelled, "cancelled_departures")) \
@@ -218,7 +220,9 @@ def build_transfers(calls, quay_hub, hub_labels):
     hour, with a histogram of how the planned gap changed: departure delay minus arrival delay."""
     F = functions()
     from pyspark.sql import Window
-    calls = calls.filter(F.col("line_id").isNotNull()).join(F.broadcast(quay_hub), "quay_id")
+    # Endpoints come from all calls, so an unmapped first or last quay stays an (unknown) endpoint.
+    calls = calls.filter(F.col("line_id").isNotNull()).join(F.broadcast(quay_hub), "quay_id", "left") \
+        .withColumn("hub_id", F.coalesce("hub_id", F.lit(UNKNOWN_HUB)))
     ends = calls.groupBy("journey_id").agg(
         F.min("call_order").alias("first_order"), F.max("call_order").alias("last_order"),
         F.min_by("hub_id", "call_order").alias("origin_id"), F.max_by("hub_id", "call_order").alias("destination_id"))
@@ -227,11 +231,12 @@ def build_transfers(calls, quay_hub, hub_labels):
     def side(prefix, kind, line, end, keep, flags):
         aimed = F.coalesce(f"aimed_{kind}_at", f"planned_{kind}_at")
         trusted = ~F.arrays_overlap("dq_issue", F.array(*map(F.lit, flags)))
-        return calls.filter(keep & aimed.isNotNull()).select(
+        return calls.filter(keep & aimed.isNotNull() & (F.col("hub_id") != UNKNOWN_HUB)).select(
             "operating_date", "hub_id", F.col("line_id").alias(line), F.col(end[0]).alias(end[1]),
             F.col("journey_id").alias(f"{prefix}_journey"), F.col("call_order").alias(f"{prefix}_order"),
             aimed.cast("long").alias(f"{prefix}_at"), cancelled_call().alias(f"{prefix}_cancelled"),
-            F.when(trusted, F.col(f"actual_{kind}_at").cast("long") - aimed.cast("long")).alias(f"{prefix}_delay"))
+            # Fractional seconds kept: only the gap change is floored to whole minutes.
+            F.when(trusted, F.col(f"actual_{kind}_at").cast("double") - aimed.cast("double")).alias(f"{prefix}_delay"))
 
     arrivals = side("a", "arrival", "from_line_id", ("origin_id", "from_origin_id"),
                     (F.col("call_order") > F.col("first_order")) & F.coalesce(F.col("for_alighting"), F.lit(True)),

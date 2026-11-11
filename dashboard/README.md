@@ -14,12 +14,13 @@ departures under road conditions. Definitions are in the [Gold contract](../docs
 On the VM, after `pipeline/gold.py` has published each day:
 
 ```sh
-~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
+flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
   --date 2026-11-05 --date 2026-11-08 --date 2026-11-09
 ```
 
-It needs pandas and pyarrow from `~/spark-env`, no Spark. Three days took 166 s and peaked at
-2.1 GiB RSS, so run it when no Spark job holds the memory. `dist/` (about 49 MB, 9 MB gzipped) is
+It needs pandas and pyarrow from `~/spark-env`, no Spark. It holds the Spark lock anyway, so no
+Gold rerun replaces tables mid-build and no Spark job competes for memory: three days took 170 s
+and peaked at 2.1 GiB RSS. `dist/` (about 55 MB, 9 MB gzipped) is
 generated and not tracked in git.
 
 ## View

@@ -77,7 +77,8 @@ def hub_shard(root, markers, hubs, hours, shard):
               for key, group in by_hour[by_hour.index.droplevel("hour").isin(pairs.index)].groupby(level=PAIR)}
     for key, row in pairs.iterrows():
         out[key[0]]["transfers"].append({
-            "from": key[1], "origin": row["from_origin_name"], "to": key[3], "destination": row["to_destination_name"],
+            "from": key[1], "origin_id": key[2], "origin": row["from_origin_name"],
+            "to": key[3], "destination_id": key[4], "destination": row["to_destination_name"],
             "connections": int(row["connections"]), "cancelled": int(row["cancelled_connections"]),
             "unknown": int(row["unknown_connections"]), "gaps": trimmed(row[GAPS].to_numpy(dtype=np.int64)),
             "hours": hourly[key]})
@@ -104,7 +105,9 @@ def build(root, days, dist):
     if stops["scored_departures"].sum() != scored:
         raise ValueError("stop_reliability does not reconcile to the Gold run markers")
     hubs = stops.groupby("hub_id")[DEPARTURES].sum().join(stops.groupby("hub_id")[["hub_name", "hub_latitude", "hub_longitude"]].last())
-    hubs = hubs[(hubs.index != UNKNOWN_HUB) & (hubs["scored_departures"] >= MIN_DEPARTURES) & hubs["hub_latitude"].notna()]
+    # Silver flags missing or invalid coordinates but keeps the stop; the map needs both.
+    placed = hubs["hub_latitude"].between(-90, 90) & hubs["hub_longitude"].between(-180, 180)
+    hubs = hubs[(hubs.index != UNKNOWN_HUB) & (hubs["scored_departures"] >= MIN_DEPARTURES) & placed]
     hubs = hubs.sort_values("scored_departures", ascending=False)
     hubs["shard"] = np.arange(len(hubs)) % SHARDS  # busiest hubs spread over shards
     hours = stops.groupby(["hub_id", "hour"])[["scored_departures", "late_departures", "cancelled_departures"]].sum()

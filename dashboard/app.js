@@ -88,6 +88,7 @@ function curve(points, chosen) {
 
 // ---------- data ----------
 const hubs = G.hubs.map((row) => Object.fromEntries(G.hub_columns.map((c, i) => [c, row[i]])));
+hubs.forEach((h) => { h.name = typeof h.name === "string" && h.name ? h.name : h.id; }); // NSR names are nullable
 const totals = G.days.reduce((t, d) => ({ scored: t.scored + d.totals.scored_departures,
   late: t.late + d.totals.late_departures, connections: t.connections + d.totals.transfer_connections }),
 { scored: 0, late: 0, connections: 0 });
@@ -254,7 +255,7 @@ function renderTransfers(box, pairs) {
   const arrivals = new Map();
   for (const p of pairs) {
     p.counts = expand(p.gaps); p.known = sum(p.counts);
-    const key = `${p.from}|${p.origin}`;
+    const key = `${p.from}|${p.origin_id}`; // names are labels only: two origins may share one
     if (!arrivals.has(key)) arrivals.set(key, { key, from: p.from, origin: p.origin, known: 0, pairs: [] });
     const a = arrivals.get(key); a.known += p.known; a.pairs.push(p);
   }
