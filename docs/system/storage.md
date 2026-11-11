@@ -55,8 +55,9 @@ Grafana's **Disk full in** panel provides a live forecast.
 Cleanup is manual. Delete whole days and record removals in the [problem log](../report/problems.md).
 Paths are relative to `/data/dat535/`.
 
-1. Remove `{dev,prod}/silver/_decoded/*/source_date=` days older than three days. This frees
-   ~1.9 GB/day, or 19 GB for ten days on 2026-11-06. Reruns decode again in ~37 min/UTC day.
+1. Remove `{dev,prod}/silver/_decoded/<feed>/source_date=YYYY-MM-DD/` folders older than three
+   days. This frees ~1.9 GB/day, or 19 GB for ten days on 2026-11-06. Reruns decode again in
+   ~37 min/UTC day.
 2. Remove `dev/` outputs older than a week. October's 2026-10-15/16 tests occupied 36 GB.
 3. Rebuild pre-zstd prod Bronze with `workflow_dispatch`, one date at a time. This saves
    ~14 GB/day without data loss. Days 2026-10-15…22 offered ~95 GB.

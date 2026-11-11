@@ -441,7 +441,7 @@ Both workflows use the VM's self-hosted runner.
 
 | Trigger | Behaviour |
 | ------- | --------- |
-| Push to `dev` or manual dev dispatch | Tests, yesterday's 08 UTC Bronze sample, partial Silver |
+| Push to any branch except `main`, or manual dev dispatch | Tests, yesterday's 08 UTC Bronze sample, partial Silver |
 | Push to `main` | Approved deployment, tests and collector installation |
 | Prod schedule or manual dispatch | Bronze and both Silver jobs, without deployment tests or approval |
 | Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver, Entur Silver for two days ago |
