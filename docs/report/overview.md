@@ -447,7 +447,7 @@ Before publishing, scorecard totals reconcile to Silver's rows, and the map and 
 must split exactly the scorecard's timed and late departures.
 
 On 2026-11-05, 08 and 09 ([run records](evidence/README.md#gold-with-road-data-2026-11-05-08-and-09)),
-each day took 43–64 s and at most 2.94 GiB RSS. Nationally, a connection held 52 % of the time
+each day took 46–69 s and at most 2.94 GiB RSS. Nationally, a connection held 52 % of the time
 with no spare minute and 84 % with three. Matched on mode and hour, departures near congested
 road sections were late 10.0 points more often than near free-flowing ones; heavy precipitation
 added 1.1 and incidents 2.1. Proximity is not causation.

@@ -60,7 +60,8 @@ beside the Parquet.
 
 Timed departures per hub and hour, with `late_departures`, six delay bins (more than a minute
 early, within a minute, 1–3, 3–5, 5–10 and 10+ minutes late) and `cancelled_departures`
-(reported cancelled calls where boarding was allowed). Hub name and WGS84 position come from the
+(reported cancelled calls where boarding was allowed, including planned calls of a journey
+cancelled as a whole). Hub name and WGS84 position come from the
 operating day's `stop_place` snapshot.
 
 ## `transfer_reliability`
@@ -81,7 +82,8 @@ A transfer is observed, not modelled from two separate delay distributions:
 
 `cancelled_connections` has either call cancelled. `unknown_connections` lacks an actual time or
 carries an implausible-delay flag. Origin and destination are the hubs of the journeys' first and
-last calls, with names.
+last calls, with names, or `__unknown_hub__` when that quay is not in NSR. Delays keep their
+fractional seconds; only the gap change is floored.
 
 **Limits.** The curve pools connections with different planned gaps and assumes the gap change
 does not depend on the gap. Walking time is the reader's input: NeTEx interchanges and NSR
@@ -123,9 +125,12 @@ strata by the level's departures and skipping strata where the reference has few
 Rush hour therefore cannot pass for congestion. Region and line are not controlled.
 
 ```sh
-~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
+flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
   --date 2026-11-05 --date 2026-11-08 --date 2026-11-09
 ```
+
+It holds the Spark lock for the whole build: a Gold rerun replaces its tables one by one, so a
+build running beside it could mix two runs that the run-ID check before reading cannot see.
 
 The builder reads the transfer table shard by shard with a filtered Arrow scan. Reading all
 three days at once peaked at 5–7 GB. See the [problem log](../report/problems.md#2026-11-11--the-dashboard-builder-needed-more-memory-than-the-spark-job).
@@ -168,9 +173,9 @@ missing for 11-06 and 11-07.
 
 | Operating day | Gold run | Timed departures | Late | Observed connections | Elapsed | Peak RSS |
 | ------------- | -------- | ---------------: | ---: | -------------------: | ------: | -------: |
-| 2026-11-05 Thu | [`local-20261111T161642Z-fcdc0d31`](../report/evidence/gold-2026-11-05.json) | 1,624,438 | 37.5 % | 4,007,852 | 60 s | 2.84 GiB |
-| 2026-11-08 Sun | [`local-20261111T161745Z-a11b99aa`](../report/evidence/gold-2026-11-08.json) | 600,491 | 22.7 % | 1,196,830 | 43 s | 2.26 GiB |
-| 2026-11-09 Mon | [`local-20261111T161831Z-93e363a5`](../report/evidence/gold-2026-11-09.json) | 1,627,100 | 34.4 % | 4,004,644 | 64 s | 2.94 GiB |
+| 2026-11-05 Thu | [`local-20261111T192137Z-e426fdeb`](../report/evidence/gold-2026-11-05.json) | 1,624,438 | 37.5 % | 4,008,473 | 69 s | 2.94 GiB |
+| 2026-11-08 Sun | [`local-20261111T192251Z-e4cf5972`](../report/evidence/gold-2026-11-08.json) | 600,491 | 22.7 % | 1,197,122 | 46 s | 2.48 GiB |
+| 2026-11-09 Mon | [`local-20261111T192339Z-428817a6`](../report/evidence/gold-2026-11-09.json) | 1,627,100 | 34.4 % | 4,005,340 | 69 s | 2.88 GiB |
 
 A weekday writes about 1.78 M transfer rows (21 MB), 406 k stop rows (7 MB), 4 k scorecard rows
 and 2.5 k condition rows.

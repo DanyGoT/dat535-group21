@@ -1,10 +1,10 @@
 {
-  "run_id": "local-20261111T161642Z-fcdc0d31",
+  "run_id": "local-20261111T192137Z-e426fdeb",
   "operating_date": "2026-11-05",
   "schema_version": 2,
   "status": "complete",
   "ready": true,
-  "started_at": "2026-11-11T16:16:42.490Z",
+  "started_at": "2026-11-11T19:21:37.096Z",
   "silver_run_id": "gh-42595809419-1",
   "silver_status": "complete",
   "datex_run_id": "gh-42595809419-1",
@@ -24,9 +24,9 @@
       "parquet_bytes": 7177443
     },
     "transfer_reliability": {
-      "rows": 1779641,
+      "rows": 1779935,
       "partition": "operating_date=2026-11-05",
-      "parquet_bytes": 21383352
+      "parquet_bytes": 21390982
     },
     "departure_conditions": {
       "rows": 2561,
@@ -69,10 +69,10 @@
     "scored_departures": 1624438,
     "late_departures": 609167,
     "actual_equals_aimed_departures": 10379,
-    "transfer_connections": 4007852,
-    "cancelled_connections": 14122,
-    "unknown_connections": 437054
+    "transfer_connections": 4008473,
+    "cancelled_connections": 14128,
+    "unknown_connections": 437649
   },
-  "finished_at": "2026-11-11T16:17:42.628Z",
-  "elapsed_s": 60.138
+  "finished_at": "2026-11-11T19:22:46.413Z",
+  "elapsed_s": 69.317
 }
