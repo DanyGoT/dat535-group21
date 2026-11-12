@@ -33,7 +33,7 @@ layer carries the most weight, then Bronze, then Gold.
 | `docs/report/overview.md` | First stop for understanding the system. The one file the report and presentation are built from: core components with real code snippets. **Update it in the same PR when a core component is added or changes** |
 | `docs/report/problems.md` | After hitting and fixing a non-trivial problem: add an entry and an index row (raw material for the report) |
 | `docs/report/evidence/README.md` | Citing a measured number: index of the tracked run records and reports |
-| `collector/README.md` | Operating the VM: units, setup, credentials, tunnel, off-campus access |
+| `collector/README.md` | Operating the VM: units, setup, credentials, tunnel |
 
 Items marked **UNVERIFIED** in the docs are research gaps, not facts. Verify against the
 source (or real data) before building on them, then update the doc.
@@ -51,8 +51,7 @@ source (or real data) before building on them, then update the doc.
 - The collectors and monitor are long-running infrastructure outside GitHub
   Actions (see `docs/system/architecture.md`). They run on the VM's `/usr/bin/python3`, which
   is **Python 3.11**: no syntax newer than 3.11 in `collector/`.
-- SSH to the VM's address works only from the UiS network; off campus use Tailscale
-  (`collector/README.md`, "Off campus").
+- SSH to the VM's address works only from the UiS network.
 
 ## Rules
 

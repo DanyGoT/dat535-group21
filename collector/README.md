@@ -68,32 +68,13 @@ as JSON. It supplements sparse open hours with recent closed files. `--file <hou
 reads from the start. Open-hour sampling uses random offsets. Set landing explicitly because
 shells do not inherit unit environments.
 
-For the status page without the public tunnel:
+For the status page without the public tunnel, from the UiS network:
 
 ```sh
 ssh -L 8751:127.0.0.1:8751 ubuntu@<vm>
 ```
 
-Open `http://localhost:8751`. Substitute `dat535-ts` for `ubuntu@<vm>` off campus after
-configuring [Tailscale](#off-campus).
-
-## Off campus
-
-SSH to the VM address requires the UiS network. Off campus, use Tailscale node `dat535-vm`
-at `100.65.145.61` in one member's tailnet. `tailscaled` starts with
-`--accept-dns=false --accept-routes=false`, leaving VM DNS and routes unchanged.
-Collectors and the public tunnel do not depend on it.
-
-Ask the tailnet owner to share the node, then add:
-
-```sshconfig
-# ~/.ssh/config
-Host dat535-ts
-    HostName 100.65.145.61
-    User ubuntu
-```
-
-Remove Tailscale with `sudo systemctl disable --now tailscaled`.
+Open `http://localhost:8751`.
 
 ## DATEX credentials
 
@@ -127,8 +108,8 @@ lists alert thresholds. Nothing removes stored days automatically.
 ## Tunnel
 
 [dat535-tunnel.service](systemd/dat535-tunnel.service) opens a reverse SSH tunnel to a public
-host. Caddy maps `siri-dat535.dany.no` to `127.0.0.1:8750` and `status-dat535.dany.no` to
-`127.0.0.1:8751` there. Expose only these services. Landing, Prometheus and the exporter stay private.
+host. A reverse proxy there maps `siri.<domain>` to `127.0.0.1:8750` and `status.<domain>` to
+`127.0.0.1:8751`. Expose only these services. Landing, Prometheus and the exporter stay private.
 
 Treat the key as readable by anyone on the shared VM. Restrict the public-host account to
 those loopback listeners and a forced command, with no interactive shell or `-L` forwarding.

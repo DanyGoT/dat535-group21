@@ -149,13 +149,12 @@ Run records count files, rows, errors and hour coverage.
 | Write the day directly | `partitionBy` on a constant sorted the whole day and filled the root disk on 2026-10-24 |
 | DATEX `parquet.page.size.row.check.min=1` | First full-day write buffered 26.6M-character snapshots until heap exhaustion on 2026-10-29 |
 
-The 2026-11-06 audit matched Bronze rows to landing lines on every checked feed.
-The only collection dip found in that audit was 2026-10-21, 15–17 UTC.
+A check on 2026-11-06 matched Bronze rows to landing lines on every checked feed.
+The only collection dip it found was 2026-10-21, 15–17 UTC.
 Prod run 78 restored 2026-10-23 Bronze, with 4,808,892 ET, 4,605 SX and 643,233 vehicle rows.
 
-At that audit, other vehicle Bronze began 2026-10-26, against landing from 2026-10-17.
-The 2026-11-11 VM probe found vehicle Bronze date folders spanning 2026-10-23 to
-2026-11-09. These are different snapshots of coverage, not contradictory start dates.
+At that check, other vehicle Bronze began 2026-10-26, against landing from 2026-10-17.
+On 2026-11-11, vehicle Bronze date folders spanned 2026-10-23 to 2026-11-09. These are different snapshots of coverage, not contradictory start dates.
 
 [`bronze_datex.py`](../../pipeline/bronze_datex.py) also counts poll outcomes, distinct snapshots
 and the longest successful-poll gap.
@@ -476,7 +475,7 @@ Both workflows use the VM's self-hosted runner.
 | Prod schedule or manual dispatch | Bronze and both Silver jobs, without deployment tests or approval |
 | Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver, Entur Silver for two days ago |
 
-The 2026-11-11 VM probe found recent starts at about 09:20–10:50 UTC despite the cron.
+On 2026-11-11, recent runs had started at about 09:20–10:50 UTC despite the cron.
 Gold and the dashboard build have no scheduled step; they run by hand.
 Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
 Spark steps and pipeline tests share `flock /data/dat535/.spark.lock`.

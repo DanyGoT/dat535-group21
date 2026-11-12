@@ -1,7 +1,7 @@
 # Statens vegvesen DATEX II: access and collection
 
 This page covers access, feed cadence and collection costs for NPRA's road data. Measurements below come from
-our VM account on 2026-10-23/24.
+requests made from the VM on 2026-10-23/24.
 
 Up: [overview](../report/overview.md) · Related: [payload content](content.md),
 [external sources](../external/sources.md), [collector runbook](../../collector/README.md)
@@ -73,7 +73,7 @@ Every poll, including failures, produces one landing line. The envelope is docum
 
 ## End-to-end on the VM
 
-The scratch test used real NPRA data on 2026-10-24, 17:55–18:01 UTC.
+A manual test on the VM collected real NPRA data on 2026-10-24, 17:55–18:01 UTC, and showed:
 
 - Hour 17 closed on time. SIGTERM left the current hour as `.part`.
 - Weather repeated unchanged at 18:00. Travel time changed between 17:55 and 17:57,

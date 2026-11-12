@@ -297,7 +297,7 @@ Entry template:
 ## 2026-10-28 — Missing and malformed real-time data crossed Silver contract boundaries
 
 - **Area:** Silver, readiness and regression coverage.
-- **Evidence:** PR #34 review findings reproduced locally:
+- **Evidence:** The review of PR #34 found these, and each was reproduced before the fix:
 
   - 120 corrupt envelopes spanning every required hour published `ready=true`.
   - A vehicle's available dated alias left its operating date null.
@@ -390,7 +390,7 @@ Entry template:
 - **Area:** Bronze
 - **Symptom:** Every prod Bronze run reported 1–2 `corrupt` ET rows.
 - **Evidence:** The two on 2026-10-22 (hour 21) had raw lines of 21,557,914 and 22,773,516
-  characters. Locally, Spark 3.5.0 read a 19,999,000-character string and marked a
+  characters. In a test, Spark 3.5.0 read a 19,999,000-character string and marked a
   20,000,100-character one corrupt.
 - **Cause:** Spark 3.5's JSON reader uses Jackson 2.15, which caps strings at 20,000,000
   characters by default. Overriding Jackson's global default did nothing, because Spark builds its
