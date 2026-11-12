@@ -34,7 +34,7 @@ Both publication records say `complete`, `ready=true`.
 | [`silver-2026-10-29.json`](silver-2026-10-29.json) | Input coverage, table counts, issues and runtime |
 | [`gold-2026-10-29.json`](gold-2026-10-29.json) | Gold totals reconciled against that Silver run |
 | [`gold-line-scorecard-2026-10-29.md`](gold-line-scorecard-2026-10-29.md) | Generated scorecard report, top 25 reported lines |
-| [`gold-dashboard-2026-10-29.png`](gold-dashboard-2026-10-29.png), [mobile](gold-dashboard-2026-10-29-mobile.png) | Example viewer showing that day |
+| [`gold-dashboard-2026-10-29.png`](gold-dashboard-2026-10-29.png), [mobile](gold-dashboard-2026-10-29-mobile.png) | The first scorecard viewer showing that day |
 
 ## Bounded sample, 2026-10-26
 

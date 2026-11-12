@@ -107,7 +107,7 @@ Spark steps share the [storage lock](storage.md#memory).
 | Dev push to any branch except `main`, or dispatch | Both test suites, then yesterday's 08:00–09:00 UTC sample |
 
 The [production workflow](../../.github/workflows/dat535-prod.yml) schedules `0 3 * * *`.
-Actual starts were about 09:20–10:50 UTC in the 2026-11-11 VM audit. Its steps run sequentially:
+Runs checked on 2026-11-11 started at about 09:20–10:50 UTC. Its steps run sequentially:
 
 1. [Entur Bronze](../../pipeline/bronze.py) and [DATEX Bronze](../../pipeline/bronze_datex.py)
    ingest yesterday's UTC files. Payloads stay unchanged in zstd Parquet with provenance and run records.

@@ -110,8 +110,8 @@ marker. Inspect leftovers and rerun manually. Consumers take the shared lock and
 
 ## The root disk
 
-A terminal recording (`script … donut`) held 21.7 GB in a deleted file during 2026-10-16…26, filling `/` to 94 %.
-`du` missed it. `lsof +L1` finds open deleted files. Keep personal tools and recordings off this VM.
+During 2026-10-16…26 a long-running process held 21.7 GB in a deleted file, filling `/` to 94 %.
+`du` missed it. `lsof +L1` finds open deleted files.
 
 ## Watching it
 
