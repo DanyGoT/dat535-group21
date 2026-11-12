@@ -46,7 +46,7 @@ source (or real data) before building on them, then update the doc.
 - **4 vCPU, 7.9 GB RAM, root disk 38 GB (`/tmp` lives there), data volume 984 GB (`/data`).**
   One Spark job at a time; read `docs/system/storage.md` before anything memory- or disk-heavy.
 - CI/CD: GitHub Actions on a **self-hosted runner** on the VM.
-  `dev` branch → `.github/workflows/dat535-dev.yml`; `main` → `dat535-prod.yml` (deploys need manual approval).
+  Push to any branch except `main` → `.github/workflows/dat535-dev.yml`; `main` → `dat535-prod.yml` (deploys need manual approval).
 - Pipeline code reads `DAT535_ENV` (`dev`/`prod`) and `DAT535_OUTPUT_DIR` from the environment.
 - The collectors and monitor are long-running infrastructure outside GitHub
   Actions (see `docs/system/architecture.md`). They run on the VM's `/usr/bin/python3`, which
