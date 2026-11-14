@@ -128,62 +128,82 @@ def local_hour(column):
     return F.hour(F.from_utc_timestamp(column, "Europe/Oslo"))
 
 
+SCORECARD_SQL = """
+WITH trips AS (
+    SELECT operating_date, coalesce(line_id, {unknown}) AS line_id,
+           count(*) AS input_journeys,
+           count_if(has_plan) AS planned_journeys,
+           count_if(has_realtime) AS reported_journeys,
+           count_if(has_plan AND has_realtime) AS reported_planned_journeys,
+           count_if(has_plan AND NOT has_realtime) AS unreported_planned_journeys,
+           count_if(NOT has_plan AND has_realtime) AS realtime_only_journeys,
+           count_if(has_realtime AND coalesce(journey_cancelled, false)) AS reported_cancelled_journeys,
+           count_if(has_plan AND lower(service_alteration) = 'cancellation') AS plan_cancellation_journeys,
+           count_if(has_plan AND lower(service_alteration) = 'replaced') AS plan_replaced_journeys
+    FROM {journeys} GROUP BY 1, 2
+), stops AS (
+    SELECT operating_date, coalesce(line_id, {unknown}) AS line_id,
+           count(*) AS input_calls,
+           count_if(has_plan) AS planned_calls,
+           count_if(has_realtime) AS reported_calls,
+           count_if(has_plan AND has_realtime) AS reported_planned_calls,
+           count_if(has_plan AND NOT has_realtime) AS unreported_planned_calls,
+           count_if(NOT has_plan AND has_realtime) AS realtime_only_calls,
+           count_if(has_realtime AND cancelled) AS reported_cancelled_calls,
+           count_if(size(dq_issue) > 0) AS flagged_calls,
+           count_if(scored) AS scored_departures,
+           count_if(scored AND departure_delay_s >= {late}) AS late_departures,
+           count_if(scored AND departure_delay_s < 0) AS early_departures,
+           count_if(scored AND actual_departure_equals_aimed) AS actual_equals_aimed_departures,
+           percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000) AS delay_percentiles
+    FROM {calls} GROUP BY 1, 2
+), counts AS (
+    -- A line can appear in one grain only: its other counts are 0, its rates stay null.
+    SELECT operating_date, line_id,
+           coalesce(input_journeys, 0) AS input_journeys,
+           coalesce(planned_journeys, 0) AS planned_journeys,
+           coalesce(reported_journeys, 0) AS reported_journeys,
+           coalesce(reported_planned_journeys, 0) AS reported_planned_journeys,
+           coalesce(unreported_planned_journeys, 0) AS unreported_planned_journeys,
+           coalesce(realtime_only_journeys, 0) AS realtime_only_journeys,
+           coalesce(reported_cancelled_journeys, 0) AS reported_cancelled_journeys,
+           coalesce(plan_cancellation_journeys, 0) AS plan_cancellation_journeys,
+           coalesce(plan_replaced_journeys, 0) AS plan_replaced_journeys,
+           coalesce(input_calls, 0) AS input_calls,
+           coalesce(planned_calls, 0) AS planned_calls,
+           coalesce(reported_calls, 0) AS reported_calls,
+           coalesce(reported_planned_calls, 0) AS reported_planned_calls,
+           coalesce(unreported_planned_calls, 0) AS unreported_planned_calls,
+           coalesce(realtime_only_calls, 0) AS realtime_only_calls,
+           coalesce(reported_cancelled_calls, 0) AS reported_cancelled_calls,
+           coalesce(flagged_calls, 0) AS flagged_calls,
+           coalesce(scored_departures, 0) AS scored_departures,
+           coalesce(late_departures, 0) AS late_departures,
+           coalesce(early_departures, 0) AS early_departures,
+           coalesce(actual_equals_aimed_departures, 0) AS actual_equals_aimed_departures,
+           IF(planned_journeys > 0, round(100D * reported_planned_journeys / planned_journeys, 2), NULL) AS journey_reporting_pct,
+           IF(planned_calls > 0, round(100D * reported_planned_calls / planned_calls, 2), NULL) AS call_reporting_pct,
+           IF(scored_departures > 0, round(100D * late_departures / scored_departures, 2), NULL) AS late_departure_pct,
+           delay_percentiles[0] AS median_departure_delay_s,
+           delay_percentiles[1] AS p90_departure_delay_s
+    FROM trips FULL JOIN stops USING (operating_date, line_id)
+)
+SELECT /*+ BROADCAST(l, o) */ c.*, l.name AS line_name, l.public_code, l.operator_id, l.mode,
+       o.name AS operator_name
+FROM counts c
+LEFT JOIN {lines} l ON l.operating_date = c.operating_date AND l.id = c.line_id
+LEFT JOIN {operators} o ON o.operating_date = c.operating_date AND o.id = l.operator_id
+"""
+
+
 def build_scorecard(calls, journeys, lines, operators):
-    """Aggregate each fact grain separately, then attach daily reference labels."""
-    F = functions()
-    key = KEYS["line_scorecard"]
-
-    def grouped(frame):
-        return frame.withColumn("line_id", F.coalesce("line_id", F.lit(UNKNOWN_LINE)))
-
-    def percent(numerator, denominator):
-        return F.when(F.col(denominator) > 0, F.round(100.0 * F.col(numerator) / F.col(denominator), 2))
-
+    """Spark SQL: aggregate each fact grain separately, then attach daily reference labels.
+    The shared departure rules are DataFrame columns, so SQL counts the same departures as the rest."""
     assert_unique(lines, ["operating_date", "id"], "Gold line reference")
     assert_unique(operators, ["operating_date", "id"], "Gold operator reference")
-    planned, reported = F.col("has_plan"), F.col("has_realtime")
-    cancelled = F.coalesce(F.col("journey_cancelled"), F.lit(False))
-    trip_counts = grouped(journeys).groupBy(*key).agg(
-        F.count("*").alias("input_journeys"),
-        count_if(planned, "planned_journeys"),
-        count_if(reported, "reported_journeys"),
-        count_if(planned & reported, "reported_planned_journeys"),
-        count_if(planned & ~reported, "unreported_planned_journeys"),
-        count_if(~planned & reported, "realtime_only_journeys"),
-        count_if(reported & cancelled, "reported_cancelled_journeys"),
-        count_if(planned & (F.lower("service_alteration") == "cancellation"), "plan_cancellation_journeys"),
-        count_if(planned & (F.lower("service_alteration") == "replaced"), "plan_replaced_journeys"),
-    )
-
-    scored, delay = scored_departure(), F.col("departure_delay_s")
-    call_counts = grouped(calls).groupBy(*key).agg(
-        F.count("*").alias("input_calls"),
-        count_if(planned, "planned_calls"),
-        count_if(reported, "reported_calls"),
-        count_if(planned & reported, "reported_planned_calls"),
-        count_if(planned & ~reported, "unreported_planned_calls"),
-        count_if(~planned & reported, "realtime_only_calls"),
-        count_if(reported & cancelled_call(), "reported_cancelled_calls"),
-        count_if(F.size("dq_issue") > 0, "flagged_calls"),
-        count_if(scored, "scored_departures"),
-        count_if(scored & (delay >= LATE_S), "late_departures"),
-        count_if(scored & (delay < 0), "early_departures"),
-        count_if(scored & F.col("actual_departure_equals_aimed"), "actual_equals_aimed_departures"),
-        F.percentile_approx(F.when(scored, delay), [0.5, 0.9], 10000).alias("_delay_percentiles"),
-    )
-    count_columns = [c for c in trip_counts.columns + call_counts.columns if c not in key + ["_delay_percentiles"]]
-    result = trip_counts.join(call_counts, key, "full").fillna(0, subset=count_columns)
-    result = result.withColumn("journey_reporting_pct", percent("reported_planned_journeys", "planned_journeys")) \
-        .withColumn("call_reporting_pct", percent("reported_planned_calls", "planned_calls")) \
-        .withColumn("late_departure_pct", percent("late_departures", "scored_departures")) \
-        .withColumn("median_departure_delay_s", F.col("_delay_percentiles")[0]) \
-        .withColumn("p90_departure_delay_s", F.col("_delay_percentiles")[1]).drop("_delay_percentiles")
-    labels = lines.select("operating_date", F.col("id").alias("line_id"),
-                          F.col("name").alias("line_name"), "public_code", "operator_id", "mode")
-    operator_labels = operators.select("operating_date", F.col("id").alias("operator_id"),
-                                       F.col("name").alias("operator_name"))
-    return result.join(F.broadcast(labels), key, "left") \
-        .join(F.broadcast(operator_labels), ["operating_date", "operator_id"], "left")
+    calls = calls.withColumn("scored", scored_departure()).withColumn("cancelled", cancelled_call())
+    return calls.sparkSession.sql(SCORECARD_SQL, calls=calls, journeys=journeys, lines=lines,
+                                  operators=operators, unknown=UNKNOWN_LINE, late=LATE_S)
 
 
 def build_hubs(quays, stop_places):
@@ -219,7 +239,6 @@ def build_transfers(calls, quay_hub, hub_labels):
     other line and destination aimed 0-15 min later. One row per hub, line pair and local arrival
     hour, with a histogram of how the planned gap changed: departure delay minus arrival delay."""
     F = functions()
-    from pyspark.sql import Window
     # Endpoints come from all calls, so an unmapped first or last quay stays an (unknown) endpoint.
     calls = calls.filter(F.col("line_id").isNotNull()).join(F.broadcast(quay_hub), "quay_id", "left") \
         .withColumn("hub_id", F.coalesce("hub_id", F.lit(UNKNOWN_HUB)))
@@ -250,8 +269,9 @@ def build_transfers(calls, quay_hub, hub_labels):
     departures = departures.withColumn("_bucket", F.floor(F.col("b_at") / MAX_SLACK_S))
     pairs = arrivals.join(departures, ["operating_date", "hub_id", "_bucket"]).filter(
         (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S) & (F.col("from_line_id") != F.col("to_line_id")))
-    first = Window.partitionBy("a_journey", "a_order", "to_line_id", "to_destination_id").orderBy("b_at", "b_journey")
-    pairs = pairs.withColumn("_rank", F.row_number().over(first)).filter(F.col("_rank") == 1)
+    arrival = ["a_journey", "a_order", "to_line_id", "to_destination_id"]
+    pairs = pairs.groupBy(*arrival).agg(F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]),
+                                                 F.struct("b_at", "b_journey")).alias("_first")).select(*arrival, "_first.*")
 
     gone = F.col("a_cancelled") | F.col("b_cancelled")
     known = ~gone & F.col("a_delay").isNotNull() & F.col("b_delay").isNotNull()
@@ -324,6 +344,37 @@ def build_conditions(calls, roads, day):
                     .when(ratio.isNull(), "unmeasured").when(ratio < 1.2, "free_flow").when(ratio < 1.5, "slow")
                     .otherwise("congested"))
     return rows.groupBy(*KEYS["departure_conditions"]).agg(*departure_measures(F.lit(True)))
+
+
+# Spark SQL: the run's totals, and whether the map and the conditions split exactly the
+# scorecard's timed and late departures. Sums are 0, not null, for an empty table.
+TOTALS_SQL = """
+WITH line AS (
+    SELECT coalesce(sum(input_journeys), 0) AS input_journeys, coalesce(sum(input_calls), 0) AS input_calls,
+           coalesce(sum(planned_journeys), 0) AS planned_journeys,
+           coalesce(sum(reported_journeys), 0) AS reported_journeys,
+           coalesce(sum(scored_departures), 0) AS scored_departures,
+           coalesce(sum(late_departures), 0) AS late_departures,
+           coalesce(sum(actual_equals_aimed_departures), 0) AS actual_equals_aimed_departures
+    FROM {line_scorecard}
+), transfer AS (
+    SELECT coalesce(sum(connections), 0) AS transfer_connections,
+           coalesce(sum(cancelled_connections), 0) AS cancelled_connections,
+           coalesce(sum(unknown_connections), 0) AS unknown_connections
+    FROM {transfer_reliability}
+), stop AS (
+    SELECT coalesce(sum(scored_departures), 0) AS scored, coalesce(sum(late_departures), 0) AS late
+    FROM {stop_reliability}
+), conditions AS (
+    SELECT coalesce(sum(scored_departures), 0) AS scored, coalesce(sum(late_departures), 0) AS late
+    FROM {departure_conditions}
+)
+SELECT line.*, transfer.*,
+       stop.scored = line.scored_departures AND stop.late = line.late_departures AS stop_reliability_reconciles,
+       conditions.scored = line.scored_departures AND conditions.late = line.late_departures
+           AS departure_conditions_reconciles
+FROM line, transfer, stop, conditions
+"""
 
 
 def report_markdown(record, rows):
@@ -408,23 +459,15 @@ def run(output_dir, day, spark=None, allow_partial=False):
             assert_unique(written[table], KEYS[table], f"Gold {table}")
             record["tables"][table] = dict(rows=written[table].count(), partition=f"operating_date={day}",
                                            parquet_bytes=sum(p.stat().st_size for p in partition.glob("*.parquet")))
-        # Only the small line/day aggregate reaches the driver, never stop-call facts.
-        rows = [r.asDict() for r in written["line_scorecard"].orderBy("line_id").collect()]
-        totals = {c: sum(r[c] for r in rows) for c in (
-            "input_journeys", "input_calls", "planned_journeys", "reported_journeys", "scored_departures",
-            "late_departures", "actual_equals_aimed_departures")}
+        totals = spark.sql(TOTALS_SQL, **written).first().asDict()
         if totals["input_journeys"] != sources["entur"]["tables"]["journey"]["rows"] or \
                 totals["input_calls"] != sources["entur"]["tables"]["stop_call"]["rows"]:
             raise ValueError("Gold totals do not reconcile to Silver; refusing publication")
-        # The map and the conditions split the same timed departures as the scorecard.
         for table in ("stop_reliability", "departure_conditions"):
-            check = written[table].agg(F.sum("scored_departures"), F.sum("late_departures")).first()
-            if (check[0] or 0, check[1] or 0) != (totals["scored_departures"], totals["late_departures"]):
+            if not totals.pop(f"{table}_reconciles"):
                 raise ValueError(f"{table} does not reconcile to the line scorecard; refusing publication")
-        transfers = written["transfer_reliability"].agg(F.sum("connections"), F.sum("cancelled_connections"),
-                                                        F.sum("unknown_connections")).first()
-        totals.update(transfer_connections=transfers[0] or 0, cancelled_connections=transfers[1] or 0,
-                      unknown_connections=transfers[2] or 0)
+        # Only the small line/day aggregate reaches the driver, never stop-call facts.
+        rows = [r.asDict() for r in written["line_scorecard"].orderBy("line_id").collect()]
         # How much of the day each road condition could describe, for the run record.
         levels = written["departure_conditions"].collect()
         record["condition_levels"] = {dim: {} for dim in KEYS["departure_conditions"][3:]}

@@ -96,13 +96,13 @@ def split_unkeyed(frame, feed):
 
 def first_and_last(df, key):
     """One row per key with its earliest copy's values, plus when it was first and last seen."""
-    from pyspark.sql import Window
     F = functions()
-    seen = df.groupBy(*key).agg(F.min("received_at").alias("first_received_at"), F.max("received_at").alias("last_received_at"),
-                                F.count("*").alias("copies"))
-    earliest = df.withColumn("_rank", F.row_number().over(Window.partitionBy(*key).orderBy("received_at", "payload_sha256"))) \
-        .filter(F.col("_rank") == 1).drop("_rank")
-    return earliest.join(seen, key)
+    values = [c for c in df.columns if c not in key]
+    return df.groupBy(*key).agg(
+        F.min_by(F.struct(*values), F.struct("received_at", "payload_sha256")).alias("_earliest"),
+        F.min("received_at").alias("first_received_at"), F.max("received_at").alias("last_received_at"),
+        F.count("*").alias("copies")) \
+        .select(*key, "_earliest.*", "first_received_at", "last_received_at", "copies")
 
 
 def build_situations(parsed):
@@ -157,11 +157,11 @@ def build_travel_times(parsed):
 
 def latest_reference(parsed, kind):
     """The day's last snapshot of a location table: its ids are the reference for that day."""
-    from pyspark.sql import Window
     F = functions()
-    rows = parsed.filter(F.col("kind") == kind)
-    return rows.withColumn("_rank", F.row_number().over(Window.partitionBy("id").orderBy(F.col("received_at").desc(), F.col("payload_sha256").desc()))) \
-        .filter(F.col("_rank") == 1).drop("_rank", "kind", "entity_json")
+    rows = parsed.filter(F.col("kind") == kind).drop("kind", "entity_json")
+    values = [c for c in rows.columns if c != "id"]
+    return rows.groupBy("id").agg(F.max_by(F.struct(*values), F.struct("received_at", "payload_sha256")).alias("_latest")) \
+        .select("id", "_latest.*").select(*rows.columns)
 
 
 def build_sites(parsed, weather):

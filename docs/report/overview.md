@@ -227,23 +227,22 @@ versions across its three-day input window, rather than per UTC input day.
 ### The final state of a call
 
 [`latest`](../../pipeline/silver.py) prefers a row with an actual arrival or departure,
-then producer time, receipt time and deterministic tie-breakers.
+then producer time, receipt time and deterministic tie-breakers. It is one `max_by` aggregate
+rather than a ranking window: the winner is picked as rows are combined, before the shuffle.
 
 ```python
 # pipeline/silver.py
 def latest(df, key, actual_first=False):
-    """Deterministic winner; producer time beats arrival order. No payload shuffle."""
-    from pyspark.sql import Window
     F = functions()
     order = []
     if actual_first:
-        order.append((F.col("actual_arrival_at").isNotNull() | F.col("actual_departure_at").isNotNull()).desc())
+        order.append(F.col("actual_arrival_at").isNotNull() | F.col("actual_departure_at").isNotNull())
     if "recorded_at" in df.columns:
-        order.append(F.col("recorded_at").desc_nulls_last())
-    order += [F.col("received_at").desc_nulls_last(), F.col("payload_sha256").desc_nulls_last(),
-              F.col("entity_index").desc_nulls_last()]
-    return df.withColumn("_rank", F.row_number().over(Window.partitionBy(*key).orderBy(*order))) \
-        .filter(F.col("_rank") == 1).drop("_rank")
+        order.append(F.col("recorded_at"))
+    order += [F.col("received_at"), F.col("payload_sha256"), F.col("entity_index")]
+    values = [c for c in df.columns if c not in key]
+    return df.groupBy(*key).agg(F.max_by(F.struct(*values), F.struct(*order)).alias("_latest")) \
+        .select(*key, "_latest.*").select(*df.columns)
 ```
 
 ### The denominator: planned but never reported
@@ -434,7 +433,9 @@ arrivals = arrivals.withColumn("_bucket", F.explode(F.array(bucket, bucket + 1))
 departures = departures.withColumn("_bucket", F.floor(F.col("b_at") / MAX_SLACK_S))
 pairs = arrivals.join(departures, ["operating_date", "hub_id", "_bucket"]).filter(
     (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S) & (F.col("from_line_id") != F.col("to_line_id")))
-first = Window.partitionBy("a_journey", "a_order", "to_line_id", "to_destination_id").orderBy("b_at", "b_journey")
+arrival = ["a_journey", "a_order", "to_line_id", "to_destination_id"]
+pairs = pairs.groupBy(*arrival).agg(F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]),
+                                             F.struct("b_at", "b_journey")).alias("_first")).select(*arrival, "_first.*")
 ```
 
 Gold stores a histogram of the gap change, departure delay minus arrival delay in minutes. A
@@ -442,8 +443,26 @@ connection with *b* spare minutes held when the change was at least −b, so one
 every b. Road conditions come from DATEX Silver's quay links: the nearest station within 10 km,
 situations active within 500 m and the travel-time period on sections within 500 m.
 
-Before publishing, scorecard totals reconcile to Silver's rows, and the map and conditions tables
-must split exactly the scorecard's timed and late departures.
+The scorecard is Spark SQL: counts per line read best as a query. The departure rules stay
+DataFrame columns, so the query counts the same departures as the other three tables:
+
+```python
+# pipeline/gold.py, build_scorecard
+calls = calls.withColumn("scored", scored_departure()).withColumn("cancelled", cancelled_call())
+return calls.sparkSession.sql(SCORECARD_SQL, calls=calls, journeys=journeys, lines=lines,
+                              operators=operators, unknown=UNKNOWN_LINE, late=LATE_S)
+```
+
+```sql
+-- pipeline/gold.py, SCORECARD_SQL (call grain)
+count_if(scored) AS scored_departures,
+count_if(scored AND departure_delay_s >= {late}) AS late_departures,
+percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000) AS delay_percentiles
+```
+
+Before publishing, one more query (`TOTALS_SQL`) sums the four tables: scorecard totals must equal
+Silver's rows, and the map and conditions tables must split exactly the scorecard's timed and
+late departures.
 
 On 2026-11-05, 08 and 09 ([run records](evidence/README.md#gold-with-road-data-2026-11-05-08-and-09)),
 each day took 46–69 s and at most 2.94 GiB RSS. Nationally, a connection held 52 % of the time
@@ -506,6 +525,14 @@ More: [dev workflow](../../.github/workflows/dat535-dev.yml),
 | Python XML parsing in Spark tasks | Standard-library parser shared across decoders | Historical estimate of 37 min/UTC day |
 | One Spark job at a time | Fit 7.9 GB RAM | Long runs block other jobs |
 | Time-split validation and as-of features | Prevent future knowledge leaking into features | Less training data |
+
+Each Spark API is used where it fits. Spark SQL computes declarative aggregates: Gold's
+scorecard and reconciliation totals. The DataFrame API composes rules from shared column
+expressions: Silver's joins, deduplication with `max_by`/`min_by` aggregates, Gold's departure definition, transfers and road
+conditions. `mapInArrow` runs the Python XML decoders over Bronze rows in Arrow batches
+(`silver.py` `decode_day`, `silver_datex.py` `decode`). The RDD API
+(`parallelize(...).mapPartitions` in `silver.py` `run`) parses NeTEx and NSR zip members, because
+the input is a list of member names, not rows.
 
 An earlier undated estimate put landing plus Bronze at 19.5 GB/weekday before cleanup.
 The [storage baseline](../system/storage.md#what-a-day-costs) gives about 20.5 GB/day before

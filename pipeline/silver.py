@@ -79,18 +79,19 @@ def current_reference(df):
 
 
 def latest(df, key, actual_first=False):
-    """Deterministic winner; producer time beats arrival order. No payload shuffle."""
-    from pyspark.sql import Window
+    """Deterministic winner; producer time beats arrival order. No payload shuffle.
+    max_by over a struct: fields compare left to right and null is smallest, so a missing
+    time loses, as with a descending, nulls-last sort."""
     F = functions()
     order = []
     if actual_first:
-        order.append((F.col("actual_arrival_at").isNotNull() | F.col("actual_departure_at").isNotNull()).desc())
+        order.append(F.col("actual_arrival_at").isNotNull() | F.col("actual_departure_at").isNotNull())
     if "recorded_at" in df.columns:
-        order.append(F.col("recorded_at").desc_nulls_last())
-    order += [F.col("received_at").desc_nulls_last(), F.col("payload_sha256").desc_nulls_last(),
-              F.col("entity_index").desc_nulls_last()]
-    return df.withColumn("_rank", F.row_number().over(Window.partitionBy(*key).orderBy(*order))) \
-        .filter(F.col("_rank") == 1).drop("_rank")
+        order.append(F.col("recorded_at"))
+    order += [F.col("received_at"), F.col("payload_sha256"), F.col("entity_index")]
+    values = [c for c in df.columns if c not in key]
+    return df.groupBy(*key).agg(F.max_by(F.struct(*values), F.struct(*order)).alias("_latest")) \
+        .select(*key, "_latest.*").select(*df.columns)
 
 
 def normalize_journeys(df, aliases):
