@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from monitor import (DATEX_PREFIX, feeds_from_env, landing_dir, newest_static, parse_iso, pid_alive,
+from monitor import (DATEX_PREFIX, archived, feeds_from_env, landing_dir, newest_static, parse_iso, pid_alive,
                      static_from_env)
 
 HOUR_FILE = re.compile(r"hour=(\d{2})\.jsonl(\.gz|\.part)?$")
@@ -189,8 +189,7 @@ def collect_monitor(status_dir, out):
 def collect_static(landing, dataset, out):
     path = newest_static(landing, dataset)
     lab = {"dataset": dataset}
-    days = sum(1 for d in (Path(landing) / dataset).glob("date=*")
-               if any(not p.name.endswith((".part", ".json", ".tmp")) for p in d.iterdir()))
+    days = sum(1 for d in (Path(landing) / dataset).glob("date=*") if any(archived(p) for p in d.iterdir()))
     out.append(("dat535_static_days", lab, days))
     if path:
         st = path.stat()
