@@ -115,10 +115,11 @@ def normalize_journeys(df, aliases):
         # Explicit day, then the plan's alias (it only holds the target day), then what the id or
         # the first call says. A dated id of another day resolves to that day and is filtered
         # out by the caller, not reported as an unknown identity.
-        joined = issues(joined, ("operating_date_derived", F.col("operating_date").isNull() & F.col("_mapped_date").isNull() &
-                                 F.col("derived_operating_date").isNotNull()))
+        joined = issues(joined, ("operating_date_derived", F.col("operating_date").isNull()
+                                 & F.col("_mapped_date").isNull() & F.col("derived_operating_date").isNotNull()))
         joined = joined.withColumn("date_source", F.when(F.col("operating_date").isNotNull(), "framed")
-                                   .when(F.col("_mapped_date").isNotNull(), "alias").otherwise(F.col("derived_date_source"))) \
+                                   .when(F.col("_mapped_date").isNotNull(), "alias")
+                                   .otherwise(F.col("derived_date_source"))) \
             .withColumn("operating_date", F.coalesce("operating_date", "_mapped_date", "derived_operating_date")) \
             .drop("derived_operating_date", "derived_date_source")
     else:
@@ -146,14 +147,13 @@ def merge_plan(rt, plan, key):
 
 
 def conform(df, quays, lines):
+    """Flag ids the day's reference snapshot does not know. The row stays."""
     F = functions()
-    if "quay_id" in df.columns:
-        df = df.join(F.broadcast(quays.select(F.col("id").alias("quay_id"), F.lit(True).alias("_known_quay"))), "quay_id", "left")
-        df = issues(df, ("unknown_quay", F.col("quay_id").isNotNull() & F.col("_known_quay").isNull())) \
-            .drop("_known_quay")
-    if "line_id" in df.columns:
-        df = df.join(F.broadcast(lines.select(F.col("id").alias("line_id"), F.lit(True).alias("_known_line"))), "line_id", "left")
-        df = issues(df, ("unknown_line", F.col("line_id").isNotNull() & F.col("_known_line").isNull())).drop("_known_line")
+    for column, reference, issue in (("quay_id", quays, "unknown_quay"), ("line_id", lines, "unknown_line")):
+        if column in df.columns:
+            known = reference.select(F.col("id").alias(column), F.lit(True).alias("_known"))
+            df = df.join(F.broadcast(known), column, "left")
+            df = issues(df, (issue, F.col(column).isNotNull() & F.col("_known").isNull())).drop("_known")
     return df
 
 
@@ -161,18 +161,22 @@ def build_journeys(versions, plan):
     columns = JOURNEY_KEY + ["line_id", "operator_id", "direction_id", "mode", "codespace", "vehicle_id",
                              "source_mode", "date_source",
                              "journey_cancelled", "extra_journey", "monitored", "recorded_at", "received_at",
-                             "payload_sha256", "record_sha256", "source_file", "bronze_run_id", "source_journey_id", "entity_index", "dq_issue"]
+                             "payload_sha256", "record_sha256", "source_file", "bronze_run_id", "source_journey_id",
+                             "entity_index", "dq_issue"]
     rt = latest(versions.filter(functions().col("kind") == "journey").select(*columns), JOURNEY_KEY)
     return merge_plan(rt, plan, JOURNEY_KEY)
 
 
 def build_calls(versions, plan, journeys):
     F = functions()
-    attributes = ["line_id", "operator_id", "direction_id", "mode", "source_mode", "codespace", "vehicle_id", "monitored", "date_source"]
-    calls = versions.filter(F.col("kind") == "call").drop("kind", "entity_json", "source_date", "journey_cancelled", "extra_journey", *attributes)
+    attributes = ["line_id", "operator_id", "direction_id", "mode", "source_mode", "codespace", "vehicle_id",
+                  "monitored", "date_source"]
+    calls = versions.filter(F.col("kind") == "call") \
+        .drop("kind", "entity_json", "source_date", "journey_cancelled", "extra_journey", *attributes)
     final = latest(calls, CALL_KEY, actual_first=True).withColumn("reported_quay_id", F.col("quay_id"))
     # Call versions carry no journey attributes (silver_parse.parse_et); the journey's latest do.
-    final = final.join(journeys.filter(F.col("has_realtime")).select(*JOURNEY_KEY, *[c for c in attributes if c in journeys.columns]),
+    reported = journeys.filter(F.col("has_realtime"))
+    final = final.join(reported.select(*JOURNEY_KEY, *[c for c in attributes if c in journeys.columns]),
                        JOURNEY_KEY, "left")
     final = merge_plan(final, plan, CALL_KEY)
     # A cancellation-only journey message may have no calls. Its latest flag
@@ -188,13 +192,17 @@ def build_calls(versions, plan, journeys):
             .withColumn(f"actual_{event}_equals_aimed", actual == aimed)
     # Half an hour early or six hours late at one call: batch-stamped or wrong-day actuals, e.g.
     # a whole ferry journey stamped 9 h before departure (2026-10-29). Real delays stay unflagged.
+    def implausible(delay):
+        return (F.col(delay) < -1800) | (F.col(delay) > 21600)
+
     return issues(final, ("missing_quay", F.col("quay_id").isNull()),
-                  ("implausible_arrival_delay", (F.col("arrival_delay_s") < -1800) | (F.col("arrival_delay_s") > 21600)),
-                  ("implausible_departure_delay", (F.col("departure_delay_s") < -1800) | (F.col("departure_delay_s") > 21600)),
+                  ("implausible_arrival_delay", implausible("arrival_delay_s")),
+                  ("implausible_departure_delay", implausible("departure_delay_s")),
                   ("missing_reported_quay", F.col("has_realtime") & F.col("reported_quay_id").isNull()),
                   ("nonpositive_call_order", F.col("call_order") <= 0),
                   ("departure_before_arrival", F.col("actual_departure_at") < F.col("actual_arrival_at")),
-                  ("missing_aimed_time", F.col("has_realtime") & F.col("aimed_arrival_at").isNull() & F.col("aimed_departure_at").isNull()))
+                  ("missing_aimed_time", F.col("has_realtime") & F.col("aimed_arrival_at").isNull()
+                   & F.col("aimed_departure_at").isNull()))
 
 
 def asof_intervals(df, key, actual_column=None):
@@ -207,7 +215,8 @@ def asof_intervals(df, key, actual_column=None):
         F.col("recorded_at"), F.col("received_at"), F.col("payload_sha256"), F.col("entity_index")]
     df = df.withColumn("_priority", F.struct(*priority))
     at_time = Window.partitionBy(*(key + ["available_at"])).orderBy(F.col("_priority").desc())
-    df = df.withColumn("_same_time", F.row_number().over(at_time)).filter(F.col("_same_time") == 1).drop("_same_time")
+    df = df.withColumn("_same_time", F.row_number().over(at_time)) \
+        .filter(F.col("_same_time") == 1).drop("_same_time")
     knowledge = Window.partitionBy(*key).orderBy("available_at")
     seen = knowledge.rowsBetween(Window.unboundedPreceding, Window.currentRow)
     df = df.withColumn("_best_seen", F.max("_priority").over(seen)) \
@@ -223,56 +232,59 @@ def build_predictions(versions, final_calls, leads=LEAD_MINUTES):
     a later actual or cancellation-only update.
     """
     F = functions()
+
+    def known_at_cutoff(state, key):
+        """The state's version that was the newest one known at the target's cutoff."""
+        condition = (F.col(f"{state}.available_at") <= F.col("t.cutoff_at")) & \
+            (F.col(f"{state}.next_available_at").isNull() | (F.col("t.cutoff_at") < F.col(f"{state}.next_available_at")))
+        for column in key:
+            condition &= F.col(f"{state}.{column}") == F.col(f"t.{column}")
+        return condition
+
     journey_states = asof_intervals(versions.filter(F.col("kind") == "journey"), JOURNEY_KEY).alias("j")
     parts = []
     for event in ("arrival", "departure"):
         v = versions.filter(F.col("kind") == "call").select(
-            *CALL_KEY, "recorded_at", "received_at", "payload_sha256", "source_file", "bronze_run_id", "entity_index", "dq_issue",
-            F.col(f"expected_{event}_at").alias("predicted_at"),
+            *CALL_KEY, "recorded_at", "received_at", "payload_sha256", "source_file", "bronze_run_id", "entity_index",
+            "dq_issue", F.col(f"expected_{event}_at").alias("predicted_at"),
             F.col(f"actual_{event}_at").alias("known_actual_at"), "call_cancelled", "journey_cancelled")
         # One state at each knowledge time; retain states without a prediction so
         # they terminate the preceding state's interval.
-        v = asof_intervals(v, CALL_KEY, actual_column="known_actual_at")
-        target = final_calls.select(*CALL_KEY,
-            F.coalesce(f"planned_{event}_at", f"aimed_{event}_at").alias("planned_target"),
-            F.col(f"actual_{event}_at").alias("actual_target"))
-        target = target.select(*CALL_KEY, F.explode(F.array(
-            F.struct(F.lit("planned").alias("reference"), F.col("planned_target").alias("target_at")),
-            F.struct(F.lit("actual").alias("reference"), F.col("actual_target").alias("target_at")))).alias("target")) \
+        v = asof_intervals(v, CALL_KEY, actual_column="known_actual_at").alias("v")
+        target = final_calls.select(*CALL_KEY, F.explode(F.array(
+            F.struct(F.lit("planned").alias("reference"),
+                     F.coalesce(f"planned_{event}_at", f"aimed_{event}_at").alias("target_at")),
+            F.struct(F.lit("actual").alias("reference"), F.col(f"actual_{event}_at").alias("target_at")),
+        )).alias("target")) \
             .select(*CALL_KEY, "target.*").filter(F.col("target_at").isNotNull()) \
             .withColumn("lead_minutes", F.explode(F.array(*[F.lit(n) for n in leads]))) \
-            .withColumn("cutoff_at", F.timestamp_seconds(F.col("target_at").cast("double") - F.col("lead_minutes") * 60))
-        target, v = target.alias("t"), v.alias("v")
-        condition = (F.col("v.available_at") <= F.col("t.cutoff_at")) & \
-            (F.col("v.next_available_at").isNull() | (F.col("t.cutoff_at") < F.col("v.next_available_at")))
-        for key in CALL_KEY:
-            condition = condition & (F.col("v." + key) == F.col("t." + key))
+            .withColumn("cutoff_at", F.timestamp_seconds(F.col("target_at").cast("double") - F.col("lead_minutes") * 60)) \
+            .alias("t")
         # Keep planned targets even when no call update was known: a journey
         # cancellation can independently provide their state at the cutoff.
-        joined = target.join(v, condition, "left").filter(F.col("v.known_actual_at").isNull())
-        journey_condition = (F.col("j.available_at") <= F.col("t.cutoff_at")) & \
-            (F.col("j.next_available_at").isNull() | (F.col("t.cutoff_at") < F.col("j.next_available_at")))
-        for key in JOURNEY_KEY:
-            journey_condition &= F.col("j." + key) == F.col("t." + key)
-        joined = joined.join(journey_states, journey_condition, "left") \
-            .filter(F.col("v.predicted_at").isNotNull() | (F.col("v.call_cancelled") == True) | (F.col("j.journey_cancelled") == True))
-        parts.append(joined.select(*[F.col("t." + c).alias(c) for c in CALL_KEY],
-                     F.lit(event).alias("event"), "t.reference", "t.target_at", "t.lead_minutes", "t.cutoff_at",
-                     "v.predicted_at", F.greatest("v.available_at", "j.available_at").alias("available_at"),
-                     F.coalesce("v.recorded_at", "j.recorded_at").alias("recorded_at"),
-                     F.coalesce("v.received_at", "j.received_at").alias("received_at"),
-                     "v.call_cancelled", "j.journey_cancelled",
-                     F.col("j.recorded_at").alias("journey_recorded_at"), F.col("j.received_at").alias("journey_received_at"),
-                     F.col("j.payload_sha256").alias("journey_payload_sha256"),
-                     F.coalesce("v.payload_sha256", "j.payload_sha256").alias("payload_sha256"),
-                     F.coalesce("v.source_file", "j.source_file").alias("source_file"),
-                     F.coalesce("v.bronze_run_id", "j.bronze_run_id").alias("bronze_run_id"),
-                     F.sort_array(F.array_distinct(F.concat(F.coalesce(F.col("v.dq_issue"), empty_issues()),
-                                                          F.coalesce(F.col("j.dq_issue"), empty_issues())))).alias("dq_issue")))
+        joined = target.join(v, known_at_cutoff("v", CALL_KEY), "left").filter(F.col("v.known_actual_at").isNull()) \
+            .join(journey_states, known_at_cutoff("j", JOURNEY_KEY), "left") \
+            .filter(F.col("v.predicted_at").isNotNull() | (F.col("v.call_cancelled") == True)
+                    | (F.col("j.journey_cancelled") == True))
+        parts.append(joined.select(
+            *[F.col("t." + c).alias(c) for c in CALL_KEY],
+            F.lit(event).alias("event"), "t.reference", "t.target_at", "t.lead_minutes", "t.cutoff_at",
+            "v.predicted_at", F.greatest("v.available_at", "j.available_at").alias("available_at"),
+            F.coalesce("v.recorded_at", "j.recorded_at").alias("recorded_at"),
+            F.coalesce("v.received_at", "j.received_at").alias("received_at"),
+            "v.call_cancelled", "j.journey_cancelled",
+            F.col("j.recorded_at").alias("journey_recorded_at"), F.col("j.received_at").alias("journey_received_at"),
+            F.col("j.payload_sha256").alias("journey_payload_sha256"),
+            F.coalesce("v.payload_sha256", "j.payload_sha256").alias("payload_sha256"),
+            F.coalesce("v.source_file", "j.source_file").alias("source_file"),
+            F.coalesce("v.bronze_run_id", "j.bronze_run_id").alias("bronze_run_id"),
+            F.sort_array(F.array_distinct(F.concat(F.coalesce(F.col("v.dq_issue"), empty_issues()),
+                                                   F.coalesce(F.col("j.dq_issue"), empty_issues())))).alias("dq_issue")))
     return parts[0].unionByName(parts[1])
 
 
 def quarantine_rows(df, feed):
+    """Rejected rows of any kind in one shape: where they came from, why, and the row as JSON."""
     F = functions()
     return df.select(F.lit(feed).alias("feed"), F.col("kind").alias("record_kind"), "source_date", "received_at",
                      "source_file", "payload_sha256", "record_sha256", "bronze_run_id", "dq_issue",
@@ -280,6 +292,8 @@ def quarantine_rows(df, feed):
 
 
 def stage_table(df, stage, table, day, rid, key, partition="operating_date", metadata=None):
+    """Write one table's partition to the staging directory, then check it from what was written:
+    a unique key, every row in the run's partition. Returns (written frame, stats for the record)."""
     F = functions()
     path = stage / table / f"{partition}={day}"
     if partition not in df.columns:
@@ -291,13 +305,15 @@ def stage_table(df, stage, table, day, rid, key, partition="operating_date", met
     written = df.sparkSession.read.parquet(str(path))
     if key:
         assert_unique(written, key, table)
+    elsewhere = F.col(partition).isNull() | (F.col(partition) != F.lit(day))
     stats = written.agg(F.count("*").alias("rows"),
-                         F.sum((F.size("dq_issue") > 0).cast("long")).alias("flagged_rows"),
-                         F.sum((F.col(partition).isNull() | (F.col(partition) != F.lit(day))).cast("long")).alias("wrong_partition_rows")).first().asDict()
+                        F.sum((F.size("dq_issue") > 0).cast("long")).alias("flagged_rows"),
+                        F.sum(elsewhere.cast("long")).alias("wrong_partition_rows")).first().asDict()
     if stats.pop("wrong_partition_rows"):
         raise ValueError(f"{table}: rows do not belong to {partition}={day}")
     stats["flagged_rows"] = stats["flagged_rows"] or 0
-    stats["issues"] = {r["issue"]: r["count"] for r in written.select(F.explode("dq_issue").alias("issue")).groupBy("issue").count().collect()}
+    issue_counts = written.select(F.explode("dq_issue").alias("issue")).groupBy("issue").count().collect()
+    stats["issues"] = {r["issue"]: r["count"] for r in issue_counts}
     stats["parquet_bytes"] = sum(p.stat().st_size for p in path.glob("*.parquet"))
     log.info("%s: %s", table, stats)
     return written, stats
@@ -345,7 +361,22 @@ def publish(stage, root, record, day, runs=None):
         raise
 
 
+def audit_bronze(frame):
+    """One Bronze day partition: (rows by _bronze_status, the hours it holds, the Bronze runs that
+    wrote it). Reads narrow columns only."""
+    F = functions()
+    audit = frame.groupBy("_bronze_status", "_bronze_run_id").agg(
+        F.count("*").alias("rows"), F.collect_set("hour").alias("hours")).collect()
+    statuses = {}
+    for r in audit:
+        statuses[r["_bronze_status"]] = statuses.get(r["_bronze_status"], 0) + r["rows"]
+    return statuses, {h for r in audit for h in r["hours"]}, sorted({r["_bronze_run_id"] for r in audit})
+
+
 def read_bronze(spark, output, feed, day, allow_partial, record):
+    """The Bronze days one feed needs for the operating day, by source day, with their coverage
+    in the run record. ET needs the day before and after too: an operating day spans UTC days.
+    Returns ({source day: frame}, whether every hour is there)."""
     F = functions()
     days = [day + timedelta(days=n) for n in (-1, 0, 1)] if feed == "et" else [day]
     frames = {}
@@ -356,28 +387,25 @@ def read_bronze(spark, output, feed, day, allow_partial, record):
             evidence[str(source_day)] = {"missing_partition": True, "missing_hours": HOURS}
             continue
         frame = spark.read.parquet(str(folder))
-        audit = frame.groupBy("_bronze_status", "_bronze_run_id").agg(
-            F.count("*").alias("rows"), F.collect_set("hour").alias("hours")).collect()
-        hours = {h for r in audit for h in r["hours"]}
-        missing = sorted(set(HOURS) - hours)
-        statuses = {}
-        for r in audit:
-            statuses[r["_bronze_status"]] = statuses.get(r["_bronze_status"], 0) + r["rows"]
-        evidence[str(source_day)] = {"missing_hours": missing, "rows": sum(r["rows"] for r in audit),
-                                     "bronze_status": statuses, "bronze_run_ids": sorted({r["_bronze_run_id"] for r in audit}),
+        statuses, hours, run_ids = audit_bronze(frame)
+        evidence[str(source_day)] = {"missing_hours": sorted(set(HOURS) - hours), "rows": sum(statuses.values()),
+                                     "bronze_status": statuses, "bronze_run_ids": run_ids,
                                      "parquet_bytes": sum(p.stat().st_size for p in folder.glob("*.parquet"))}
         frames[source_day] = frame.withColumn("source_date", F.lit(str(source_day)))
     record["inputs"][feed] = evidence
     complete = all(not entry["missing_hours"] for entry in evidence.values())
     if not complete and not allow_partial:
-        raise ValueError(f"incomplete {feed} Bronze coverage: {evidence}; use --allow-partial only for exploration")
+        raise ValueError(f"incomplete {feed} Bronze coverage: {evidence}; "
+                         "use --allow-partial only for exploration")
     if not frames:
         raise FileNotFoundError(f"no completed Bronze input for {feed} near {day}")
 
     def source(frame):
+        # What identifies a row without a payload: its raw line, or failing that where it landed.
         raw_line = F.col("_bronze_raw_line") if "_bronze_raw_line" in frame.columns else F.lit(None).cast("string")
+        landed = F.to_json(F.struct("received_at", "_bronze_status", "_bronze_source_file"))
         frame = frame.withColumn("record_sha256", F.coalesce("_bronze_payload_sha256", F.sha2(raw_line, 256),
-            F.sha2(F.to_json(F.struct("received_at", "_bronze_status", "_bronze_source_file")), 256)))
+                                                             F.sha2(landed, 256)))
         return frame.select("received_at", "payload", "_bronze_source_file", "_bronze_payload_sha256",
                             "record_sha256", "_bronze_run_id", "_bronze_status", "source_date")
     return {source_day: source(frame) for source_day, frame in frames.items()}, complete
@@ -387,12 +415,12 @@ def decode_day(spark, root, stage, feed, source_day, source, evidence):
     """Typed versions of one Bronze day, decoded once: ET needs D-1, D and D+1 for every operating
     day, so three runs would otherwise parse the same XML. Reused unless Bronze or the decoder changed.
     """
-    F = functions()
     folder = root / "_decoded" / feed / f"source_date={source_day}"
     audit = evidence[str(source_day)]
     # Any change to the decoder's source decodes again: no version number to forget to bump.
     decoder = hashlib.sha256(Path(__file__).with_name("silver_parse.py").read_bytes()).hexdigest()
-    stamp = dict(decoder=decoder, bronze_run_ids=audit["bronze_run_ids"], rows=audit["rows"], parquet_bytes=audit["parquet_bytes"])
+    stamp = dict(decoder=decoder, bronze_run_ids=audit["bronze_run_ids"], rows=audit["rows"],
+                 parquet_bytes=audit["parquet_bytes"])
     marker = folder / "_decoded.json"
     if marker.exists() and json.loads(marker.read_text()) == stamp:
         return folder
@@ -413,6 +441,162 @@ def decode_day(spark, root, stage, feed, source_day, source, evidence):
     return folder
 
 
+def silver_spark(app, output_dir, master, shuffle_partitions):
+    """Bronze's Spark settings, with Spark's scratch space on the data volume next to the output,
+    not on the small root disk. Environment variables override the defaults for one run."""
+    scratch = Path(os.environ.get("DAT535_SPARK_LOCAL_DIR", str(Path(output_dir).parent / "spark-scratch")))
+    scratch.mkdir(parents=True, exist_ok=True)
+    return bronze_spark(app, settings={
+        "spark.master": os.environ.get("SPARK_MASTER", master),
+        "spark.local.dir": str(scratch),
+        "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", shuffle_partitions)})
+
+
+def reference_snapshots(landing, day):
+    """The archived NeTEx and NSR snapshots for the day: {dataset: (snapshot day, zip)}, and their
+    evidence for the run record. The checksum comes from the collector's manifest when it has one."""
+    snapshots = {dataset: archived_file(landing, dataset, day) for dataset in ("netex", "nsr")}
+    evidence = {}
+    for dataset, (snapshot_day, path) in snapshots.items():
+        entry = evidence[dataset] = {"snapshot_date": str(snapshot_day), "file": str(path),
+                                     "bytes": path.stat().st_size}
+        meta = path.with_name(path.name + ".meta.json")
+        if meta.exists():
+            archived = json.loads(meta.read_text())
+            if archived["bytes"] != entry["bytes"]:
+                raise ValueError(f"archive size differs from collector manifest: {path}")
+            entry["sha256"] = archived["sha256"]
+            entry["available_at"] = archived.get("finished_at")
+        else:
+            with path.open("rb") as source:
+                entry["sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
+    return snapshots, evidence
+
+
+def decode_references(spark, work, netex_path, nsr_path, day):
+    """The day's plan from the NeTEx zip and the stops from the NSR zip, one zip member per task,
+    as reference rows (silver_reference.reference_schema). Returns (planned, stops)."""
+    F = functions()
+    sc = spark.sparkContext
+    members = plan_members(netex_path)
+    # Shared members also provide operators. They emit no ServiceJourneys.
+    with zipfile.ZipFile(netex_path) as z:
+        members += [(n, None) for n in sorted(z.namelist()) if n.startswith("_") and n.endswith("shared_data.xml")]
+    plan = sc.parallelize(members, min(len(members), sc.defaultParallelism * 4)) \
+        .mapPartitions(lambda it: plan_partition(it, str(netex_path), day))
+    spark.createDataFrame(plan, reference_schema()).write.parquet(str(work / "plan"))
+    planned = spark.read.parquet(str(work / "plan"))
+    if not planned.filter(F.col("kind") == "journey").limit(1).count():
+        raise ValueError(f"archived timetable contains no supported journeys for {day}")
+    with zipfile.ZipFile(nsr_path) as z:
+        stop_members = sorted(n for n in z.namelist() if n.endswith(".xml"))
+    stops = sc.parallelize(stop_members, min(len(stop_members), sc.defaultParallelism)) \
+        .mapPartitions(lambda it: nsr_partition(it, str(nsr_path)))
+    spark.createDataFrame(stops, reference_schema()).write.parquet(str(work / "nsr"))
+    return planned, spark.read.parquet(str(work / "nsr"))
+
+
+def build_dimension(source, table, columns):
+    """One reference table (quay, stop_place, line, operator) at its newest version per id."""
+    F = functions()
+    dim = source.filter(F.col("kind") == table).select(*columns)
+    # Identical references can be repeated in different line members. An
+    # actual conflicting value fails uniqueness instead of picking one.
+    dim = current_reference(dim.drop("source_member").dropDuplicates())
+    if table in {"quay", "stop_place"}:
+        dim = issues(dim, ("missing_coordinates", F.col("latitude").isNull() | F.col("longitude").isNull()),
+                     ("invalid_coordinates", ~F.col("latitude").between(-90, 90)
+                      | ~F.col("longitude").between(-180, 180)))
+    return dim
+
+
+def scope(parsed, feed, day, aliases):
+    """One feed's decoded versions -> (versions Silver keeps, [quarantine rows]). A version without
+    its identity is quarantined, never silently dropped. ET of another operating day is not an
+    error: that day's run owns it."""
+    F = functions()
+    rejected = [quarantine_rows(parsed.filter(F.col("kind") == "quarantine"), feed)]
+    parsed = parsed.filter(~F.col("kind").isin("quarantine", "control"))
+    if feed == "sx":
+        parsed = issues(parsed, ("missing_situation_id", F.col("situation_id").isNull()),
+                        ("missing_participant_id", F.col("participant_id").isNull()))
+        valid = F.col("situation_id").isNotNull() & F.col("participant_id").isNotNull()
+    else:
+        if feed == "et":
+            # Explicitly another day. Pushed down to the Parquet scan.
+            parsed = parsed.filter((F.col("operating_date") == F.lit(day)) | F.col("operating_date").isNull())
+        parsed = normalize_journeys(parsed, aliases)
+        parsed = issues(parsed, ("missing_operating_date", F.col("operating_date").isNull()),
+                        ("missing_journey_id", F.col("journey_id").isNull()))
+        if feed == "et":
+            parsed = issues(parsed, ("missing_call_order", (F.col("kind") == "call") & F.col("call_order").isNull()),
+                            ("missing_recorded_at", F.col("recorded_at").isNull()))
+            valid = F.col("operating_date").isNotNull() & F.col("journey_id").isNotNull() & \
+                ((F.col("kind") != "call") | F.col("call_order").isNotNull())
+        else:
+            parsed = issues(parsed, ("missing_vehicle_id", F.col("vehicle_id").isNull()),
+                            ("missing_codespace", F.col("codespace").isNull()),
+                            ("missing_last_updated_at", F.col("last_updated_at").isNull()))
+            valid = F.col("vehicle_id").isNotNull() & F.col("codespace").isNotNull() & \
+                F.col("last_updated_at").isNotNull()
+    rejected.append(quarantine_rows(parsed.filter(~valid), feed))
+    parsed = parsed.filter(valid)
+    if feed == "et":
+        # An undated journey resolved to another day in normalize_journeys.
+        parsed = parsed.filter(F.col("operating_date") == F.lit(day))
+    return parsed, rejected
+
+
+def build_vehicles(versions):
+    F = functions()
+    vehicles = latest(versions, ["codespace", "vehicle_id", "last_updated_at"])
+    return issues(vehicles,
+                  ("missing_coordinates", F.col("latitude").isNull() | F.col("longitude").isNull()),
+                  ("invalid_coordinates", ~F.col("latitude").between(-90, 90) | ~F.col("longitude").between(-180, 180)),
+                  ("invalid_bearing", ~F.col("bearing").between(0, 360)),
+                  ("negative_speed", F.col("speed") < 0),
+                  ("invalid_progress", ~F.col("progress_pct").between(0, 100)))
+
+
+def build_situations(versions):
+    """One row per situation version, with when it was first received."""
+    from pyspark.sql import Window
+    F = functions()
+    key = ["participant_id", "situation_id", "version_key"]
+    sx = versions.withColumn("first_received_at", F.min("received_at").over(Window.partitionBy(*key)))
+    sx = latest(sx, key)
+    return issues(sx, ("invalid_validity_period", F.exists("validity_periods", lambda p: p.end_at < p.start_at)))
+
+
+def call_reconciliation(record, calls):
+    """How the retained call versions reduce to stop calls, for the run record."""
+    F = functions()
+    coverage = {r["realtime_status"]: r["count"] for r in calls.groupBy("realtime_status").count().collect()}
+    versions = record["inputs"]["et"]["retained_versions"].get("call", 0)
+    reported = coverage.get("matched", 0) + coverage.get("realtime_only", 0)
+    record["call_coverage"] = coverage
+    record["call_reconciliation"] = {
+        "input_versions": versions,
+        "planned_calls": coverage.get("matched", 0) + coverage.get("no_realtime", 0),
+        "reported_calls": reported,
+        "duplicate_versions_removed": versions - reported}
+    record["actual_equals_aimed_by_operator"] = [r.asDict() for r in calls.groupBy("operator_id").agg(
+        F.count("actual_departure_at").alias("actual_departures"),
+        F.sum(F.coalesce(F.col("actual_departure_equals_aimed"), F.lit(False)).cast("long")).alias("actual_equals_aimed"),
+    ).collect()]
+
+
+def finish(record, complete, allow_partial, started):
+    """Status and readiness of a Silver run that got through: ready only with complete input and no
+    source contract errors. A strict run with contract errors fails instead of publishing."""
+    record["finished_at"] = iso(utcnow())
+    record["elapsed_s"] = round(time.monotonic() - started, 3)
+    record["status"] = "complete" if complete and not record["contract_errors"] else "partial"
+    record["ready"] = record["status"] == "complete"
+    if record["contract_errors"] and not allow_partial:
+        raise ValueError(f"source contract errors: {record['contract_errors']}")
+
+
 def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MINUTES):
     F = functions()
     root = Path(output_dir) / "silver"
@@ -427,27 +611,10 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
     history = root / "_runs" / f"operating_date={day}" / f"{rid}.json"
     owned_spark = spark is None
     try:
-        snapshots = {dataset: archived_file(landing, dataset, day) for dataset in ("netex", "nsr")}
-        record["references"] = {k: {"snapshot_date": str(d), "file": str(p), "bytes": p.stat().st_size}
-                                for k, (d, p) in snapshots.items()}
-        for dataset, (_, path) in snapshots.items():
-            meta = path.with_name(path.name + ".meta.json")
-            if meta.exists():
-                archived = json.loads(meta.read_text())
-                if archived["bytes"] != path.stat().st_size:
-                    raise ValueError(f"archive size differs from collector manifest: {path}")
-                record["references"][dataset]["sha256"] = archived["sha256"]
-                record["references"][dataset]["available_at"] = archived.get("finished_at")
-            else:
-                with path.open("rb") as source:
-                    record["references"][dataset]["sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
+        snapshots, record["references"] = reference_snapshots(landing, day)
+        (netex_day, netex_path), (nsr_day, nsr_path) = snapshots["netex"], snapshots["nsr"]
         if spark is None:
-            scratch = Path(os.environ.get("DAT535_SPARK_LOCAL_DIR", str(Path(output_dir).parent / "spark-scratch")))
-            scratch.mkdir(parents=True, exist_ok=True)
-            spark = bronze_spark("DAT535-Silver-Entur", settings={
-                "spark.master": os.environ.get("SPARK_MASTER", "local[4]"),
-                "spark.local.dir": str(scratch),
-                "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", "32")})
+            spark = silver_spark("DAT535-Silver-Entur", output_dir, "local[4]", "32")
         for module in ("bronze.py", "silver.py", "silver_parse.py", "silver_reference.py"):
             spark.sparkContext.addPyFile(str(Path(__file__).with_name(module)))
         stage.mkdir(parents=True)
@@ -455,27 +622,7 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
         for feed in DATASETS:
             inputs[feed], covered = read_bronze(spark, output_dir, feed, day, allow_partial, record)
             complete &= covered
-        netex_day, netex_path = snapshots["netex"]
-        nsr_day, nsr_path = snapshots["nsr"]
-        members = plan_members(netex_path)
-        # Shared members also provide operators. They emit no ServiceJourneys.
-        with zipfile.ZipFile(netex_path) as z:
-            shared = sorted(n for n in z.namelist() if n.startswith("_") and n.endswith("shared_data.xml"))
-        members += [(s, None) for s in shared]
-        plan_rdd = spark.sparkContext.parallelize(members, min(len(members), spark.sparkContext.defaultParallelism * 4)) \
-            .mapPartitions(lambda it: plan_partition(it, str(netex_path), day))
-        plan_path = stage / "_work" / "plan"
-        spark.createDataFrame(plan_rdd, reference_schema()).write.parquet(str(plan_path))
-        planned = spark.read.parquet(str(plan_path))
-        if not planned.filter(F.col("kind") == "journey").limit(1).count():
-            raise ValueError(f"archived timetable contains no supported journeys for {day}")
-        with zipfile.ZipFile(nsr_path) as z:
-            nsr_members = sorted(n for n in z.namelist() if n.endswith(".xml"))
-        nsr_rdd = spark.sparkContext.parallelize(nsr_members, min(len(nsr_members), spark.sparkContext.defaultParallelism)) \
-            .mapPartitions(lambda it: nsr_partition(it, str(nsr_path)))
-        nsr_work = stage / "_work" / "nsr"
-        spark.createDataFrame(nsr_rdd, reference_schema()).write.parquet(str(nsr_work))
-        stops = spark.read.parquet(str(nsr_work))
+        planned, stops = decode_references(spark, stage / "_work", netex_path, nsr_path, day)
 
         def save(df, table, key, partition="operating_date", metadata=None):
             written, stats = stage_table(df, stage, table, day, rid, key, partition, metadata)
@@ -485,121 +632,71 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
 
         dimensions = {}
         for table, source, columns in (
-            ("quay", stops, ["id", "version", "name", "stop_place_id", "latitude", "longitude", "source_member", "dq_issue"]),
-            ("stop_place", stops, ["id", "version", "name", "parent_stop_place_id", "latitude", "longitude", "source_member", "dq_issue"]),
-            ("line", planned, ["id", "version", "name", "operator_id", "mode", "public_code", "is_flexible", "source_member", "dq_issue"]),
+            ("quay", stops, ["id", "version", "name", "stop_place_id", "latitude", "longitude", "source_member",
+                             "dq_issue"]),
+            ("stop_place", stops, ["id", "version", "name", "parent_stop_place_id", "latitude", "longitude",
+                                   "source_member", "dq_issue"]),
+            ("line", planned, ["id", "version", "name", "operator_id", "mode", "public_code", "is_flexible",
+                               "source_member", "dq_issue"]),
             ("operator", planned, ["id", "version", "name", "source_member", "dq_issue"])):
-            dim = source.filter(F.col("kind") == table).select(*columns)
-            # Identical references can be repeated in different line members. An
-            # actual conflicting value fails uniqueness instead of picking one.
-            dim = current_reference(dim.drop("source_member").dropDuplicates())
-            if table in {"quay", "stop_place"}:
-                dim = issues(dim, ("missing_coordinates", F.col("latitude").isNull() | F.col("longitude").isNull()),
-                             ("invalid_coordinates", ~F.col("latitude").between(-90, 90) | ~F.col("longitude").between(-180, 180)))
-            dimensions[table] = save(dim, table, ["id"], metadata={"snapshot_date": nsr_day if table in {"quay", "stop_place"} else netex_day})
-            if table in {"quay", "stop_place", "line"} and record["tables"][table]["rows"] == 0:
+            snapshot = nsr_day if source is stops else netex_day
+            dimensions[table] = save(build_dimension(source, table, columns), table, ["id"],
+                                     metadata={"snapshot_date": snapshot})
+            if table != "operator" and record["tables"][table]["rows"] == 0:
                 raise ValueError(f"reference contract: no {table} entities decoded")
-        aliases = planned.filter(F.col("kind") == "journey").select(*JOURNEY_KEY,
-                         F.explode("dated_journey_ids").alias("dated_journey_id")).dropDuplicates()
+        plan_journeys = planned.filter(F.col("kind") == "journey")
+        aliases = plan_journeys.select(*JOURNEY_KEY, F.explode("dated_journey_ids").alias("dated_journey_id")) \
+            .dropDuplicates()
         assert_unique(aliases, ["dated_journey_id"], "dated journey mapping")
         aliases = save(aliases.withColumn("dq_issue", empty_issues()), "dated_journey", ["dated_journey_id"],
                        metadata={"snapshot_date": netex_day})
-        plan_journey = planned.filter(F.col("kind") == "journey").select(
-            *JOURNEY_KEY, "line_id", "operator_id", "direction_type", "mode", "journey_pattern_id", "service_alteration",
-            "dated_journey_ids", "is_flexible", "source_member", "dq_issue")
+        plan_journey = plan_journeys.select(
+            *JOURNEY_KEY, "line_id", "operator_id", "direction_type", "mode", "journey_pattern_id",
+            "service_alteration", "dated_journey_ids", "is_flexible", "source_member", "dq_issue")
         plan_call = planned.filter(F.col("kind") == "call").select(
-            *CALL_KEY, "line_id", "operator_id", "direction_type", "mode", "quay_id", "planned_arrival_at", "planned_departure_at",
-            "earliest_departure_at", "latest_arrival_at", "is_flexible", "for_boarding", "for_alighting", "source_member", "dq_issue")
+            *CALL_KEY, "line_id", "operator_id", "direction_type", "mode", "quay_id", "planned_arrival_at",
+            "planned_departure_at", "earliest_departure_at", "latest_arrival_at", "is_flexible", "for_boarding",
+            "for_alighting", "source_member", "dq_issue")
         assert_unique(plan_journey, JOURNEY_KEY, "plan journeys")
         assert_unique(plan_call, CALL_KEY, "plan calls")
-        quarantine = []
-        decoded = {}
+
+        quarantine, versions = [], {}
         # Check the small feeds before spending hours decoding nationwide ET.
         for feed in ("sx", "vehicles", "et"):
-            source = inputs[feed]
-            parsed = spark.read.parquet(*[str(decode_day(spark, root, stage, feed, source_day, frame, record["inputs"][feed]))
-                                          for source_day, frame in source.items()])
-            record["inputs"][feed]["decoded"] = {r["kind"]: r["count"] for r in parsed.groupBy("kind").count().collect()}
-            bad = parsed.filter(F.col("kind") == "quarantine")
-            quarantine.append(quarantine_rows(bad, feed))
-            parsed = parsed.filter(~F.col("kind").isin("quarantine", "control"))
-            if feed == "et":
-                # Explicitly another day: that day's run owns it. Pushed down to the Parquet scan.
-                parsed = parsed.filter((F.col("operating_date") == F.lit(day)) | F.col("operating_date").isNull())
-            if feed in {"et", "vehicles"}:
-                parsed = normalize_journeys(parsed, aliases)
-                parsed = issues(parsed, ("missing_operating_date", F.col("operating_date").isNull()),
-                                ("missing_journey_id", F.col("journey_id").isNull()))
-                if feed == "et":
-                    valid = F.col("operating_date").isNotNull() & F.col("journey_id").isNotNull()
-                    parsed = issues(parsed, ("missing_call_order", (F.col("kind") == "call") & F.col("call_order").isNull()),
-                                    ("missing_recorded_at", F.col("recorded_at").isNull()))
-                    valid &= (F.col("kind") != "call") | F.col("call_order").isNotNull()
-                else:
-                    parsed = issues(parsed, ("missing_vehicle_id", F.col("vehicle_id").isNull()),
-                                    ("missing_codespace", F.col("codespace").isNull()),
-                                    ("missing_last_updated_at", F.col("last_updated_at").isNull()))
-                    valid = F.col("vehicle_id").isNotNull() & F.col("codespace").isNotNull() & F.col("last_updated_at").isNotNull()
-                quarantine.append(quarantine_rows(parsed.filter(~valid), feed))
-                parsed = parsed.filter(valid)
-                if feed == "et":
-                    parsed = parsed.filter(F.col("operating_date") == F.lit(day))
-            else:
-                parsed = issues(parsed, ("missing_situation_id", F.col("situation_id").isNull()),
-                                ("missing_participant_id", F.col("participant_id").isNull()))
-                valid = F.col("situation_id").isNotNull() & F.col("participant_id").isNotNull()
-                quarantine.append(quarantine_rows(parsed.filter(~valid), feed))
-                parsed = parsed.filter(valid)
-            scoped_work = stage / "_work" / (feed + "-scoped")
-            parsed.write.parquet(str(scoped_work))
-            decoded[feed] = spark.read.parquet(str(scoped_work))
-            record["inputs"][feed]["retained_versions"] = {r["kind"]: r["count"] for r in
-                decoded[feed].groupBy("kind").count().collect()}
+            evidence = record["inputs"][feed]
+            parsed = spark.read.parquet(*[str(decode_day(spark, root, stage, feed, source_day, frame, evidence))
+                                          for source_day, frame in inputs[feed].items()])
+            evidence["decoded"] = {r["kind"]: r["count"] for r in parsed.groupBy("kind").count().collect()}
+            retained, rejected = scope(parsed, feed, day, aliases)
+            quarantine += rejected
+            # Written and read back: several tables read these, so the alias join and filters run once.
+            retained.write.parquet(str(stage / "_work" / f"{feed}-scoped"))
+            versions[feed] = spark.read.parquet(str(stage / "_work" / f"{feed}-scoped"))
+            evidence["retained_versions"] = {r["kind"]: r["count"]
+                                             for r in versions[feed].groupBy("kind").count().collect()}
+
         metadata = {"netex_snapshot_date": netex_day, "nsr_snapshot_date": nsr_day,
                     "netex_available_at": record["references"]["netex"].get("available_at"),
                     "nsr_available_at": record["references"]["nsr"].get("available_at")}
-        journeys = conform(build_journeys(decoded["et"], plan_journey), dimensions["quay"], dimensions["line"])
+        journeys = conform(build_journeys(versions["et"], plan_journey), dimensions["quay"], dimensions["line"])
         journeys = save(journeys, "journey", JOURNEY_KEY, metadata=metadata)
-        calls = conform(build_calls(decoded["et"], plan_call, journeys), dimensions["quay"], dimensions["line"])
+        calls = conform(build_calls(versions["et"], plan_call, journeys), dimensions["quay"], dimensions["line"])
         calls = save(calls, "stop_call", CALL_KEY, metadata=metadata)
-        record["call_coverage"] = {r["realtime_status"]: r["count"] for r in calls.groupBy("realtime_status").count().collect()}
-        record["call_reconciliation"] = {
-            "input_versions": record["inputs"]["et"]["retained_versions"].get("call", 0),
-            "planned_calls": record["call_coverage"].get("matched", 0) + record["call_coverage"].get("no_realtime", 0),
-            "reported_calls": record["call_coverage"].get("matched", 0) + record["call_coverage"].get("realtime_only", 0)}
-        record["call_reconciliation"]["duplicate_versions_removed"] = record["call_reconciliation"]["input_versions"] - record["call_reconciliation"]["reported_calls"]
-        record["actual_equals_aimed_by_operator"] = [r.asDict() for r in calls.groupBy("operator_id").agg(
-            F.count("actual_departure_at").alias("actual_departures"),
-            F.sum(F.coalesce(F.col("actual_departure_equals_aimed"), F.lit(False)).cast("long")).alias("actual_equals_aimed")).collect()]
-        predictions = build_predictions(decoded["et"], calls, leads)
-        save(predictions, "call_prediction", CALL_KEY + ["event", "reference", "lead_minutes"], metadata=metadata)
-        vehicles = latest(decoded["vehicles"], ["codespace", "vehicle_id", "last_updated_at"])
-        vehicles = issues(vehicles, ("missing_coordinates", F.col("latitude").isNull() | F.col("longitude").isNull()),
-                          ("invalid_coordinates", ~F.col("latitude").between(-90, 90) | ~F.col("longitude").between(-180, 180)),
-                          ("invalid_bearing", ~F.col("bearing").between(0, 360)),
-                          ("negative_speed", F.col("speed") < 0),
-                          ("invalid_progress", ~F.col("progress_pct").between(0, 100)))
-        vehicles = conform(vehicles, dimensions["quay"], dimensions["line"])
+        call_reconciliation(record, calls)
+        save(build_predictions(versions["et"], calls, leads), "call_prediction",
+             CALL_KEY + ["event", "reference", "lead_minutes"], metadata=metadata)
+        vehicles = conform(build_vehicles(versions["vehicles"]), dimensions["quay"], dimensions["line"])
         save(vehicles.drop("kind", "entity_json", "source_date"), "vehicle_position",
              ["codespace", "vehicle_id", "last_updated_at"], partition="observation_date", metadata=metadata)
-        from pyspark.sql import Window
-        sx = decoded["sx"].withColumn("first_received_at", F.min("received_at").over(
-            Window.partitionBy("participant_id", "situation_id", "version_key")))
-        sx = latest(sx, ["participant_id", "situation_id", "version_key"])
-        sx = issues(sx, ("invalid_validity_period", F.exists("validity_periods", lambda p: p.end_at < p.start_at)))
-        save(sx.drop("kind", "entity_json", "source_date"), "sx_situation", ["participant_id", "situation_id", "version_key"], partition="observation_date")
+        save(build_situations(versions["sx"]).drop("kind", "entity_json", "source_date"), "sx_situation",
+             ["participant_id", "situation_id", "version_key"], partition="observation_date")
         rejected = quarantine[0]
         for frame in quarantine[1:]:
             rejected = rejected.unionByName(frame)
         save(rejected, "quarantine", None)
-        contract_errors = record["tables"]["quarantine"]["issues"]
-        record["contract_errors"] = {k: n for k, n in contract_errors.items() if k in CONTRACT_ISSUES}
-        record["finished_at"] = iso(utcnow())
-        record["elapsed_s"] = round(time.monotonic() - started, 3)
-        record["status"] = "complete" if complete and not record["contract_errors"] else "partial"
-        record["ready"] = record["status"] == "complete"
-        if record["contract_errors"] and not allow_partial:
-            raise ValueError(f"source contract errors: {record['contract_errors']}")
+        record["contract_errors"] = {k: n for k, n in record["tables"]["quarantine"]["issues"].items()
+                                     if k in CONTRACT_ISSUES}
+        finish(record, complete, allow_partial, started)
         atomic_json(history, record)
         publish(stage, root, record, day)
         return record
@@ -615,12 +712,15 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
             spark.stop()
 
 
-def main(argv=None):
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", type=Date.fromisoformat, default=(utcnow() - timedelta(days=2)).date(),
-                        help="Norwegian operating day, YYYY-MM-DD (default: two days ago)")
-    parser.add_argument("--allow-partial", action="store_true", help="publish exploration output with ready=false when input is incomplete")
+def cli(doc, run, days_back, date_help, argv=None):
+    """The command line of both Silver jobs: parse --date and --allow-partial, then run."""
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description=doc.splitlines()[0])
+    parser.add_argument("--date", type=Date.fromisoformat, default=(utcnow() - timedelta(days=days_back)).date(),
+                        help=date_help)
+    parser.add_argument("--allow-partial", action="store_true",
+                        help="publish exploration output with ready=false when input is incomplete")
     args = parser.parse_args(argv)
     try:
         run(Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output")),
@@ -629,6 +729,10 @@ def main(argv=None):
         log.error("%s", error)
         return 1
     return 0
+
+
+def main(argv=None):
+    return cli(__doc__, run, 2, "Norwegian operating day, YYYY-MM-DD (default: two days ago)", argv)
 
 
 if __name__ == "__main__":
