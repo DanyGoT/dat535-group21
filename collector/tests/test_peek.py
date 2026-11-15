@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import support  # noqa: F401  (puts collector/ on sys.path)
+import collector_support  # noqa: F401  (puts collector/ on sys.path)
 
 import peek
 

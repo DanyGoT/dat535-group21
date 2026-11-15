@@ -148,7 +148,7 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
 
 
 def main(argv=None):
-    return cli(__doc__, FEEDS, run, argv)
+    return cli(__doc__, FEEDS, run, log, argv)
 
 
 if __name__ == "__main__":

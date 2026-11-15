@@ -6,7 +6,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from support import SparkCase
+from pipeline_support import SparkCase
 
 import gold as G
 

@@ -12,7 +12,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-import support  # noqa: F401  (puts collector/ on sys.path)
+import collector_support  # noqa: F401  (puts collector/ on sys.path)
 
 try:
     import websockets

@@ -363,7 +363,7 @@ def run(landing, output_dir, day, spark=None, allow_partial=False):
 
 
 def main(argv=None):
-    return cli(__doc__, run, 1, "UTC observation day, YYYY-MM-DD (default: yesterday)", argv)
+    return cli(__doc__, run, 1, "UTC observation day, YYYY-MM-DD (default: yesterday)", log, argv)
 
 
 if __name__ == "__main__":

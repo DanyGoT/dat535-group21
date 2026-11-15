@@ -453,14 +453,16 @@ def silver_spark(app, output_dir, master, shuffle_partitions):
         "spark.sql.shuffle.partitions": os.environ.get("DAT535_SHUFFLE_PARTITIONS", shuffle_partitions)})
 
 
-def reference_snapshots(landing, day):
-    """The archived NeTEx and NSR snapshots for the day: {dataset: (snapshot day, zip)}, and their
-    evidence for the run record. The checksum comes from the collector's manifest when it has one."""
+def reference_snapshots(landing, day, record):
+    """The archived NeTEx and NSR snapshots for the day: {dataset: (snapshot day, zip)}. Their
+    evidence goes into the run record first, so a failed check still shows which files it read.
+    The checksum comes from the collector's manifest when it has one."""
     snapshots = {dataset: archived_file(landing, dataset, day) for dataset in ("netex", "nsr")}
-    evidence = {}
-    for dataset, (snapshot_day, path) in snapshots.items():
-        entry = evidence[dataset] = {"snapshot_date": str(snapshot_day), "file": str(path),
-                                     "bytes": path.stat().st_size}
+    record["references"] = {dataset: {"snapshot_date": str(snapshot_day), "file": str(path),
+                                      "bytes": path.stat().st_size}
+                            for dataset, (snapshot_day, path) in snapshots.items()}
+    for dataset, (_, path) in snapshots.items():
+        entry = record["references"][dataset]
         meta = path.with_name(path.name + ".meta.json")
         if meta.exists():
             archived = json.loads(meta.read_text())
@@ -471,7 +473,7 @@ def reference_snapshots(landing, day):
         else:
             with path.open("rb") as source:
                 entry["sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
-    return snapshots, evidence
+    return snapshots
 
 
 def decode_references(spark, work, netex_path, nsr_path, day):
@@ -549,6 +551,7 @@ def scope(parsed, feed, day, aliases):
 
 
 def build_vehicles(versions):
+    """One row per vehicle and update time, its latest copy, with implausible values flagged."""
     F = functions()
     vehicles = latest(versions, ["codespace", "vehicle_id", "last_updated_at"])
     return issues(vehicles,
@@ -612,7 +615,7 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
     history = root / "_runs" / f"operating_date={day}" / f"{rid}.json"
     owned_spark = spark is None
     try:
-        snapshots, record["references"] = reference_snapshots(landing, day)
+        snapshots = reference_snapshots(landing, day, record)
         (netex_day, netex_path), (nsr_day, nsr_path) = snapshots["netex"], snapshots["nsr"]
         if spark is None:
             spark = silver_spark("DAT535-Silver-Entur", output_dir, "local[4]", "32")
@@ -640,7 +643,7 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
             ("line", planned, ["id", "version", "name", "operator_id", "mode", "public_code", "is_flexible",
                                "source_member", "dq_issue"]),
             ("operator", planned, ["id", "version", "name", "source_member", "dq_issue"])):
-            snapshot = nsr_day if source is stops else netex_day
+            snapshot = nsr_day if table in {"quay", "stop_place"} else netex_day
             dimensions[table] = save(build_dimension(source, table, columns), table, ["id"],
                                      metadata={"snapshot_date": snapshot})
             if table != "operator" and record["tables"][table]["rows"] == 0:
@@ -713,8 +716,9 @@ def run(landing, output_dir, day, spark=None, allow_partial=False, leads=LEAD_MI
             spark.stop()
 
 
-def cli(doc, run, days_back, date_help, argv=None):
-    """The command line of both Silver jobs: parse --date and --allow-partial, then run."""
+def cli(doc, run, days_back, date_help, logger, argv=None):
+    """The command line of both Silver jobs: parse --date and --allow-partial, then run. Errors are
+    logged to the job's own logger."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=doc.splitlines()[0])
@@ -727,13 +731,13 @@ def cli(doc, run, days_back, date_help, argv=None):
         run(Path(os.environ.get("DAT535_LANDING_DIR", "landing")), Path(os.environ.get("DAT535_OUTPUT_DIR", "output")),
             args.date, allow_partial=args.allow_partial)
     except (OSError, ValueError) as error:
-        log.error("%s", error)
+        logger.error("%s", error)
         return 1
     return 0
 
 
 def main(argv=None):
-    return cli(__doc__, run, 2, "Norwegian operating day, YYYY-MM-DD (default: two days ago)", argv)
+    return cli(__doc__, run, 2, "Norwegian operating day, YYYY-MM-DD (default: two days ago)", log, argv)
 
 
 if __name__ == "__main__":
