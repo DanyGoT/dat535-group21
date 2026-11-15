@@ -172,9 +172,6 @@ selective restarts belong in the [runbook](../../collector/README.md#what-runs).
   because Spark 3.5 has no native `from_xml`.
 - Layer outputs use `/data/dat535/{prod,dev}/<layer>/`. Memory and spill rules live in [storage](storage.md#memory).
 
-The course template [pipeline.yml](../../.github/workflows/pipeline.yml) also declares manual
-and monthly triggers, but its only job is disabled with `if: false`.
-
 ## Open decisions
 
 See [evidence](../report/evidence/README.md) for full-day Silver measurements.
