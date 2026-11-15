@@ -10,6 +10,7 @@ import gzip
 import io
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -18,16 +19,15 @@ import time
 import unittest
 import unittest.mock
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from threading import Thread
 
-HERE = Path(__file__).resolve().parent
-COLLECTOR = HERE.parent
-sys.path.insert(0, str(COLLECTOR))
+from support import serve
 
-import datex  # noqa: E402
-import hourly  # noqa: E402
+import datex
+import hourly
+
+COLLECTOR = Path(__file__).resolve().parents[1]
 
 XML = ('<?xml version="1.0" encoding="UTF-8"?>\n<d2:payload xmlns:d2="http://datex2.eu/schema/3/d2Payload">'
        '<sit:situation id="NPRA_HBT_1">"Bergen–Åsane" æøå \\ \t</sit:situation></d2:payload>\n')
@@ -89,35 +89,21 @@ def fake(**attrs):
     return type("NPRA", (FakeNPRA,), {"requests": [], **attrs})
 
 
-def serve(handler):
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    srv.daemon_threads = True
-    Thread(target=srv.serve_forever, daemon=True).start()
-    return srv
-
-
 class DatexCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="datex-test-"))
         self.landing = self.tmp / "landing"
         self.spool = self.tmp / "spool"
         self.spool.mkdir()
-        self.servers = []
         self.writers = []
 
     def tearDown(self):
         for w in self.writers:
             w.close()
-        for srv in self.servers:
-            srv.shutdown()
-            srv.server_close()
-        import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def start(self, handler):
-        srv = serve(handler)
-        self.servers.append(srv)
-        return f"http://127.0.0.1:{srv.server_address[1]}/datexapi"
+        return f"http://127.0.0.1:{serve(self, handler).server_address[1]}/datexapi"
 
     def poller(self, handler, feed="situation", auth=AUTH, pause=None):
         writer = hourly.HourlyWriter(self.landing, datex.landing_name(feed))

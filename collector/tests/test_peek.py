@@ -12,8 +12,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-COLLECTOR = HERE.parent
+import support  # noqa: F401  (puts collector/ on sys.path)
+
+import peek
+
+COLLECTOR = Path(__file__).resolve().parents[1]
 
 HEARTBEAT = ('<?xml version="1.0" encoding="UTF-8"?><Siri xmlns="http://www.siri.org.uk/siri" '
              'version="2.0"><HeartbeatNotification><Status>true</Status></HeartbeatNotification></Siri>')
@@ -51,8 +54,6 @@ class PeekTest(unittest.TestCase):
         self.assertNotIn("xmlns", out)
 
     def test_library(self):
-        sys.path.insert(0, str(COLLECTOR))
-        import peek
         with tempfile.TemporaryDirectory() as d:
             part = Path(d) / "siri-et" / "date=2026-10-17" / "hour=13.jsonl.part"
             part.parent.mkdir(parents=True)

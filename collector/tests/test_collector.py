@@ -11,20 +11,23 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 import unittest.mock
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from functools import partial
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-COLLECTOR = HERE.parent
-sys.path.insert(0, str(COLLECTOR))
+from support import serve
 
-import hourly  # noqa: E402
-import receiver  # noqa: E402
+import exporter
+import hourly
+import monitor
+import receiver
+import serve_status
+
+COLLECTOR = Path(__file__).resolve().parents[1]
 
 ET_PUSH = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Siri version="2.0" xmlns="http://www.siri.org.uk/siri">
@@ -58,12 +61,6 @@ class Recorder(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(self.reply)))
         self.end_headers()
         self.wfile.write(self.reply)
-
-
-def serve(handler):
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv
 
 
 class WriterTest(unittest.TestCase):
@@ -149,11 +146,9 @@ class ReceiverHttpTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         receiver.Handler.writers = {"et": hourly.HourlyWriter(self.tmp.name, "siri-et")}
         receiver.Handler.subs = None
-        self.srv = serve(receiver.Handler)
-        self.port = self.srv.server_address[1]
+        self.port = serve(self, receiver.Handler).server_address[1]
 
     def tearDown(self):
-        self.srv.shutdown()
         receiver.Handler.writers["et"].close()
         self.tmp.cleanup()
 
@@ -204,30 +199,27 @@ class SubscribeTest(unittest.TestCase):
         Recorder.requests = []
         Recorder.reply = (b'<Siri xmlns="http://www.siri.org.uk/siri"><SubscriptionResponse><ResponseStatus>'
                           b'<Status>true</Status></ResponseStatus></SubscriptionResponse></Siri>')
-        srv = serve(Recorder)
-        try:
-            subs = receiver.Subscriptions(["et", "sx"], "https://example.org/", "test-client",
-                                          f"http://127.0.0.1:{srv.server_address[1]}/subscribe")
-            now = at(10, 0)
-            subs.tick(now)
-            self.assertEqual(len(Recorder.requests), 2)
-            _, headers, body = Recorder.requests[0]
-            self.assertEqual(headers["ET-Client-Name"], "test-client")
-            self.assertIn("<Address>https://example.org/siri/et</Address>", body)
-            self.assertIn("<HeartbeatInterval>PT60S</HeartbeatInterval>", body)
-            self.assertIn("<SubscriptionIdentifier>test-client-et</SubscriptionIdentifier>", body)
-            self.assertIn("SituationExchangeSubscriptionRequest", Recorder.requests[1][2])
+        srv = serve(self, Recorder)
+        subs = receiver.Subscriptions(["et", "sx"], "https://example.org/", "test-client",
+                                      f"http://127.0.0.1:{srv.server_address[1]}/subscribe")
+        now = at(10, 0)
+        subs.tick(now)
+        self.assertEqual(len(Recorder.requests), 2)
+        _, headers, body = Recorder.requests[0]
+        self.assertEqual(headers["ET-Client-Name"], "test-client")
+        self.assertIn("<Address>https://example.org/siri/et</Address>", body)
+        self.assertIn("<HeartbeatInterval>PT60S</HeartbeatInterval>", body)
+        self.assertIn("<SubscriptionIdentifier>test-client-et</SubscriptionIdentifier>", body)
+        self.assertIn("SituationExchangeSubscriptionRequest", Recorder.requests[1][2])
 
-            subs.touch("et", at(10, 2))
-            subs.touch("sx", at(10, 2))
-            subs.tick(at(10, 4))  # heartbeats flowing: nothing to do
-            self.assertEqual(len(Recorder.requests), 2)
-            subs.touch("sx", at(10, 9))
-            subs.tick(at(10, 10))  # et silent > 3 min -> re-subscribe et only
-            self.assertEqual(len(Recorder.requests), 3)
-            self.assertIn("test-client-et", Recorder.requests[2][2])
-        finally:
-            srv.shutdown()
+        subs.touch("et", at(10, 2))
+        subs.touch("sx", at(10, 2))
+        subs.tick(at(10, 4))  # heartbeats flowing: nothing to do
+        self.assertEqual(len(Recorder.requests), 2)
+        subs.touch("sx", at(10, 9))
+        subs.tick(at(10, 10))  # et silent > 3 min -> re-subscribe et only
+        self.assertEqual(len(Recorder.requests), 3)
+        self.assertIn("test-client-et", Recorder.requests[2][2])
 
     def test_no_public_url_never_subscribes(self):
         subs = receiver.Subscriptions(["et"], None, "c", "http://127.0.0.1:9/never")
@@ -248,12 +240,11 @@ class MonitorTest(unittest.TestCase):
                                           "subscribing": False, "feeds": {"et": {}}}))
         Recorder.requests = []
         Recorder.reply = b"{}"
-        self.ntfy = serve(Recorder)
+        self.ntfy = serve(self, Recorder)
         self.feeds = "et"
         self.static = ""
 
     def tearDown(self):
-        self.ntfy.shutdown()
         shutil.rmtree(self.tmp)
 
     def run_monitor(self):
@@ -319,7 +310,6 @@ class MonitorTest(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if k not in ("MONITOR_FEEDS", "RECEIVER_FEEDS", "DATEX_FEEDS")}
         with unittest.mock.patch.dict(os.environ, env, clear=True):
-            import monitor
             datex = ["datex-situation", "datex-traveltime", "datex-weather",
                      "datex-traveltime-locations", "datex-weather-sites"]
             self.assertEqual(monitor.feeds_from_env(), ["et", "sx", "vehicles"] + datex)
@@ -492,7 +482,6 @@ class ExporterTest(unittest.TestCase):
                 "ok": False, "checked_at": "2026-10-15T03:00:00Z",
                 "checks": {"receiver": {"ok": True}, "disk": {"ok": False}}}))
 
-            import exporter
             dx = d / "landing" / "datex-situation" / "date=2026-10-15"
             dx.mkdir(parents=True)
             (dx / "hour=01.jsonl.gz").write_bytes(b"x" * 13)
@@ -575,20 +564,15 @@ class FakeGrafana(BaseHTTPRequestHandler):
 
 class StatusServerTest(unittest.TestCase):
     def setUp(self):
-        import serve_status
-        from functools import partial
         self.tmp = tempfile.TemporaryDirectory()
         Path(self.tmp.name, "index.html").write_text("<p>main</p>")
         Path(self.tmp.name, ".secret").write_text("no")
-        self.grafana = serve(FakeGrafana)
+        self.grafana = serve(self, FakeGrafana)
         serve_status.StatusHandler.upstream = serve_status.urllib.parse.urlsplit(
             f"http://127.0.0.1:{self.grafana.server_address[1]}")
-        self.srv = serve(partial(serve_status.StatusHandler, directory=self.tmp.name))
-        self.port = self.srv.server_address[1]
+        self.port = serve(self, partial(serve_status.StatusHandler, directory=self.tmp.name)).server_address[1]
 
     def tearDown(self):
-        self.srv.shutdown()
-        self.grafana.shutdown()
         self.tmp.cleanup()
 
     def request(self, method, path, body=None):

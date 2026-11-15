@@ -7,13 +7,12 @@ Run from the repo root:  python3 -m unittest discover -s collector/tests -v
 import asyncio
 import gzip
 import json
-import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+import support  # noqa: F401  (puts collector/ on sys.path)
 
 try:
     import websockets
@@ -95,7 +94,6 @@ class SessionTest(unittest.TestCase):
     def test_closed_hour_is_gzipped(self):
         with tempfile.TemporaryDirectory() as d:
             w = vehicles.HourlyWriter(d, vehicles.FEED)
-            from datetime import datetime, timezone
             w.append("a\n", datetime(2026, 10, 15, 10, 59, tzinfo=timezone.utc))
             w.rotate(datetime(2026, 10, 15, 11, 0, tzinfo=timezone.utc))
             w.pending.join()
