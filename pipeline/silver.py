@@ -291,14 +291,15 @@ def quarantine_rows(df, feed):
                      F.to_json(F.struct(*[F.col(c) for c in df.columns if c != "entity_json"])).alias("entity_json"))
 
 
-def stage_table(df, stage, table, day, rid, key, partition="operating_date", metadata=None):
+def stage_table(df, stage, table, day, rid, key, partition="operating_date", metadata=None,
+                schema_version=SCHEMA_VERSION):
     """Write one table's partition to the staging directory, then check it from what was written:
     a unique key, every row in the run's partition. Returns (written frame, stats for the record)."""
     F = functions()
     path = stage / table / f"{partition}={day}"
     if partition not in df.columns:
         df = df.withColumn(partition, F.lit(day))
-    df = df.withColumn("_silver_run_id", F.lit(rid)).withColumn("_silver_schema_version", F.lit(SCHEMA_VERSION))
+    df = df.withColumn("_silver_run_id", F.lit(rid)).withColumn("_silver_schema_version", F.lit(schema_version))
     for name, value in (metadata or {}).items():
         df = df.withColumn(name, F.lit(value).cast("timestamp") if name.endswith("_available_at") else F.lit(value))
     df.write.mode("overwrite").parquet(str(path))

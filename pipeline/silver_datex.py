@@ -312,7 +312,8 @@ def run(landing, output_dir, day, spark=None, allow_partial=False):
                                                  for r in parsed[feed].groupBy("kind").count().collect()}
 
         def save(df, table, key):
-            written, stats = stage_table(df, stage, table, day, rid, key, "observation_date")
+            written, stats = stage_table(df, stage, table, day, rid, key, "observation_date",
+                                         schema_version=SCHEMA_VERSION)
             stats["partition"] = f"observation_date={day}"
             record["tables"][table] = stats
             return written
