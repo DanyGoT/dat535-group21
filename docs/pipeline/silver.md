@@ -92,8 +92,9 @@ can leave staging files and a `publishing` marker. Rerun the date under the same
 
 - Entur writes schema **2**. `entity_index` changed from int to long. Rebuild schema-1 days
   before reading across versions.
-- DATEX declares schema **1** in its marker, but shared `stage_table` stamps
-  `_silver_schema_version=2` on its rows. These disagree in the current code.
+- DATEX writes schema **1**, in its marker and on its rows. Days published in October and
+  November 2026 carry `_silver_schema_version=2` on their rows instead: the shared `stage_table`
+  stamped Entur's version on every table until it was fixed.
 - [`gold.py`](../../pipeline/gold.py) checks the marker versions, Entur 2 and DATEX 1, and ties
   every row to the marker by `_silver_run_id`, so the row stamp does not matter to it.
   See [what Gold builds](gold-example.md#shared-rules).

@@ -338,6 +338,7 @@ class SparkTest(unittest.TestCase):
 
         situations = {r["record_id"]: r for r in self.table("road_situation").collect()}
         self.assertEqual(sorted(situations), ["r1", "r2"])
+        self.assertEqual({r["_silver_schema_version"] for r in situations.values()}, {marker["schema_version"]})
         self.assertEqual(situations["r1"]["snapshots_seen"], 24)
         self.assertEqual((situations["r1"]["first_seen_at"], situations["r1"]["last_seen_at"]),
                          (datetime(2026, 11, 5, 0, 0), datetime(2026, 11, 5, 23, 0)))
