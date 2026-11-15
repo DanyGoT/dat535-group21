@@ -10,11 +10,9 @@ from collections import ChainMap, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
-from silver_parse import boolean, canonical_mode, local, number, ref, strip_ns, text
+from silver_parse import OSLO, boolean, canonical_mode, local, number, ref, strip_ns, text
 
-OSLO = ZoneInfo("Europe/Oslo")
 INDEX_TAGS = {"OperatingDay", "OperatingPeriod", "DayType", "DayTypeAssignment",
               "PassengerStopAssignment", "JourneyPattern", "Line", "Route", "Operator"}
 
@@ -55,7 +53,8 @@ def elements(archive, member, tags):
                 stack.pop()
 
 
-def index_member(archive, member, day):
+def index_member(archive, member):
+    """The elements of one zip member that journeys refer to, by kind and id, as small dicts."""
     index = {k: {} for k in INDEX_TAGS}
     index["dated"] = defaultdict(list)
     index["dated_services"] = set()
@@ -75,9 +74,11 @@ def index_member(archive, member, day):
             data.update(start=text(elem, "FromDate"), end=text(elem, "ToDate"),
                         start_ref=ref(elem, "FromOperatingDayRef"), end_ref=ref(elem, "ToOperatingDayRef"))
         elif kind == "DayType":
-            data["weekdays"] = [word for e in elem.findall("properties/PropertyOfDay/DaysOfWeek") for word in (e.text or "").split()]
-            data["unsupported"] = any(local(e.tag) not in {"properties", "PropertyOfDay", "DaysOfWeek", "Name", "Description"}
-                                      for e in elem.iter() if e is not elem)
+            data["weekdays"] = [word for e in elem.findall("properties/PropertyOfDay/DaysOfWeek")
+                                for word in (e.text or "").split()]
+            data["unsupported"] = any(
+                local(e.tag) not in {"properties", "PropertyOfDay", "DaysOfWeek", "Name", "Description"}
+                for e in elem.iter() if e is not elem)
         elif kind == "DayTypeAssignment":
             availability = text(elem, "isAvailable")
             invalid = []
@@ -107,7 +108,9 @@ def index_member(archive, member, day):
         # FIN repeats a child assignment id across different DayTypeRef values.
         # Its date rule is a relation, so retain each distinct selector rather
         # than overwriting a different calendar's exception by native id.
-        key = (ident, data["day_type"], data["date"], data["day_ref"], data["period"], data["available"]) if kind == "DayTypeAssignment" else ident
+        key = ident
+        if kind == "DayTypeAssignment":
+            key = (ident, data["day_type"], data["date"], data["day_ref"], data["period"], data["available"])
         previous = index[kind].get(key)
         if previous and previous != data:
             raise ValueError(f"conflicting {kind} {ident} in {member}")
@@ -116,11 +119,15 @@ def index_member(archive, member, day):
 
 
 @lru_cache(maxsize=2)
-def shared_index(archive, member, day):
-    return index_member(archive, member, day)
+def shared_index(archive, member):
+    """A shared member's index, kept for the next line members of the same task."""
+    return index_member(archive, member)
 
 
 class Calendar:
+    """Whether a DayType's date rules make it run on one operating day. A member's own rules, then
+    its shared file's; `fallbacks` resolve ids that only another shared file of the codespace has."""
+
     def __init__(self, indexes, day, fallbacks=()):
         self.day = day
         self.maps = {k: ChainMap(*(i[k] for i in indexes)) for k in INDEX_TAGS}
@@ -190,9 +197,9 @@ def planned_time(value, offset, day, issues, field):
         dt = datetime.combine(day + timedelta(days=int(offset or 0)), clock)
         if dt.tzinfo is not None:
             return dt.astimezone(timezone.utc)
-        candidates = {dt.replace(tzinfo=OSLO, fold=fold).astimezone(timezone.utc)
-                      for fold in (0, 1)
-                      if dt.replace(tzinfo=OSLO, fold=fold).astimezone(timezone.utc).astimezone(OSLO).replace(tzinfo=None) == dt}
+        # One instant, except at a DST change: two in autumn's repeated hour, none in spring's gap.
+        instants = {dt.replace(tzinfo=OSLO, fold=fold).astimezone(timezone.utc) for fold in (0, 1)}
+        candidates = {t for t in instants if t.astimezone(OSLO).replace(tzinfo=None) == dt}
         if len(candidates) != 1:
             issues.append(f"{'ambiguous' if candidates else 'nonexistent'}_{field}")
             return None
@@ -203,24 +210,24 @@ def planned_time(value, offset, day, issues, field):
 
 
 def plan_member(archive, member, shared, day):
-    own = index_member(archive, member, day)
+    """The lines, operators, journeys and calls of one line member that run on the day."""
+    own = index_member(archive, member)
+    codespace = member.split("_", 1)[0]
     # Several SKY/RUT flexible members have ordinary place-name filenames.
     # Their Line element, rather than the filename, chooses the calendar scope.
     if own["Line"]:
         scopes = {line["is_flexible"] for line in own["Line"].values()}
         if len(scopes) > 1:
             raise ValueError(f"mixed fixed/flexible calendar scopes in {member}")
-        codespace = member.split("_", 1)[0]
         preferred = f"_{codespace}{'_flexible' if True in scopes else ''}_shared_data.xml"
         with zipfile.ZipFile(archive) as z:
             if preferred in z.namelist():
                 shared = preferred
-    indexes = [own] + ([shared_index(archive, shared, day)] if shared else [])
-    codespace = member.split("_", 1)[0]
+    indexes = [own] + ([shared_index(archive, shared)] if shared else [])
     with zipfile.ZipFile(archive) as z:
         alternatives = [n for n in (f"_{codespace}_shared_data.xml", f"_{codespace}_flexible_shared_data.xml")
                         if n != shared and n != member and n in z.namelist()]
-    fallbacks = [Calendar([own, shared_index(archive, n, day)], day) for n in alternatives]
+    fallbacks = [Calendar([own, shared_index(archive, n)], day) for n in alternatives]
     calendar = Calendar(indexes, day, fallbacks)
     maps = calendar.maps
     stop_quays = defaultdict(set)
@@ -283,13 +290,14 @@ def plan_member(archive, member, shared, day):
             quays = stop_quays[p["stop"]]
             if len(quays) != 1:
                 pi.append("missing_quay_mapping" if not quays else "ambiguous_quay_mapping")
+            # <Tag>Time with its <Tag>DayOffset, e.g. ArrivalTime and ArrivalDayOffset.
+            times = {field: planned_time(text(point, tag + "Time"), text(point, tag + "DayOffset"), day, pi, field)
+                     for field, tag in (("planned_arrival_at", "Arrival"), ("planned_departure_at", "Departure"),
+                                        ("earliest_departure_at", "EarliestDeparture"),
+                                        ("latest_arrival_at", "LatestArrival"))}
             yield dict(base, kind="call", dq_issue=pi, call_order=p["order"],
                        quay_id=next(iter(quays)) if len(quays) == 1 else None,
-                       for_boarding=p["boarding"], for_alighting=p["alighting"],
-                       planned_arrival_at=planned_time(text(point, "ArrivalTime"), text(point, "ArrivalDayOffset"), day, pi, "planned_arrival_at"),
-                       planned_departure_at=planned_time(text(point, "DepartureTime"), text(point, "DepartureDayOffset"), day, pi, "planned_departure_at"),
-                       earliest_departure_at=planned_time(text(point, "EarliestDepartureTime"), text(point, "EarliestDepartureDayOffset"), day, pi, "earliest_departure_at"),
-                       latest_arrival_at=planned_time(text(point, "LatestArrivalTime"), text(point, "LatestArrivalDayOffset"), day, pi, "latest_arrival_at"))
+                       for_boarding=p["boarding"], for_alighting=p["alighting"], **times)
 
 
 def plan_partition(items, archive, day):
@@ -298,6 +306,7 @@ def plan_partition(items, archive, day):
 
 
 def plan_members(archive):
+    """[(line member, its shared member or None)]: the work items of the plan decode."""
     with zipfile.ZipFile(archive) as z:
         names = set(z.namelist())
     members = []
@@ -314,20 +323,23 @@ def plan_members(archive):
     return members
 
 
+def stop_entity(elem, kind, member, parent=None):
+    issues = []
+    return dict(kind=kind, id=elem.get("id"), version=elem.get("version"),
+                name=text(elem, "Name"), stop_place_id=parent,
+                parent_stop_place_id=ref(elem, "ParentSiteRef"),
+                latitude=number(text(elem, "Centroid/Location/Latitude"), issues, "latitude"),
+                longitude=number(text(elem, "Centroid/Location/Longitude"), issues, "longitude"),
+                source_member=member, dq_issue=issues)
+
+
 def nsr_partition(members, archive):
+    """Stop places and their quays from NSR zip members."""
     for member in members:
         for stop in elements(archive, member, {"StopPlace"}):
-            def entity(elem, kind, parent=None):
-                issues = []
-                return dict(kind=kind, id=elem.get("id"), version=elem.get("version"),
-                            name=text(elem, "Name"), stop_place_id=parent,
-                            parent_stop_place_id=ref(elem, "ParentSiteRef"),
-                            latitude=number(text(elem, "Centroid/Location/Latitude"), issues, "latitude"),
-                            longitude=number(text(elem, "Centroid/Location/Longitude"), issues, "longitude"),
-                            source_member=member, dq_issue=issues)
-            yield entity(stop, "stop_place")
+            yield stop_entity(stop, "stop_place", member)
             for quay in stop.findall("quays/Quay"):
-                yield entity(quay, "quay", stop.get("id"))
+                yield stop_entity(quay, "quay", member, stop.get("id"))
 
 
 def reference_schema():
@@ -335,7 +347,8 @@ def reference_schema():
                                    StringType, StructField, StructType, TimestampType)
     fields = {k: StringType() for k in ("kind", "id", "version", "name", "source_member", "public_code",
                                       "journey_id", "line_id", "operator_id", "direction_type", "mode",
-                                      "journey_pattern_id", "service_alteration", "quay_id", "stop_place_id", "parent_stop_place_id")}
+                                      "journey_pattern_id", "service_alteration", "quay_id", "stop_place_id",
+                                      "parent_stop_place_id")}
     fields.update(operating_date=DateType(), call_order=IntegerType(),
                   planned_arrival_at=TimestampType(), planned_departure_at=TimestampType(),
                   earliest_departure_at=TimestampType(), latest_arrival_at=TimestampType(),
