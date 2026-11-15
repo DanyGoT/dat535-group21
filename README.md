@@ -83,9 +83,8 @@ in one file, with the code that matters. Every section there links to the detail
 uv run --python 3.11 --with-requirements requirements-dev.txt --with websockets==10.4 \
   python -m unittest discover -s collector/tests
 
-# Pipeline. Needs Java 8 or 17, and no external services. PyArrow and pandas are not in
-# requirements-dev.txt yet, and one test expects the VM's UTC clock.
-TZ=UTC uv run --python 3.11 --with-requirements requirements-dev.txt --with pyarrow --with pandas \
+# Pipeline. Needs Java 8 or 17, and no external services.
+uv run --python 3.11 --with-requirements requirements-dev.txt \
   python -m unittest discover -s pipeline/tests
 ```
 

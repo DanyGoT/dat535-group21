@@ -3,23 +3,21 @@
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 import zipfile
-from datetime import date, datetime, timedelta, timezone
-from importlib.util import find_spec
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from support import SparkCase
 
+import silver as S
 import silver_parse as P
 import silver_reference as R
 
 DAY = date(2026, 10, 26)
 JID = "T:ServiceJourney:1"
-UTC = timezone.utc
 
 
 def instant(value):
@@ -369,24 +367,12 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual(R.planned_time("02:30:00+01:00", 0, date(2026, 10, 25), [], "time"), instant("2026-10-25T01:30:00Z"))
 
 
-@unittest.skipUnless(find_spec("pyspark"), "pyspark not installed")
-class SparkTest(unittest.TestCase):
+class SparkTest(SparkCase):
     @classmethod
     def setUpClass(cls):
-        import silver
-        from pyspark.sql import SparkSession
-        cls.S = silver
-        cls.spark = SparkSession.builder.master("local[2]").appName("silver-tests") \
-            .config("spark.sql.session.timeZone", "UTC").config("spark.ui.enabled", "false") \
-            .config("spark.sql.shuffle.partitions", "2").config("spark.sql.parquet.compression.codec", "zstd") \
-            .getOrCreate()
-        cls.spark.sparkContext.setLogLevel("ERROR")
-        cls.spark.sparkContext.addPyFile(str(Path(R.__file__)))
-        cls.spark.sparkContext.addPyFile(str(Path(P.__file__)))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.spark.stop()
+        super().setUpClass()
+        for module in (R, P):
+            cls.spark.sparkContext.addPyFile(module.__file__)
 
     def versions(self, entries):
         rows = []
@@ -403,14 +389,14 @@ class SparkTest(unittest.TestCase):
 
     def test_duplicate_reference_keys_fail_before_joining(self):
         with self.assertRaisesRegex(ValueError, "duplicate primary key"):
-            self.S.assert_unique(self.spark.createDataFrame([("1",), ("1",)], ["id"]), ["id"], "quays")
+            S.assert_unique(self.spark.createDataFrame([("1",), ("1",)], ["id"]), ["id"], "quays")
 
     def test_reference_versions_sort_numerically_and_keep_conflicting_ties(self):
         refs = self.spark.createDataFrame([("1", "9", "old"), ("1", "10", "current")], ["id", "version", "name"])
-        self.assertEqual(self.S.current_reference(refs).first()["name"], "current")
+        self.assertEqual(S.current_reference(refs).first()["name"], "current")
         conflict = self.spark.createDataFrame([("1", "10", "a"), ("1", "10", "b")], ["id", "version", "name"])
         with self.assertRaisesRegex(ValueError, "duplicate primary key"):
-            self.S.assert_unique(self.S.current_reference(conflict), ["id"], "operators")
+            S.assert_unique(S.current_reference(conflict), ["id"], "operators")
 
     def test_vehicle_id_is_scoped_by_codespace(self):
         records = []
@@ -419,7 +405,7 @@ class SparkTest(unittest.TestCase):
                 "vehicleId": "123", "codespace": {"codespaceId": codespace}, "lastUpdated": "2026-10-26T08:00:00Z"}]}}})
             records.extend(P.parse_vehicles(msg, base()))
         df = self.spark.createDataFrame(records, P.schema("vehicles"))
-        self.assertEqual(self.S.latest(df, ["codespace", "vehicle_id", "last_updated_at"]).count(), 2)
+        self.assertEqual(S.latest(df, ["codespace", "vehicle_id", "last_updated_at"]).count(), 2)
 
     def test_explicit_dated_reference_resolves_vehicle_date(self):
         alias = "T:DatedServiceJourney:1"
@@ -435,7 +421,7 @@ class SparkTest(unittest.TestCase):
         versions = self.spark.createDataFrame([
             dict(base(), kind="vehicle", vehicle_id=case, journey_id=jid, dated_journey_id=dated, operating_date=op)
             for case, jid, dated, op in cases], P.schema("vehicles"))
-        rows = {r["vehicle_id"]: r for r in self.S.normalize_journeys(versions, aliases).collect()}
+        rows = {r["vehicle_id"]: r for r in S.normalize_journeys(versions, aliases).collect()}
         self.assertEqual(len(rows), len(cases))
         for case in ("vehicle", "et_alias"):
             self.assertEqual(rows[case]["operating_date"], DAY)
@@ -455,7 +441,7 @@ class SparkTest(unittest.TestCase):
         records += list(P.parse_et(et(recorded="2026-10-26T08:03:00Z", extra="<Cancellation>true</Cancellation>"), base("2026-10-26T08:03:01Z")))
         records += list(P.parse_et(et(recorded="2026-10-26T07:58:00Z", extra="<Cancellation>false</Cancellation>"), base("2026-10-26T08:04:00Z")))
         versions = self.spark.createDataFrame(records, P.schema("et"))
-        rows = self.S.build_predictions(versions, self.target_calls(), leads=[5]).collect()
+        rows = S.build_predictions(versions, self.target_calls(), leads=[5]).collect()
         self.assertTrue(rows)
         self.assertTrue(all(r["journey_cancelled"] for r in rows))
         self.assertTrue(all(r["journey_received_at"] <= r["cutoff_at"] for r in rows))
@@ -472,7 +458,7 @@ class SparkTest(unittest.TestCase):
                 if case == "first_call_after_cutoff":
                     records += list(P.parse_et(et(call(), recorded="2026-10-26T08:06:00Z"), base("2026-10-26T08:06:01Z")))
                 versions = self.spark.createDataFrame(records, P.schema("et"))
-                rows = self.S.build_predictions(versions, target, leads=[5]).collect()
+                rows = S.build_predictions(versions, target, leads=[5]).collect()
                 if case == "cancellation_after_cutoff":
                     self.assertEqual(rows, [])
                     continue
@@ -496,9 +482,9 @@ class SparkTest(unittest.TestCase):
             ("2026-10-26T08:12:00Z", "2026-10-26T08:12:00Z", call()),
             ("2026-10-26T08:13:00Z", "2026-10-26T08:10:00Z", call(expected="2026-10-26T08:20:00Z"))])
         from pyspark.sql import functions as F
-        winner = self.S.latest(v.filter(F.col("kind") == "call"), self.S.CALL_KEY, actual_first=True).first()
+        winner = S.latest(v.filter(F.col("kind") == "call"), S.CALL_KEY, actual_first=True).first()
         self.assertEqual(winner["actual_departure_at"].timestamp(), instant("2026-10-26T08:11:00Z").timestamp())
-        journey = self.S.latest(v.filter(F.col("kind") == "journey"), self.S.JOURNEY_KEY).first()
+        journey = S.latest(v.filter(F.col("kind") == "journey"), S.JOURNEY_KEY).first()
         self.assertEqual(journey["recorded_at"].timestamp(), instant("2026-10-26T08:12:00Z").timestamp())
 
     def test_plan_enrichment_does_not_fabricate_a_reported_quay(self):
@@ -508,7 +494,7 @@ class SparkTest(unittest.TestCase):
             "operating_date date, journey_id string, call_order int, quay_id string, dq_issue array<string>, source_member string")
         journeys = self.spark.createDataFrame([(DAY, JID, None, None, True)],
             "operating_date date, journey_id string, journey_cancelled boolean, extra_journey boolean, has_realtime boolean")
-        result = self.S.build_calls(versions, plan, journeys).first()
+        result = S.build_calls(versions, plan, journeys).first()
         self.assertEqual(result["quay_id"], "NSR:Quay:1")
         self.assertIsNone(result["reported_quay_id"])
         self.assertIn("missing_reported_quay", result["dq_issue"])
@@ -520,7 +506,7 @@ class SparkTest(unittest.TestCase):
             ("2026-10-26T08:06:00Z", "2026-10-26T08:04:00Z", call(expected="2026-10-26T08:13:00Z")),
             ("2026-10-26T08:04:30Z", "2026-10-26T08:07:00Z", call(expected="2026-10-26T08:14:00Z"))])
         final = self.target_calls()
-        rows = self.S.build_predictions(v, final, leads=[5]).collect()
+        rows = S.build_predictions(v, final, leads=[5]).collect()
         planned = next(r for r in rows if r["reference"] == "planned")
         actual = next(r for r in rows if r["reference"] == "actual")
         self.assertEqual(planned["predicted_at"].timestamp(), instant("2026-10-26T08:12:00Z").timestamp())
@@ -546,14 +532,14 @@ class SparkTest(unittest.TestCase):
                          "fixture", f"broken envelope {h}" if status == "corrupt" else None) for h in range(24)]
                 self.spark.createDataFrame(rows,
                     "received_at string, payload string, _bronze_status string, hour string, _bronze_source_file string, _bronze_payload_sha256 string, _bronze_run_id string, _bronze_raw_line string") \
-                    .write.parquet(str(output / "bronze" / self.S.DATASETS[feed] / f"date={source_day}"))
+                    .write.parquet(str(output / "bronze" / S.DATASETS[feed] / f"date={source_day}"))
             marker = output / "silver" / "_runs" / f"operating_date={DAY}" / "latest.json"
             previous = {"run_id": "previous", "status": "complete", "ready": True}
-            self.S.atomic_json(marker, previous)
+            S.atomic_json(marker, previous)
             expected = {"bronze_corrupt": 48, "bronze_incomplete": 24, "bronze_wrong_endpoint": 24,
                         "invalid_vehicle_shape": 24}
             with self.assertRaisesRegex(ValueError, "source contract errors"):
-                self.S.run(landing, output, DAY, spark=self.spark, leads=[5])
+                S.run(landing, output, DAY, spark=self.spark, leads=[5])
             self.assertEqual(json.loads(marker.read_text()), previous)
             history = next(p for p in marker.parent.glob("*.json") if p.name != "latest.json")
             failed = json.loads(history.read_text())
@@ -562,7 +548,7 @@ class SparkTest(unittest.TestCase):
             self.assertEqual(failed["contract_errors"], expected)
             self.assertEqual(failed["tables"]["quarantine"]["rows"], 120)
             self.assertFalse((output / "silver" / "stop_call" / f"operating_date={DAY}").exists())
-            partial = self.S.run(landing, output, DAY, spark=self.spark, allow_partial=True, leads=[5])
+            partial = S.run(landing, output, DAY, spark=self.spark, allow_partial=True, leads=[5])
             self.assertEqual(partial["status"], "partial")
             self.assertFalse(partial["ready"])
             self.assertEqual(partial["contract_errors"], expected)
@@ -583,7 +569,7 @@ class SparkTest(unittest.TestCase):
                 with zipfile.ZipFile(folder / filename, "w") as z:
                     z.writestr("T_line.xml", xml)
             def bronze(feed, source_day, payloads):
-                source = output / "bronze" / self.S.DATASETS[feed] / f"date={source_day}"
+                source = output / "bronze" / S.DATASETS[feed] / f"date={source_day}"
                 records = [(f"{source_day}T{h:02d}:00:01Z", p, "ok", f"{h:02d}", "source", P.digest(p), "fixture")
                            for h in range(24) for p in (payloads if h == 8 else ["<Siri><HeartbeatNotification/></Siri>" if feed != "vehicles" else '{"type":"connection_ack"}'])]
                 self.spark.createDataFrame(records, "received_at string, payload string, _bronze_status string, hour string, _bronze_source_file string, _bronze_payload_sha256 string, _bronze_run_id string").write.mode("overwrite").parquet(str(source))
@@ -596,7 +582,7 @@ class SparkTest(unittest.TestCase):
                        "serviceJourney": {"id": JID, "date": str(DAY)}, "location": {"latitude": 95, "longitude": 10}}
             bronze("vehicles", DAY, [json.dumps({"type": "next", "payload": {"data": {"vehicles": [vehicle, vehicle]}}})])
             before = {p: p.read_bytes() for p in landing.rglob("*.zip")}
-            record = self.S.run(landing, output, DAY, spark=self.spark, leads=[5])
+            record = S.run(landing, output, DAY, spark=self.spark, leads=[5])
             self.assertTrue(record["ready"])
             self.assertEqual(record["call_coverage"], {"matched": 2, "no_realtime": 1})
             def read(table, partition="operating_date"):
@@ -615,7 +601,7 @@ class SparkTest(unittest.TestCase):
             # A missing input on a rerun must leave the previously published day intact.
             shutil.rmtree(output / "bronze" / "siri-et" / f"date={DAY - timedelta(days=1)}")
             with self.assertRaises(ValueError):
-                self.S.run(landing, output, DAY, spark=self.spark)
+                S.run(landing, output, DAY, spark=self.spark)
             self.assertEqual(marker.read_bytes(), previous)
             self.assertEqual(read("stop_call").count(), 3)
             other = output / "silver" / "stop_call" / f"operating_date={DAY - timedelta(days=1)}" / "kept.txt"
@@ -625,7 +611,7 @@ class SparkTest(unittest.TestCase):
             # disappear, while other days and the immutable references survive.
             for offset in (-1, 0, 1):
                 bronze("et", DAY + timedelta(days=offset), ["<Siri><HeartbeatNotification/></Siri>"])
-            again = self.S.run(landing, output, DAY, spark=self.spark, leads=[5])
+            again = S.run(landing, output, DAY, spark=self.spark, leads=[5])
             self.assertTrue(again["ready"])
             self.assertEqual(again["call_coverage"], {"no_realtime": 3})
             self.assertEqual(read("call_prediction").count(), 0)
@@ -636,14 +622,13 @@ class SparkTest(unittest.TestCase):
 
 class PublishTest(unittest.TestCase):
     def test_failed_partition_install_restores_published_day(self):
-        import silver
         with tempfile.TemporaryDirectory(prefix="silver-publish-") as tmp:
             root, stage = Path(tmp) / "silver", Path(tmp) / "stage"
             partition = f"operating_date={DAY}"
             tables = {table: {"partition": partition} for table in ("journey", "stop_call")}
             previous = {"run_id": "old", "ready": True, "status": "complete", "tables": tables}
             marker = root / "_runs" / partition / "latest.json"
-            silver.atomic_json(marker, previous)
+            S.atomic_json(marker, previous)
             for table in tables:
                 for parent, content in ((root, "old"), (stage, "new")):
                     folder = parent / table / partition
@@ -654,9 +639,9 @@ class PublishTest(unittest.TestCase):
                 if source == stage / "stop_call" / partition:
                     raise OSError("simulated failed install")
                 return replace(source, dest)
-            with patch.object(silver.os, "replace", side_effect=fail_second):
+            with patch.object(S.os, "replace", side_effect=fail_second):
                 with self.assertRaisesRegex(OSError, "simulated"):
-                    silver.publish(stage, root, dict(previous, run_id="new"), DAY)
+                    S.publish(stage, root, dict(previous, run_id="new"), DAY)
             self.assertEqual(json.loads(marker.read_text()), previous)
             for table in tables:
                 self.assertEqual((root / table / partition / "data.parquet").read_text(), "old")

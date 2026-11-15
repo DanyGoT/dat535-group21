@@ -1,25 +1,13 @@
 """Local tests for the DATEX Bronze job. Builds a tiny landing zone in a temp dir; never calls
-Vegvesen.
+Vegvesen."""
 
-Run from the repo root (Spark tests need pyspark + Java, e.g. inside ~/spark-env):
-    python3 -m unittest discover -s pipeline/tests -v
-"""
-
-import gzip
 import json
-import os
-import shutil
-import sys
-import tempfile
 import unittest
 from datetime import date
-from importlib.util import find_spec
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+from support import LandingCase, SparkCase
 
-import bronze_datex  # noqa: E402
+import bronze_datex
 
 DAY = date(2026, 10, 24)
 XML = ('<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\'?>\n<ns2:messageContainer '
@@ -35,39 +23,12 @@ def poll(feed="situation", at="05:00:01", status=200, payload=XML, error=None, *
     return json.dumps(rec, ensure_ascii=False) + "\n"
 
 
-@unittest.skipUnless(find_spec("pyspark"), "pyspark not installed")
-class IngestTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from pyspark.sql import SparkSession
-        cls.spark = SparkSession.builder.master("local[1]").appName("bronze-datex-test") \
-            .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
-            .config("spark.sql.session.timeZone", "UTC") \
-            .config("spark.ui.enabled", "false") \
-            .getOrCreate()
+class IngestTest(LandingCase, SparkCase):
+    day = DAY
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.spark.stop()
-
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="bronze-datex-test-"))
-        self.landing = self.tmp / "landing"
-        self.out = self.tmp / "out"
-        os.environ.pop("GITHUB_RUN_ID", None)
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def put(self, feed, name, text, day=DAY):
-        path = self.landing / f"datex-{feed}" / f"date={day}" / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if name.endswith(".gz"):
-            with gzip.open(path, "wt", encoding="utf-8") as fh:
-                fh.write(text)
-        else:
-            path.write_text(text, encoding="utf-8")
-        return path
+    @staticmethod
+    def dataset(feed):
+        return f"datex-{feed}"
 
     def read(self, feed):
         return self.spark.read.parquet(str(self.out / "bronze" / f"datex-{feed}"))
@@ -135,12 +96,9 @@ class IngestTest(unittest.TestCase):
     def test_landing_untouched(self):
         self.put("situation", "hour=05.jsonl.gz", poll())
         self.put("situation", "hour=06.jsonl.part", poll(at="06:00:00"))
-        before = sorted((p.relative_to(self.landing), p.stat().st_size, p.stat().st_mtime_ns)
-                        for p in self.landing.rglob("*") if p.is_file())
+        before = self.landing_files()
         bronze_datex.run(self.landing, self.out, DAY, spark=self.spark)
-        after = sorted((p.relative_to(self.landing), p.stat().st_size, p.stat().st_mtime_ns)
-                       for p in self.landing.rglob("*") if p.is_file())
-        self.assertEqual(before, after)
+        self.assertEqual(self.landing_files(), before)
 
 
 class CliTest(unittest.TestCase):

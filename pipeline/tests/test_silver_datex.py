@@ -2,15 +2,14 @@
 
 import json
 import shutil
-import sys
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
-from importlib.util import find_spec
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from support import SparkCase
 
+import silver_datex as J
 import silver_datex_parse as D
 
 DAY = date(2026, 11, 5)     # a Thursday, winter time
@@ -113,7 +112,7 @@ DELIVERY_BREAK = (f'<ns2:messageContainer {NS} xmlns:ns4="http://datex2.eu/schem
                   '</ns4:returnStatusReason></ns4:returnInformation></ns4:dynamicInformation></ns2:exchangeInformation></ns2:messageContainer>')
 
 
-def bronze_row(payload, feed="situation", status="ok", received="2026-11-05T12:00:00.000Z", digest=None):
+def bronze_row(payload, status="ok", received="2026-11-05T12:00:00.000Z", digest=None):
     return dict(received_at=received, payload=payload, _bronze_source_file="/landing/hour=12.jsonl.gz",
                 _bronze_payload_sha256=digest or str(hash(payload)), _bronze_run_id="fixture", _bronze_status=status, source_date=str(DAY))
 
@@ -277,29 +276,10 @@ class ParseTest(unittest.TestCase):
         self.assertEqual({r["kind"] for r in rows}, {"quarantine"})
 
 
-@unittest.skipUnless(find_spec("pyspark"), "pyspark not installed")
-class SparkTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        import silver_datex
-        from pyspark.sql import SparkSession
-        cls.J = silver_datex
-        cls.spark = SparkSession.builder.master("local[2]").appName("silver-datex-tests") \
-            .config("spark.sql.session.timeZone", "UTC").config("spark.ui.enabled", "false") \
-            .config("spark.sql.shuffle.partitions", "2").config("spark.sql.parquet.compression.codec", "zstd") \
-            .getOrCreate()
-        cls.spark.sparkContext.setLogLevel("ERROR")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.spark.stop()
-
+class SparkTest(SparkCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="silver-datex-"))
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="silver-datex-")))
         self.output = self.tmp / "out"
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def bronze(self, feed, rows, hours=None, day=DAY):
         """A Bronze partition: one row per entry, in all 24 hours unless hours is given."""
@@ -331,7 +311,7 @@ class SparkTest(unittest.TestCase):
 
     def test_full_day_grains_flags_and_marker(self):
         self.full_day()
-        result = self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+        result = J.run(self.tmp, self.output, DAY, spark=self.spark)
         self.assertEqual((result["status"], result["ready"]), ("complete", True))
         marker = json.loads((self.output / "silver" / "_runs" / "datex" / f"observation_date={DAY}" / "latest.json").read_text())
         self.assertEqual((marker["run_id"], marker["ready"]), (result["run_id"], True))
@@ -340,11 +320,14 @@ class SparkTest(unittest.TestCase):
         self.assertEqual(sorted(situations), ["r1", "r2"])
         self.assertEqual({r["_silver_schema_version"] for r in situations.values()}, {marker["schema_version"]})
         self.assertEqual(situations["r1"]["snapshots_seen"], 24)
-        self.assertEqual((situations["r1"]["first_seen_at"], situations["r1"]["last_seen_at"]),
-                         (datetime(2026, 11, 5, 0, 0), datetime(2026, 11, 5, 23, 0)))
+        # Spark hands back naive local times: astimezone() reads them as such, whatever the clock's zone.
+        self.assertEqual((situations["r1"]["first_seen_at"].astimezone(timezone.utc),
+                          situations["r1"]["last_seen_at"].astimezone(timezone.utc)),
+                         (utc("2026-11-05T00:00:00"), utc("2026-11-05T23:00:00")))
         intervals = self.table("road_situation_interval").collect()
-        self.assertEqual(sorted((r["record_id"], r["start_at"].hour) for r in intervals), [("r1", 0), ("r2", 0)])
-        self.assertEqual({r["end_at"].hour for r in intervals if r["record_id"] == "r1"}, {5})
+        self.assertEqual(sorted((r["record_id"], r["start_at"].astimezone(timezone.utc).hour) for r in intervals),
+                         [("r1", 0), ("r2", 0)])
+        self.assertEqual({r["end_at"].astimezone(timezone.utc).hour for r in intervals if r["record_id"] == "r1"}, {5})
 
         weather = {r["site_id"]: r for r in self.table("road_weather").collect()}
         self.assertEqual(sorted(weather), ["1629006", "2", "3"])
@@ -371,7 +354,7 @@ class SparkTest(unittest.TestCase):
             # One weather poll is NPRA's delivery break: a missed poll, so the day stays ready.
             self.bronze(feed, [bronze_row(DELIVERY_BREAK if (feed, h) == ("weather", 19) else payload,
                                           received=f"2026-11-05T{h:02d}:00:00.000Z", digest=f"{feed}{h}") for h in range(24)])
-        result = self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+        result = J.run(self.tmp, self.output, DAY, spark=self.spark)
         self.assertEqual((result["status"], result["ready"]), ("complete", True))
         self.assertEqual([r["record_id"] for r in self.table("road_situation").collect()], ["r1"])
         self.assertEqual([r["site_id"] for r in self.table("road_weather").collect()], ["1629006"])
@@ -385,7 +368,7 @@ class SparkTest(unittest.TestCase):
     def test_spatial_links_stay_within_the_radius_and_on_their_grain(self):
         self.full_day()
         self.quays()
-        result = self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+        result = J.run(self.tmp, self.output, DAY, spark=self.spark)
         self.assertEqual(result["quay_snapshot_date"], str(DAY))
         situations = {(r["quay_id"], r["record_id"]) for r in self.table("quay_road_situation").collect()}
         self.assertEqual(situations, {("NSR:Quay:A", "r1"), ("NSR:Quay:A", "r2")})
@@ -398,20 +381,20 @@ class SparkTest(unittest.TestCase):
         quays = self.spark.createDataFrame([("Q1", 63.3, 9.5), ("Q2", 69.0, 20.0)], "quay_id string, quay_latitude double, quay_longitude double")
         sites = self.spark.createDataFrame([("near", 63.31, 9.57, True), ("nearer_but_dead", 63.3, 9.5, False)],
                                            "id string, latitude double, longitude double, usable boolean")
-        rows = {r["quay_id"]: r for r in self.J.build_quay_weather_site(quays, sites).collect()}
+        rows = {r["quay_id"]: r for r in J.build_quay_weather_site(quays, sites).collect()}
         self.assertEqual((rows["Q1"]["site_id"], rows["Q1"]["dq_issue"]), ("near", []))
         self.assertEqual(rows["Q2"]["dq_issue"], ["nearest_site_beyond_30km"])
 
     def test_missing_hours_block_a_strict_run_and_keep_the_published_day(self):
         self.full_day()
-        first = self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+        first = J.run(self.tmp, self.output, DAY, spark=self.spark)
         shutil.rmtree(self.output / "bronze" / "datex-weather" / f"date={DAY}")
         self.bronze("weather", [bronze_row(container(site_measurements()), digest="x")], hours=["05"])
         with self.assertRaisesRegex(ValueError, "incomplete datex-weather"):
-            self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+            J.run(self.tmp, self.output, DAY, spark=self.spark)
         marker = json.loads((self.output / "silver" / "_runs" / "datex" / f"observation_date={DAY}" / "latest.json").read_text())
         self.assertEqual(marker["run_id"], first["run_id"])
-        partial = self.J.run(self.tmp, self.output, DAY, spark=self.spark, allow_partial=True)
+        partial = J.run(self.tmp, self.output, DAY, spark=self.spark, allow_partial=True)
         self.assertEqual((partial["status"], partial["ready"]), ("partial", False))
 
     def test_malformed_snapshot_blocks_readiness(self):
@@ -419,7 +402,7 @@ class SparkTest(unittest.TestCase):
         shutil.rmtree(self.output / "bronze" / "datex-traveltime" / f"date={DAY}")
         self.bronze("traveltime", [bronze_row("<broken", digest=f"b{h}", received=f"2026-11-05T{h:02d}:00:00.000Z") for h in range(24)])
         with self.assertRaisesRegex(ValueError, "source contract errors"):
-            self.J.run(self.tmp, self.output, DAY, spark=self.spark)
+            J.run(self.tmp, self.output, DAY, spark=self.spark)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,8 @@
 # Local dev environment (editor/LSP, tests). Matches the VM's Spark version.
 pyspark==3.5.0
 findspark
+# Silver decodes through Arrow (mapInArrow), which PySpark imports with pandas.
+pyarrow
+pandas
 websockets
 pytest
