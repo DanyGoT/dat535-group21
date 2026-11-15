@@ -18,6 +18,9 @@ import silver_reference as R
 
 DAY = date(2026, 10, 26)
 JID = "T:ServiceJourney:1"
+# The Bronze columns Silver reads, as Spark DDL.
+BRONZE = ("received_at string, payload string, _bronze_status string, hour string, _bronze_source_file string, "
+          "_bronze_payload_sha256 string, _bronze_run_id string")
 
 
 def instant(value):
@@ -352,6 +355,9 @@ class ReferenceTest(unittest.TestCase):
             folder = self.root / "netex" / f"date={d}"
             folder.mkdir(parents=True)
             shutil.copyfile(self.archive, folder / "plan.zip")
+        # The day's own download still in progress: a .part is not an archive.
+        (self.root / "netex" / f"date={DAY}").mkdir()
+        shutil.copyfile(self.archive, self.root / "netex" / f"date={DAY}" / "plan.zip.part")
         chosen, _ = R.archived_file(self.root, "netex", DAY)
         self.assertEqual(chosen, DAY - timedelta(days=1))
         with self.assertRaises(FileNotFoundError):
@@ -530,8 +536,7 @@ class SparkTest(SparkCase):
                 rows = [(f"{source_day}T{h:02d}:00:01Z", payload, status, f"{h:02d}",
                          f"fixture/{feed}/{source_day}/{h:02d}", P.digest(payload) if payload else None,
                          "fixture", f"broken envelope {h}" if status == "corrupt" else None) for h in range(24)]
-                self.spark.createDataFrame(rows,
-                    "received_at string, payload string, _bronze_status string, hour string, _bronze_source_file string, _bronze_payload_sha256 string, _bronze_run_id string, _bronze_raw_line string") \
+                self.spark.createDataFrame(rows, BRONZE + ", _bronze_raw_line string") \
                     .write.parquet(str(output / "bronze" / S.DATASETS[feed] / f"date={source_day}"))
             marker = output / "silver" / "_runs" / f"operating_date={DAY}" / "latest.json"
             previous = {"run_id": "previous", "status": "complete", "ready": True}
@@ -569,10 +574,12 @@ class SparkTest(SparkCase):
                 with zipfile.ZipFile(folder / filename, "w") as z:
                     z.writestr("T_line.xml", xml)
             def bronze(feed, source_day, payloads):
+                """A full Bronze day: the payloads at 08, a heartbeat in every other hour."""
                 source = output / "bronze" / S.DATASETS[feed] / f"date={source_day}"
+                heartbeat = '{"type":"connection_ack"}' if feed == "vehicles" else "<Siri><HeartbeatNotification/></Siri>"
                 records = [(f"{source_day}T{h:02d}:00:01Z", p, "ok", f"{h:02d}", "source", P.digest(p), "fixture")
-                           for h in range(24) for p in (payloads if h == 8 else ["<Siri><HeartbeatNotification/></Siri>" if feed != "vehicles" else '{"type":"connection_ack"}'])]
-                self.spark.createDataFrame(records, "received_at string, payload string, _bronze_status string, hour string, _bronze_source_file string, _bronze_payload_sha256 string, _bronze_run_id string").write.mode("overwrite").parquet(str(source))
+                           for h in range(24) for p in (payloads if h == 8 else [heartbeat])]
+                self.spark.createDataFrame(records, BRONZE).write.mode("overwrite").parquet(str(source))
             for offset in (-1, 0, 1):
                 payloads = [et(call() + call(order=2, actual="2026-10-27T00:16:00Z", aimed="2026-10-27T00:15:00Z") + call().replace("<Order>1</Order>", ""),
                                recorded="2026-10-27T00:16:01Z", jid="T:DatedServiceJourney:1", framed=False)] if offset == 1 else [et(call())]
