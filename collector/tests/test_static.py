@@ -8,20 +8,17 @@ import io
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 import unittest.mock
 import zipfile
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from threading import Thread
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+from support import serve
 
-import static  # noqa: E402
+import static
 
 NOW = datetime(2026, 10, 27, 4, 15, tzinfo=timezone.utc)
 
@@ -58,20 +55,13 @@ class FakeStorage(BaseHTTPRequestHandler):
 class ArchiveTest(unittest.TestCase):
     def setUp(self):
         self.landing = Path(tempfile.mkdtemp(prefix="static-test-"))
-        self.servers = []
 
     def tearDown(self):
-        for s in self.servers:
-            s.shutdown()
-            s.server_close()
         shutil.rmtree(self.landing, ignore_errors=True)
 
     def serve(self, **attrs):
         handler = type("Storage", (FakeStorage,), {"requests": [], **attrs})
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        srv.daemon_threads = True
-        Thread(target=srv.serve_forever, daemon=True).start()
-        self.servers.append(srv)
+        srv = serve(self, handler)
         return handler, f"http://127.0.0.1:{srv.server_address[1]}/outbound/netex/rb_norway-aggregated-netex.zip"
 
     def archive(self, url):
