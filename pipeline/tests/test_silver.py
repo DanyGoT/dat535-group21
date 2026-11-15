@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from support import SparkCase
+from pipeline_support import SparkCase
 
 import silver as S
 import silver_parse as P
@@ -518,6 +518,22 @@ class SparkTest(SparkCase):
         self.assertEqual(planned["predicted_at"].timestamp(), instant("2026-10-26T08:12:00Z").timestamp())
         self.assertEqual(actual["predicted_at"].timestamp(), instant("2026-10-26T08:13:00Z").timestamp())
         self.assertTrue(all(r["received_at"] <= r["cutoff_at"] and r["recorded_at"] <= r["cutoff_at"] for r in rows))
+
+    def test_failed_reference_check_keeps_its_evidence(self):
+        with tempfile.TemporaryDirectory(prefix="silver-reference-check-") as tmp:
+            landing, output = Path(tmp) / "landing", Path(tmp) / "out"
+            for dataset, xml in (("netex", plan_xml()), ("nsr", NSR)):
+                folder = landing / dataset / f"date={DAY}"
+                folder.mkdir(parents=True)
+                with zipfile.ZipFile(folder / "a.zip", "w") as z:
+                    z.writestr("T_line.xml", xml)
+            # The collector's manifest disagrees with the file on disk.
+            (landing / "netex" / f"date={DAY}" / "a.zip.meta.json").write_text(json.dumps({"bytes": 1, "sha256": "x"}))
+            with self.assertRaisesRegex(ValueError, "archive size differs"):
+                S.run(landing, output, DAY, spark=self.spark)
+            history = output / "silver" / "_runs" / f"operating_date={DAY}"
+            record = json.loads(next(history.glob("*.json")).read_text())
+            self.assertEqual((record["status"], sorted(record["references"])), ("failed", ["netex", "nsr"]))
 
     def test_unusable_bronze_blocks_readiness_and_preserves_published_day(self):
         with tempfile.TemporaryDirectory(prefix="silver-contract-gate-") as tmp:

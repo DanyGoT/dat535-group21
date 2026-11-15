@@ -246,8 +246,9 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
     return record
 
 
-def cli(doc, feeds, run, argv=None):
-    """The command line of both Bronze jobs: parse --date, --feeds and --hours, then run."""
+def cli(doc, feeds, run, logger, argv=None):
+    """The command line of both Bronze jobs: parse --date, --feeds and --hours, then run. Errors are
+    logged to the job's own logger."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     p = argparse.ArgumentParser(description=doc.splitlines()[0])
@@ -265,19 +266,19 @@ def cli(doc, feeds, run, argv=None):
         p.error(f"unknown feeds: {sorted(unknown)}")
 
     if find_spec("pyspark") is None:
-        log.error("pyspark is not installed (activate ~/spark-env)")
+        logger.error("pyspark is not installed (activate ~/spark-env)")
         return 1
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
     output_dir = Path(os.environ.get("DAT535_OUTPUT_DIR", "output"))
     if not landing.is_dir():
-        log.error("landing directory %s does not exist", landing)
+        logger.error("landing directory %s does not exist", landing)
         return 1
     run(landing, output_dir, args.date, chosen, hours=args.hours)
     return 0
 
 
 def main(argv=None):
-    return cli(__doc__, FEEDS, run, argv)
+    return cli(__doc__, FEEDS, run, log, argv)
 
 
 if __name__ == "__main__":

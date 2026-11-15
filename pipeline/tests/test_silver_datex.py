@@ -7,7 +7,7 @@ import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from support import SparkCase
+from pipeline_support import SparkCase
 
 import silver_datex as J
 import silver_datex_parse as D

@@ -234,9 +234,8 @@ The [dev workflow](../../.github/workflows/dat535-dev.yml) uses one-hour Bronze 
 `--allow-partial`, producing `status=partial, ready=false`. The flag permits incomplete or
 contract-failing exploration output. It does not force partial status when all checks pass.
 
-Local execution additionally needs Java 8/17, archived NeTEx/NSR, Bronze inputs and Arrow
-dependencies. [`requirements-dev.txt`](../../requirements-dev.txt) omits PyArrow and pandas,
-so installing that file alone is not a complete Silver environment.
+Local execution additionally needs Java 8/17, archived NeTEx/NSR and Bronze inputs.
+[`requirements-dev.txt`](../../requirements-dev.txt) has the Python side, PyArrow and pandas included.
 
 ## Evidence and measurements
 

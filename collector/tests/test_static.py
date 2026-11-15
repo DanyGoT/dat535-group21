@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-from support import serve
+from collector_support import serve
 
 import static
 

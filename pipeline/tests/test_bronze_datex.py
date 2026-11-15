@@ -5,7 +5,7 @@ import json
 import unittest
 from datetime import date
 
-from support import LandingCase, SparkCase
+from pipeline_support import LandingCase, SparkCase
 
 import bronze_datex
 

@@ -186,14 +186,15 @@ def static_from_env():
 
 
 def archived(path):
-    """A finished daily download: not the .part being written, a .tmp, or the .meta.json beside it."""
-    return path.is_file() and not path.name.endswith((".part", ".json", ".tmp"))
+    """Whether a file in a daily download's folder is the download itself: not the .part being
+    written, a .tmp, or the .meta.json beside it."""
+    return not path.name.endswith((".part", ".json", ".tmp"))
 
 
 def newest_static(landing, dataset):
     """Newest complete archived file of a daily download: <dataset>/date=*/<file>."""
     for day in sorted((Path(landing) / dataset).glob("date=*"), reverse=True):
-        files = [p for p in day.iterdir() if archived(p)]
+        files = [p for p in day.iterdir() if p.is_file() and archived(p)]
         if files:
             return max(files, key=lambda p: p.stat().st_mtime)
     return None
