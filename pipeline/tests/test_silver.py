@@ -310,7 +310,7 @@ class ReferenceTest(unittest.TestCase):
           </dataObjects>""")
         with zipfile.ZipFile(self.archive, "w") as z:
             z.writestr("T_line.xml", xml)
-        index = R.index_member(str(self.archive), "T_line.xml", DAY)
+        index = R.index_member(str(self.archive), "T_line.xml")
         calendar = R.Calendar([index], DAY)
         self.assertTrue(calendar.active("T:DayType:1"))
         self.assertTrue(calendar.active("T:DayType:2"))
