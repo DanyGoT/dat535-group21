@@ -8,11 +8,9 @@ import io
 import math
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo
 
-from silver_parse import local, number, reject, strip_ns, text, timestamp
+from silver_parse import OSLO, local, number, reject, strip_ns, text, timestamp
 
-OSLO = ZoneInfo("Europe/Oslo")
 XSI_TYPE = "{http://www.w3.org/2001/XMLSchema-instance}type"
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
@@ -34,13 +32,15 @@ def utm33_to_wgs84(easting, northing):
     eta_p = eta - sum(b * math.cos(2 * j * xi) * math.sinh(2 * j * eta) for j, b in enumerate(_BETA, 1))
     chi = math.asin(math.sin(xi_p) / math.cosh(eta_p))
     latitude = chi + sum(d * math.sin(2 * j * chi) for j, d in enumerate(_DELTA, 1))
-    return round(math.degrees(latitude), 6), round(15.0 + math.degrees(math.atan2(math.sinh(eta_p), math.cos(xi_p))), 6)
+    longitude = 15.0 + math.degrees(math.atan2(math.sinh(eta_p), math.cos(xi_p)))
+    return round(math.degrees(latitude), 6), round(longitude, 6)
 
 
 def distance_m(a, b):
     """Great-circle metres between two {latitude, longitude}."""
     lat1, lat2 = math.radians(a["latitude"]), math.radians(b["latitude"])
-    x = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(math.radians(b["longitude"] - a["longitude"]) / 2) ** 2
+    d_lon = math.radians(b["longitude"] - a["longitude"])
+    x = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(d_lon / 2) ** 2
     return 2 * 6371000 * math.asin(math.sqrt(x))
 
 
@@ -155,6 +155,7 @@ def parse_location(item, issues):
 
 
 def parse_record(situation, record, base, source_day):
+    """One situation record: what, how severe, when it applies during source_day, and where."""
     issues = list(base["dq_issue"])
     validity = record.find("validity/validityTimeSpecification")
     if validity is None:
@@ -167,7 +168,8 @@ def parse_record(situation, record, base, source_day):
                             end_at=timestamp(text(period, "endOfPeriod"), issues, "period_end"),
                             time_from=text(period, "recurringTimePeriodOfDay/startTimeOfPeriod"),
                             time_to=text(period, "recurringTimePeriodOfDay/endTimeOfPeriod"),
-                            days=[(e.text or "").strip() for e in period.findall("recurringDayWeekMonthPeriod/applicableDay")]))
+                            days=[(e.text or "").strip()
+                                  for e in period.findall("recurringDayWeekMonthPeriod/applicableDay")]))
     comments = {text(c, "commentType"): value_text(c, "comment") for c in record.findall("generalPublicComment")}
     reference = record.find("locationReference")
     items = [] if reference is None else (reference.findall("locationContainedInGroup") or [reference])
@@ -189,7 +191,8 @@ def parse_record(situation, record, base, source_day):
                 severity=text(record, "severity"), probability=text(record, "probabilityOfOccurrence"),
                 safety_related=text(record, "safetyRelatedMessage") == "true",
                 compliance=text(record, "complianceOption"),
-                lanes_restricted=number(text(record, "impact/numberOfLanesRestricted"), issues, "lanes_restricted", integer=True),
+                lanes_restricted=number(text(record, "impact/numberOfLanesRestricted"), issues, "lanes_restricted",
+                                        integer=True),
                 detailed_cause=(cause[0].text or "").strip() if cause is not None and len(cause) else None,
                 roadworks_id=text(record, "roadworksIdentifier"), maintenance_type=text(record, "roadMaintenanceType"),
                 start_at=start, end_at=end, valid_periods=periods, active_intervals=intervals,
@@ -240,11 +243,12 @@ def parse_traveltime(payload, base):
             status[section] = text(data, "trafficStatus/trafficStatusValue")
         elif kind == "TravelTimeData":
             issues = list(base["dq_issue"])
+            period = "measurementOrCalculationTime/period/"
             measured[section] = dict(
                 base, kind="value", dq_issue=issues, section_id=section, section_version=ref.get("version"),
                 publication_at=publication,
-                period_start_at=timestamp(text(data, "measurementOrCalculationTime/period/startOfPeriod"), issues, "period_start"),
-                period_end_at=timestamp(text(data, "measurementOrCalculationTime/period/endOfPeriod"), issues, "period_end"),
+                period_start_at=timestamp(text(data, period + "startOfPeriod"), issues, "period_start"),
+                period_end_at=timestamp(text(data, period + "endOfPeriod"), issues, "period_end"),
                 travel_time_s=number(text(data, "travelTime/duration"), issues, "travel_time"),
                 free_flow_s=number(text(data, "freeFlowTravelTime/duration"), issues, "free_flow"),
                 free_flow_kmh=number(text(data, "freeFlowSpeed/speed"), issues, "free_flow_speed"),
@@ -262,11 +266,12 @@ WEATHER_QUANTITIES = {
     "roadSurfaceTemperature": "road_surface_temperature_c", "minimumTemperature": "air_temperature_min_c",
     "maximumTemperature": "air_temperature_max_c", "windSpeed": "wind_speed", "maximumWindSpeed": "wind_gust",
     "windDirectionBearing": "wind_direction_deg", "minimumVisibilityDistance": "visibility_m",
-    "precipitationIntensity": "precipitation_mm_h", "waterFilmThickness": "water_film", "iceLayerThickness": "ice_layer",
-    "depthOfSnow": "snow_depth", "friction": "friction", "temperatureBelowOrAboveRoadSurface": "subsurface_temperature_c",
-    "weatherRelatedRoadConditionType": "road_condition"}
+    "precipitationIntensity": "precipitation_mm_h", "waterFilmThickness": "water_film",
+    "iceLayerThickness": "ice_layer", "depthOfSnow": "snow_depth", "friction": "friction",
+    "temperatureBelowOrAboveRoadSurface": "subsurface_temperature_c", "weatherRelatedRoadConditionType": "road_condition"}
 # Containers between basicData and the quantity's own element.
-_WEATHER_GROUPS = {"temperature", "humidity", "wind", "visibility", "precipitationDetail", "roadSurfaceConditionMeasurements"}
+_WEATHER_GROUPS = {"temperature", "humidity", "wind", "visibility", "precipitationDetail",
+                   "roadSurfaceConditionMeasurements"}
 
 
 def weather_quantity(data):
@@ -312,22 +317,26 @@ def parse_weather(payload, base):
 
 
 def parse_weather_sites(payload, base):
+    """The weather stations: one row per site, with its position and road."""
     root = strip_ns(ET.fromstring(payload))
     publication = timestamp(text(root, "payload/publicationTime"), base["dq_issue"], "publication_at")
     for site in root.iter("measurementSite"):
         issues = list(base["dq_issue"])
         location = site.find("measurementSiteLocation")
         location = location if location is not None else ET.Element("none")
-        yield dict(base, kind="site", dq_issue=issues, publication_at=publication, id=site.get("id"), version=site.get("version"),
-                   name=value_text(site, "measurementSiteName"),
-                   latitude=number(text(location, "pointByCoordinates/pointCoordinates/latitude"), issues, "latitude"),
-                   longitude=number(text(location, "pointByCoordinates/pointCoordinates/longitude"), issues, "longitude"),
-                   road_number=text(location, "supplementaryPositionalDescription/roadInformation/roadNumber"),
-                   county_code=text(location, "supplementaryPositionalDescription/namedArea/subdivisionCode"),
-                   county=value_text(location, "supplementaryPositionalDescription/namedArea/areaName"))
+        point = "pointByCoordinates/pointCoordinates/"
+        described = "supplementaryPositionalDescription/"
+        yield dict(base, kind="site", dq_issue=issues, publication_at=publication,
+                   id=site.get("id"), version=site.get("version"), name=value_text(site, "measurementSiteName"),
+                   latitude=number(text(location, point + "latitude"), issues, "latitude"),
+                   longitude=number(text(location, point + "longitude"), issues, "longitude"),
+                   road_number=text(location, described + "roadInformation/roadNumber"),
+                   county_code=text(location, described + "namedArea/subdivisionCode"),
+                   county=value_text(location, described + "namedArea/areaName"))
 
 
 def parse_sections(payload, base):
+    """The travel time sections: one row per road section, with its path."""
     root = strip_ns(ET.fromstring(payload))
     publication = timestamp(text(root, "payload/publicationTime"), base["dq_issue"], "publication_at")
     for section in root.iter("predefinedLocationReference"):
@@ -343,13 +352,15 @@ def situation_points(rows):
     """mapInArrow body: one row per point of each situation location, for the spatial links."""
     for row in rows:
         for location in row["locations"] or []:
-            points = along_path(location["path"]) or ([dict(latitude=location["latitude"], longitude=location["longitude"])]
-                                                      if location["latitude"] is not None and location["longitude"] is not None else [])
+            points = along_path(location["path"])
+            if not points and location["latitude"] is not None and location["longitude"] is not None:
+                points = [dict(latitude=location["latitude"], longitude=location["longitude"])]
             for point in points:
                 yield dict(record_id=row["record_id"], version=row["version"], version_at=row["version_at"], **point)
 
 
 def section_points(rows):
+    """mapInArrow body: points along each travel time section, for the spatial links."""
     for row in rows:
         for point in along_path(row["path"]):
             yield dict(section_id=row["id"], **point)
@@ -365,6 +376,8 @@ def failed_delivery(payload):
 
 
 def decode_partition(rows, feed):
+    """One task's Bronze polls of a feed -> decoded rows. Failed and unchanged polls carry no data;
+    a poll that breaks the line contract becomes a quarantine row."""
     seen = set()    # one task's situation versions (parse_situation), or snapshot hashes
     for source in rows:
         issues = []
@@ -376,13 +389,14 @@ def decode_partition(rows, feed):
             # Evidence of when we could not see NPRA; Bronze's run record counts them.
             continue
         if status not in ("ok", "not_modified"):
-            yield reject(dict(base, record_sha256=base["payload_sha256"]), "bronze_" + status)
+            yield reject(base, "bronze_" + status)
             continue
         if status == "not_modified" or source["payload"] is None:
             continue
         try:
             if feed == "situation":
-                decoded = parse_situation(source["payload"], dict(base, _seen=seen), date.fromisoformat(source["source_date"]))
+                decoded = parse_situation(source["payload"], dict(base, _seen=seen),
+                                          date.fromisoformat(source["source_date"]))
             elif source["_bronze_payload_sha256"] in seen:
                 continue    # polled at twice NPRA's cadence: most snapshots repeat byte for byte
             else:
@@ -399,10 +413,12 @@ def decode_partition(rows, feed):
                 # repeats the data (1 of ~12,000 polls, 2026-10-28 to 11-08). Any other
                 # well-formed XML without the feed's content is a contract failure.
                 reason = failed_delivery(source["payload"])
-                located = dict(base, record_sha256=base["payload_sha256"])
-                yield reject(located, "source_delivery_failed", {"reason": reason}) if reason else reject(located, "unknown_message_shape")
+                if reason:
+                    yield reject(base, "source_delivery_failed", {"reason": reason})
+                else:
+                    yield reject(base, "unknown_message_shape")
         except ET.ParseError:
-            yield reject(dict(base, record_sha256=base["payload_sha256"]), "malformed_payload")
+            yield reject(base, "malformed_payload")
 
 
 def schema(feed):
@@ -414,8 +430,9 @@ def schema(feed):
         return StructType([StructField(k, v) for k, v in columns.items()])
 
     point = struct(latitude=DoubleType(), longitude=DoubleType())
-    fields = dict(kind=StringType(), received_at=TimestampType(), publication_at=TimestampType(), source_file=StringType(),
-                  payload_sha256=StringType(), bronze_run_id=StringType(), dq_issue=ArrayType(StringType()), entity_json=StringType())
+    fields = dict(kind=StringType(), received_at=TimestampType(), publication_at=TimestampType(),
+                  source_file=StringType(), payload_sha256=StringType(), bronze_run_id=StringType(),
+                  dq_issue=ArrayType(StringType()), entity_json=StringType())
     if feed == "situation":
         fields.update({k: StringType() for k in (
             "record_id", "version", "situation_id", "overall_severity", "record_type", "severity", "probability", "compliance",
@@ -425,9 +442,10 @@ def schema(feed):
                       valid_periods=ArrayType(struct(start_at=TimestampType(), end_at=TimestampType(), time_from=StringType(),
                                                      time_to=StringType(), days=ArrayType(StringType()))),
                       active_intervals=ArrayType(struct(start_at=TimestampType(), end_at=TimestampType())),
-                      locations=ArrayType(struct(kind=StringType(), latitude=DoubleType(), longitude=DoubleType(), length_m=DoubleType(),
-                                                 road_number=StringType(), road_name=StringType(), county_code=StringType(),
-                                                 county=StringType(), description=StringType(), path=ArrayType(point))))
+                      locations=ArrayType(struct(kind=StringType(), latitude=DoubleType(), longitude=DoubleType(),
+                                                 length_m=DoubleType(), road_number=StringType(), road_name=StringType(),
+                                                 county_code=StringType(), county=StringType(),
+                                                 description=StringType(), path=ArrayType(point))))
     elif feed == "traveltime":
         fields.update(section_id=StringType(), section_version=StringType(), period_start_at=TimestampType(),
                       period_end_at=TimestampType(), travel_time_s=DoubleType(), free_flow_s=DoubleType(),
@@ -438,7 +456,8 @@ def schema(feed):
     else:
         fields.update({k: StringType() for k in ("id", "version", "name")})
         if feed == "weather-sites":
-            fields.update(latitude=DoubleType(), longitude=DoubleType(), road_number=StringType(), county_code=StringType(), county=StringType())
+            fields.update(latitude=DoubleType(), longitude=DoubleType(), road_number=StringType(),
+                          county_code=StringType(), county=StringType())
         else:
             fields.update(path=ArrayType(point))
     return StructType([StructField(k, v) for k, v in fields.items()])
