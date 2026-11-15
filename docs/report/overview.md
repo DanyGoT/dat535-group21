@@ -434,8 +434,8 @@ departures = departures.withColumn("_bucket", F.floor(F.col("b_at") / MAX_SLACK_
 pairs = arrivals.join(departures, ["operating_date", "hub_id", "_bucket"]).filter(
     (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S) & (F.col("from_line_id") != F.col("to_line_id")))
 arrival = ["a_journey", "a_order", "to_line_id", "to_destination_id"]
-pairs = pairs.groupBy(*arrival).agg(F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]),
-                                             F.struct("b_at", "b_journey")).alias("_first")).select(*arrival, "_first.*")
+first = F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]), F.struct("b_at", "b_journey"))
+pairs = pairs.groupBy(*arrival).agg(first.alias("_first")).select(*arrival, "_first.*")
 ```
 
 Gold stores a histogram of the gap change, departure delay minus arrival delay in minutes. A
