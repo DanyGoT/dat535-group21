@@ -30,17 +30,14 @@ Usage:
     python pipeline/bronze_datex.py --hours 08         # yesterday, 08:00-09:00 UTC only
 """
 
-import argparse
 import logging
 import math
 import os
 import sys
-from datetime import date as Date, timedelta
-from importlib.util import find_spec
 from pathlib import Path
 
-from bronze import (HOURS, MAX_STRING_LEN, create_spark, iso, parse_hours, run_id, scan_day, utcnow,
-                    write_run_record)
+from bronze import (HOURS, cli, create_spark, iso, read_landing, run_id, scan_day, status_counts, utcnow,
+                    with_evidence, write_run_record)
 
 log = logging.getLogger("bronze_datex")
 
@@ -60,31 +57,15 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
     Returns the feed's entry for the run record (rows, bad_rows, polls, coverage, output).
     """
     from pyspark.sql import Window
-    from pyspark.sql.functions import (col, count_distinct, input_file_name, lag, lit, octet_length,
-                                       regexp_extract, sha2, when)
+    from pyspark.sql.functions import col, count_distinct, lag, when
     from pyspark.sql.functions import max as max_
     from pyspark.sql.functions import min as min_
-    from pyspark.sql.types import IntegerType, StringType, StructField, StructType
+    from pyspark.sql.types import IntegerType, StringType
 
-    # Explicit schema: the line format is ours (written by datex.py), so no inference.
-    schema = StructType([
-        StructField("requested_at", StringType()),
-        StructField("received_at", StringType()),
-        StructField("endpoint", StringType()),
-        StructField("http_status", IntegerType()),
-        StructField("last_modified", StringType()),
-        StructField("error", StringType()),
-        StructField("payload", StringType()),
-        StructField("_bronze_raw_line", StringType()),
-    ])
-    raw = spark.read \
-        .schema(schema) \
-        .option("mode", "PERMISSIVE") \
-        .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
-        .option("encoding", "UTF-8") \
-        .option("maxStringLen", MAX_STRING_LEN) \
-        .json([str(f) for f in files])
-
+    raw = read_landing(spark, files, [
+        ("requested_at", StringType()), ("received_at", StringType()), ("endpoint", StringType()),
+        ("http_status", IntegerType()), ("last_modified", StringType()), ("error", StringType()),
+        ("payload", StringType())])
     status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
         .when(col("received_at").isNull() | col("endpoint").isNull()
               | (col("http_status").isNull() & col("error").isNull()), "incomplete") \
@@ -93,20 +74,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .when(col("http_status") == 304, "not_modified") \
         .when(col("payload").isNull(), "incomplete") \
         .otherwise("ok")
-
-    bronze = raw \
-        .withColumn("_bronze_source_file", input_file_name()) \
-        .withColumn("hour", regexp_extract(col("_bronze_source_file"), r"hour=(\d{2})\.jsonl", 1)) \
-        .withColumn("feed", lit(feed)) \
-        .withColumn("_bronze_payload_sha256", sha2(col("payload"), 256)) \
-        .withColumn("_bronze_payload_bytes", octet_length(col("payload"))) \
-        .withColumn("_bronze_status", status) \
-        .withColumn("_bronze_ingested_at", lit(ingested_at)) \
-        .withColumn("_bronze_run_id", lit(rid)) \
-        .select("requested_at", "received_at", "endpoint", "http_status", "last_modified", "error",
-                "payload", "feed", "hour",
-                "_bronze_payload_sha256", "_bronze_payload_bytes", "_bronze_status", "_bronze_raw_line",
-                "_bronze_source_file", "_bronze_ingested_at", "_bronze_run_id")
+    bronze = with_evidence(raw, feed, status, rid, ingested_at)
 
     # Straight into the day's directory, not partitionBy("date"): that sorts the whole day by
     # the (constant) partition column and spills it to the small root disk. Readers of the
@@ -125,7 +93,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
 
     # Everything below reads narrow columns of the written Parquet, never the payloads.
     written = spark.read.parquet(str(partition))
-    counts = {r["_bronze_status"]: r["count"] for r in written.groupBy("_bronze_status").count().collect()}
+    counts = status_counts(written)
     # Epoch seconds, not collected timestamps: PySpark returns those naive, in local time.
     # A day has at most ~600 successful polls per feed: one window partition is cheap.
     polls = written.filter(col("_bronze_status").isin("ok", "not_modified")) \
@@ -180,32 +148,7 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
 
 
 def main(argv=None):
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--date", type=Date.fromisoformat,
-                   default=(utcnow() - timedelta(days=1)).date(),
-                   help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
-    p.add_argument("--feeds", default=",".join(FEEDS),
-                   help=f"comma-separated feeds (default: {','.join(FEEDS)})")
-    p.add_argument("--hours", type=parse_hours, default=HOURS,
-                   help="comma-separated UTC hours, e.g. 08,09 (default: the whole day)")
-    args = p.parse_args(argv)
-    feeds = [f.strip() for f in args.feeds.split(",") if f.strip()]
-    unknown = set(feeds) - set(FEEDS)
-    if unknown:
-        p.error(f"unknown feeds: {sorted(unknown)}")
-
-    if find_spec("pyspark") is None:
-        log.error("pyspark is not installed (activate ~/spark-env)")
-        return 1
-    landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
-    output_dir = Path(os.environ.get("DAT535_OUTPUT_DIR", "output"))
-    if not landing.is_dir():
-        log.error("landing directory %s does not exist", landing)
-        return 1
-    run(landing, output_dir, args.date, feeds, hours=args.hours)
-    return 0
+    return cli(__doc__, FEEDS, run, argv)
 
 
 if __name__ == "__main__":
