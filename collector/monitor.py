@@ -185,12 +185,15 @@ def static_from_env():
     return [d.strip() for d in raw.split(",") if d.strip()]
 
 
+def archived(path):
+    """A finished daily download: not the .part being written, a .tmp, or the .meta.json beside it."""
+    return path.is_file() and not path.name.endswith((".part", ".json", ".tmp"))
+
+
 def newest_static(landing, dataset):
-    """Newest complete archived file of a daily download: <dataset>/date=*/<file>, without the
-    .part being downloaded and the .meta.json next to it."""
+    """Newest complete archived file of a daily download: <dataset>/date=*/<file>."""
     for day in sorted((Path(landing) / dataset).glob("date=*"), reverse=True):
-        files = [p for p in day.iterdir()
-                 if p.is_file() and not p.name.endswith((".part", ".json", ".tmp"))]
+        files = [p for p in day.iterdir() if archived(p)]
         if files:
             return max(files, key=lambda p: p.stat().st_mtime)
     return None
@@ -293,15 +296,7 @@ a { color: inherit; }
 header { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline; margin-bottom: 36px; }
 h1 { font-size: 14px; letter-spacing: .18em; margin: 0; }
 h2 { font-size: 12px; font-weight: 400; letter-spacing: .18em; color: var(--mute); margin: 0 0 10px; }
-.links { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0 32px; margin-bottom: 48px; }
-.link { display: grid; grid-template-columns: 2ch 13ch 1fr; padding: 7px 0; text-decoration: none; }
-.link b { font-weight: 700; }
-.link:hover b { text-decoration: underline; }
-.link i { font-style: normal; color: var(--run); }
-.link.down i, .link.down .mute { color: var(--fail); }
 .mute { color: var(--mute); }
-.msg { margin: -20px 0 28px; color: var(--mute); }
-.msg::before { content: "> "; }
 .row { padding: 16px 0; border-top: 1px solid var(--line); }
 .row:last-child { border-bottom: 1px solid var(--line); }
 .top { display: grid; grid-template-columns: 11ch 1fr auto; gap: 12px; align-items: baseline; }
@@ -312,20 +307,16 @@ h2 { font-size: 12px; font-weight: 400; letter-spacing: .18em; color: var(--mute
 .st::before { content: "■ "; }
 .active .st { color: var(--run); }
 .failed .st { color: var(--fail); }
-.activating .st, .deactivating .st { color: var(--busy); }
-button, .btn {
+button {
   font: inherit; font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
   color: var(--fg); background: none; border: 0; padding: 6px 8px; cursor: pointer; text-decoration: none;
 }
-button:hover, .btn:hover { text-decoration: underline; }
-pre { margin: 24px 0 0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+button:hover { text-decoration: underline; }
 @media (max-width: 520px) {
   .top { grid-template-columns: 1fr auto; }
   .top .st { grid-column: 1 / -1; }
   .desc { margin-left: 0; }
 }
-.badge { font-weight: 700; margin-left: 1ch; color: var(--busy); text-decoration: none; }
-.badge.error { color: var(--fail); }
 .health h2 { margin-top: 32px; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 2ch; }
 .ok { color: var(--run); }
