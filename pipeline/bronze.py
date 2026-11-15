@@ -129,23 +129,15 @@ def create_spark(app_name="DAT535-Bronze", settings=None):
     return spark
 
 
-def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
-    """Read the closed hour files of one feed/day and overwrite that day's Bronze partition.
-
-    Returns {"rows": n, "bad_rows": {status: n}}.
-    """
-    from pyspark.sql.functions import (col, input_file_name, lit, octet_length, regexp_extract,
-                                       sha2, when)
+def read_landing(spark, files, fields):
+    """The lines of closed hour files with an explicit schema: the line format is ours
+    (collector/), so nothing is inferred. A line that is not JSON keeps its text in
+    _bronze_raw_line instead of failing the read."""
     from pyspark.sql.types import StringType, StructField, StructType
 
-    # Explicit schema: the line format is ours (receiver.py, vehicles.py), so no inference.
-    schema = StructType([
-        StructField("received_at", StringType()),
-        StructField("endpoint", StringType()),
-        StructField("payload", StringType()),
-        StructField("_bronze_raw_line", StringType()),
-    ])
-    raw = spark.read \
+    schema = StructType([StructField(name, kind) for name, kind in fields]
+                        + [StructField("_bronze_raw_line", StringType())])
+    return spark.read \
         .schema(schema) \
         .option("mode", "PERMISSIVE") \
         .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
@@ -153,12 +145,14 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .option("maxStringLen", MAX_STRING_LEN) \
         .json([str(f) for f in files])
 
-    status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
-        .when(col("received_at").isNull() | col("payload").isNull(), "incomplete") \
-        .when(col("endpoint") != feed, "wrong_endpoint") \
-        .otherwise("ok")
 
-    bronze = raw \
+def with_evidence(raw, feed, status, rid, ingested_at):
+    """The landed columns unchanged, plus where each row came from, what its payload was,
+    and which run wrote it."""
+    from pyspark.sql.functions import col, input_file_name, lit, octet_length, regexp_extract, sha2
+
+    landed = [c for c in raw.columns if c != "_bronze_raw_line"]
+    return raw \
         .withColumn("_bronze_source_file", input_file_name()) \
         .withColumn("hour", regexp_extract(col("_bronze_source_file"), r"hour=(\d{2})\.jsonl", 1)) \
         .withColumn("feed", lit(feed)) \
@@ -167,9 +161,31 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .withColumn("_bronze_status", status) \
         .withColumn("_bronze_ingested_at", lit(ingested_at)) \
         .withColumn("_bronze_run_id", lit(rid)) \
-        .select("received_at", "endpoint", "payload", "feed", "hour",
+        .select(*landed, "feed", "hour",
                 "_bronze_payload_sha256", "_bronze_payload_bytes", "_bronze_status", "_bronze_raw_line",
                 "_bronze_source_file", "_bronze_ingested_at", "_bronze_run_id")
+
+
+def status_counts(written):
+    """{_bronze_status: rows} of a written partition: reads one narrow column, no payloads."""
+    return {r["_bronze_status"]: r["count"] for r in written.groupBy("_bronze_status").count().collect()}
+
+
+def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
+    """Read the closed hour files of one feed/day and overwrite that day's Bronze partition.
+
+    Returns {"rows": n, "bad_rows": {status: n}}.
+    """
+    from pyspark.sql.functions import col, when
+    from pyspark.sql.types import StringType
+
+    raw = read_landing(spark, files, [("received_at", StringType()), ("endpoint", StringType()),
+                                      ("payload", StringType())])
+    status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
+        .when(col("received_at").isNull() | col("payload").isNull(), "incomplete") \
+        .when(col("endpoint") != feed, "wrong_endpoint") \
+        .otherwise("ok")
+    bronze = with_evidence(raw, feed, status, rid, ingested_at)
 
     # No cache and no coalesce: a day of ET is ~200 GB of raw lines. Gzip is not splittable,
     # so Spark reads one task per hour file and writes about one Parquet file per hour.
@@ -181,9 +197,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
         .mode("overwrite") \
         .parquet(str(partition))
 
-    # Count from the written Parquet: reads only the _bronze_status column instead of re-parsing.
-    written = spark.read.parquet(str(partition))
-    counts = {r["_bronze_status"]: r["count"] for r in written.groupBy("_bronze_status").count().collect()}
+    counts = status_counts(spark.read.parquet(str(partition)))
     return {"rows": sum(counts.values()),
             "bad_rows": {k: v for k, v in counts.items() if k != "ok"}}
 
@@ -232,20 +246,21 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
     return record
 
 
-def main(argv=None):
+def cli(doc, feeds, run, argv=None):
+    """The command line of both Bronze jobs: parse --date, --feeds and --hours, then run."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(description=doc.splitlines()[0])
     p.add_argument("--date", type=Date.fromisoformat,
                    default=(utcnow() - timedelta(days=1)).date(),
                    help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
-    p.add_argument("--feeds", default=",".join(FEEDS),
-                   help="comma-separated feeds (default: et,sx,vehicles)")
+    p.add_argument("--feeds", default=",".join(feeds),
+                   help=f"comma-separated feeds (default: {','.join(feeds)})")
     p.add_argument("--hours", type=parse_hours, default=HOURS,
                    help="comma-separated UTC hours, e.g. 08,09 (default: the whole day)")
     args = p.parse_args(argv)
-    feeds = [f.strip() for f in args.feeds.split(",") if f.strip()]
-    unknown = set(feeds) - set(FEEDS)
+    chosen = [f.strip() for f in args.feeds.split(",") if f.strip()]
+    unknown = set(chosen) - set(feeds)
     if unknown:
         p.error(f"unknown feeds: {sorted(unknown)}")
 
@@ -257,8 +272,12 @@ def main(argv=None):
     if not landing.is_dir():
         log.error("landing directory %s does not exist", landing)
         return 1
-    run(landing, output_dir, args.date, feeds, hours=args.hours)
+    run(landing, output_dir, args.date, chosen, hours=args.hours)
     return 0
+
+
+def main(argv=None):
+    return cli(__doc__, FEEDS, run, argv)
 
 
 if __name__ == "__main__":

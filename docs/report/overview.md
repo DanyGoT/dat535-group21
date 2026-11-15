@@ -117,14 +117,10 @@ More: [landing contract](../system/architecture.md#landing-zone),
 Unreadable lines remain labelled evidence.
 
 ```python
-# pipeline/bronze.py, ingest_feed
-schema = StructType([
-    StructField("received_at", StringType()),
-    StructField("endpoint", StringType()),
-    StructField("payload", StringType()),
-    StructField("_bronze_raw_line", StringType()),
-])
-raw = spark.read \
+# pipeline/bronze.py, read_landing: an explicit schema, the line format is ours
+schema = StructType([StructField(name, kind) for name, kind in fields]
+                    + [StructField("_bronze_raw_line", StringType())])
+return spark.read \
     .schema(schema) \
     .option("mode", "PERMISSIVE") \
     .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
@@ -132,6 +128,7 @@ raw = spark.read \
     .option("maxStringLen", MAX_STRING_LEN) \
     .json([str(f) for f in files])
 
+# pipeline/bronze.py, ingest_feed
 status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
     .when(col("received_at").isNull() | col("payload").isNull(), "incomplete") \
     .when(col("endpoint") != feed, "wrong_endpoint") \
