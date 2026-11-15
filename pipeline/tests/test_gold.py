@@ -1,13 +1,12 @@
 """Offline Gold semantics and publication checks over small Silver-shaped fixtures."""
 
 import json
-import sys
 import tempfile
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from support import SparkCase
 
 import gold as G
 
@@ -73,19 +72,7 @@ def journey(jid, planned=True, reported=True, line="T:Line:1", **extra):
     return result
 
 
-class GoldTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from pyspark.sql import SparkSession
-        cls.spark = SparkSession.builder.master("local[2]").appName("gold-tests") \
-            .config("spark.sql.session.timeZone", "UTC").config("spark.ui.enabled", "false") \
-            .config("spark.sql.shuffle.partitions", "2").getOrCreate()
-        cls.spark.sparkContext.setLogLevel("ERROR")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.spark.stop()
-
+class GoldTest(SparkCase):
     def frames(self, calls=None, journeys=None):
         frame = self.spark.createDataFrame
         return {

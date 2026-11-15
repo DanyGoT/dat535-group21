@@ -1,24 +1,12 @@
-"""Local tests for the Bronze job. Builds a tiny landing zone in a temp dir; never calls Entur.
+"""Local tests for the Bronze job. Builds a tiny landing zone in a temp dir; never calls Entur."""
 
-Run from the repo root (Spark tests need pyspark + Java, e.g. inside ~/spark-env):
-    python3 -m unittest discover -s pipeline/tests -v
-"""
-
-import gzip
 import json
-import os
-import shutil
-import sys
-import tempfile
 import unittest
 from datetime import date
-from importlib.util import find_spec
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+from support import LandingCase, SparkCase
 
-import bronze  # noqa: E402
+import bronze
 
 DAY = date(2026, 10, 15)
 ET_XML = '<?xml version="1.0"?>\n<Siri version="2.0"><!-- æøå --></Siri>\n'
@@ -33,27 +21,12 @@ def line(feed, payload=ET_XML, received_at="2026-10-15T05:00:01.000Z"):
                       ensure_ascii=False) + "\n"
 
 
-class LandingCase(unittest.TestCase):
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="bronze-test-"))
-        self.landing = self.tmp / "landing"
-        self.out = self.tmp / "out"
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def put(self, feed, name, text, day=DAY):
-        path = self.landing / bronze.DATASETS[feed] / f"date={day}" / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if name.endswith(".gz"):
-            with gzip.open(path, "wt", encoding="utf-8") as fh:
-                fh.write(text)
-        else:
-            path.write_text(text, encoding="utf-8")
-        return path
+class BronzeLandingCase(LandingCase):
+    day = DAY
+    dataset = staticmethod(bronze.DATASETS.get)
 
 
-class ScanDayTest(LandingCase):
+class ScanDayTest(BronzeLandingCase):
     def test_only_closed_files(self):
         gz = self.put("et", "hour=05.jsonl.gz", line("et"))
         legacy = self.put("et", "hour=04.jsonl", line("et"))
@@ -94,24 +67,9 @@ class ParseHoursTest(unittest.TestCase):
                 bronze.parse_hours(text)
 
 
-@unittest.skipUnless(find_spec("pyspark"), "pyspark not installed")
-class IngestTest(LandingCase):
-    @classmethod
-    def setUpClass(cls):
-        from pyspark.sql import SparkSession
-        cls.spark = SparkSession.builder.master("local[1]").appName("bronze-test") \
-            .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
-            .config("spark.sql.session.timeZone", "UTC") \
-            .config("spark.ui.enabled", "false") \
-            .getOrCreate()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.spark.stop()
-
+class IngestTest(BronzeLandingCase, SparkCase):
     def setUp(self):
         super().setUp()
-        os.environ.pop("GITHUB_RUN_ID", None)
         self.put("et", "hour=04.jsonl", line("et") + line("et", received_at="2026-10-15T04:59:59.000Z"))
         self.put("et", "hour=05.jsonl.gz",
                  line("et") + "{not json\n" + json.dumps({"received_at": "x"}) + "\n" + line("sx"))
@@ -178,12 +136,9 @@ class IngestTest(LandingCase):
         self.assertEqual({r["hour"] for r in self.read("et").collect()}, {"05"})
 
     def test_landing_untouched(self):
-        before = sorted((p.relative_to(self.landing), p.stat().st_size, p.stat().st_mtime_ns)
-                        for p in self.landing.rglob("*") if p.is_file())
+        before = self.landing_files()
         bronze.run(self.landing, self.out, DAY, spark=self.spark)
-        after = sorted((p.relative_to(self.landing), p.stat().st_size, p.stat().st_mtime_ns)
-                       for p in self.landing.rglob("*") if p.is_file())
-        self.assertEqual(before, after)
+        self.assertEqual(self.landing_files(), before)
 
     def test_payload_longer_than_jacksons_default(self):
         # Prod ET had pushes of 21.6M and 22.8M characters on 2026-10-22, marked corrupt then.
