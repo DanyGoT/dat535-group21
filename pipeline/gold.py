@@ -55,6 +55,7 @@ INCIDENTS = ("Accident", "AnimalPresenceObstruction", "EnvironmentalObstruction"
 
 
 def source_record(output, source, day, allow_partial=False):
+    """The Silver marker Gold reads for one source and day, refused unless it is published."""
     runs, partition, schema, _ = SOURCES[source]
     path = Path(output) / "silver" / runs / f"{partition}={day}" / "latest.json"
     record = json.loads(path.read_text())
@@ -87,6 +88,7 @@ def read_silver(spark, output, source, day, record):
 
 
 def count_if(condition, name):
+    """Rows where condition holds: 0, never null, for a group with none."""
     F = functions()
     return F.sum(F.when(condition, 1).otherwise(0)).alias(name)
 
@@ -110,6 +112,7 @@ def scored_departure():
 
 
 def departure_measures(scored):
+    """Timed departures, late ones and the delay histogram (DELAY_BINS), all additive."""
     F = functions()
     delay = F.col("departure_delay_s")
     measures = [count_if(scored, "scored_departures"), count_if(scored & (delay >= LATE_S), "late_departures")]
@@ -230,7 +233,8 @@ def build_stops(calls, quay_hub, hub_labels):
     cancelled = reported_cancel & F.coalesce(F.col("for_boarding"), F.lit(True)) & at.isNotNull()
     rows = calls.filter(scored | cancelled).join(F.broadcast(quay_hub), "quay_id", "left") \
         .withColumn("hub_id", F.coalesce("hub_id", F.lit(UNKNOWN_HUB))).withColumn("hour", local_hour(at))
-    return rows.groupBy(*KEYS["stop_reliability"]).agg(*departure_measures(scored), count_if(cancelled, "cancelled_departures")) \
+    return rows.groupBy(*KEYS["stop_reliability"]) \
+        .agg(*departure_measures(scored), count_if(cancelled, "cancelled_departures")) \
         .join(F.broadcast(hub_labels), "hub_id", "left")
 
 
@@ -270,8 +274,8 @@ def build_transfers(calls, quay_hub, hub_labels):
     pairs = arrivals.join(departures, ["operating_date", "hub_id", "_bucket"]).filter(
         (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S) & (F.col("from_line_id") != F.col("to_line_id")))
     arrival = ["a_journey", "a_order", "to_line_id", "to_destination_id"]
-    pairs = pairs.groupBy(*arrival).agg(F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]),
-                                                 F.struct("b_at", "b_journey")).alias("_first")).select(*arrival, "_first.*")
+    first = F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]), F.struct("b_at", "b_journey"))
+    pairs = pairs.groupBy(*arrival).agg(first.alias("_first")).select(*arrival, "_first.*")
 
     gone = F.col("a_cancelled") | F.col("b_cancelled")
     known = ~gone & F.col("a_delay").isNotNull() & F.col("b_delay").isNotNull()
@@ -300,8 +304,10 @@ def build_conditions(calls, roads, day):
         F.coalesce("mode", F.lit("unknown")).alias("mode"), F.col("aimed_departure_at").alias("at"))
     call = ["journey_id", "call_order"]
 
+    def flagged(issue):
+        return F.array_contains("dq_issue", issue)
+
     # Weather: the quay's nearest usable station within 10 km, measured in the same UTC hour.
-    flagged = lambda issue: F.array_contains("dq_issue", issue)
     stuck = roads["weather_site"].select(F.col("id").alias("site_id"),
                                          F.array_contains("stuck_quantities", "precipitation_mm_h").alias("_stuck"))
     hourly = roads["road_weather"].filter(~flagged("stale_measurement")).join(F.broadcast(stuck), "site_id", "left") \
@@ -312,16 +318,19 @@ def build_conditions(calls, roads, day):
     sites = roads["quay_weather_site"].filter(F.col("distance_m") <= WEATHER_MAX_M).select("quay_id", "site_id")
 
     # Situations: the worst active record linked to the quay (within 500 m in Silver).
+    severity = F.when(F.col("record_type").isin(*INCIDENTS), 2).otherwise(1)
     situations = roads["quay_road_situation"].join(
         roads["road_situation_interval"], ["record_id", "version", "version_at"]).select(
-        "quay_id", "start_at", "end_at", F.when(F.col("record_type").isin(*INCIDENTS), 2).otherwise(1).alias("_severity"))
+        "quay_id", "start_at", "end_at", severity.alias("_severity"))
     active = departures.select(*call, "quay_id", "at").join(F.broadcast(situations), "quay_id") \
         .filter((F.col("at") >= F.col("start_at")) & (F.col("at") < F.col("end_at"))) \
         .groupBy(*call).agg(F.max("_severity").alias("_situation"))
 
     # Traffic: the most congested measured section within 500 m in the departure's 5-minute period.
     # NPRA periods start 10 ms after the boundary (00:05:00.010), so both sides use whole periods.
-    period = lambda column: F.floor(F.col(column).cast("long") / 300).alias("_period")
+    def period(column):
+        return F.floor(F.col(column).cast("long") / 300).alias("_period")
+
     periods = roads["road_travel_time"].select("section_id", period("period_start_at"), F.when(
         F.col("has_measurement") & (F.size("dq_issue") == 0), F.col("congestion_ratio")).alias("_ratio"))
     traffic = departures.select(*call, "quay_id", period("at")) \
@@ -378,6 +387,7 @@ FROM line, transfer, stop, conditions
 
 
 def report_markdown(record, rows):
+    """A short Markdown preview of the line scorecard, for reading the run without Spark."""
     totals = record["totals"]
     banner = "Complete Silver input." if record["ready"] else \
         "**PARTIAL SAMPLE — not a complete-day reliability result. Missing reports reflect this bounded input.**"
@@ -418,6 +428,8 @@ def report_markdown(record, rows):
 
 
 def run(output_dir, day, spark=None, allow_partial=False):
+    """Gold for one day: build every table in staging, check that they reconcile to Silver and to
+    each other, then publish them with a marker. Returns the run record."""
     F = functions()
     output = Path(output_dir)
     sources = {name: source_record(output, name, day, allow_partial) for name in SOURCES}
@@ -453,7 +465,8 @@ def run(output_dir, day, spark=None, allow_partial=False):
         written = {}
         for table, frame in products.items():
             partition = stage / table / f"operating_date={day}"
-            frame.withColumn("_gold_run_id", F.lit(rid)).withColumn("_source_silver_run_id", F.lit(record["silver_run_id"])) \
+            frame.withColumn("_gold_run_id", F.lit(rid)) \
+                .withColumn("_source_silver_run_id", F.lit(record["silver_run_id"])) \
                 .withColumn("_source_datex_run_id", F.lit(record["datex_run_id"])).write.parquet(str(partition))
             written[table] = spark.read.parquet(str(partition))
             assert_unique(written[table], KEYS[table], f"Gold {table}")
