@@ -209,7 +209,8 @@ found a task-boundary limit. Of 33.0 M predictions, 2 moved by 3 s and 100 recei
 ```python
 # pipeline/silver.py, normalize_journeys
 joined = joined.withColumn("date_source", F.when(F.col("operating_date").isNotNull(), "framed")
-                           .when(F.col("_mapped_date").isNotNull(), "alias").otherwise(F.col("derived_date_source"))) \
+                           .when(F.col("_mapped_date").isNotNull(), "alias")
+                           .otherwise(F.col("derived_date_source"))) \
     .withColumn("operating_date", F.coalesce("operating_date", "_mapped_date", "derived_operating_date")) \
     .drop("derived_operating_date", "derived_date_source")
 ```
@@ -378,10 +379,12 @@ around = F.array(F.lit(-1), F.lit(0), F.lit(1))
 q = quays.withColumn("_d_lat", F.explode(around)).withColumn("_d_lon", F.explode(around)) \
     .withColumn("_cell_lat", F.floor(F.col("quay_latitude") / 0.01) + F.col("_d_lat")) \
     .withColumn("_cell_lon", F.floor(F.col("quay_longitude") / 0.02) + F.col("_d_lon")).drop("_d_lat", "_d_lon")
-p = points.withColumn("_cell_lat", F.floor(F.col("latitude") / 0.01)).withColumn("_cell_lon", F.floor(F.col("longitude") / 0.02))
+p = points.withColumn("_cell_lat", F.floor(F.col("latitude") / 0.01)) \
+    .withColumn("_cell_lon", F.floor(F.col("longitude") / 0.02))
 joined = q.join(p, ["_cell_lat", "_cell_lon"]).withColumn(
     "distance_m", haversine_m(F.col("quay_latitude"), F.col("quay_longitude"), F.col("latitude"), F.col("longitude")))
-return joined.filter(F.col("distance_m") <= radius_m).groupBy("quay_id", *key).agg(F.round(F.min("distance_m"), 1).alias("distance_m"))
+return joined.filter(F.col("distance_m") <= radius_m).groupBy("quay_id", *key) \
+    .agg(F.round(F.min("distance_m"), 1).alias("distance_m"))
 ```
 
 [`utm33_to_wgs84`](../../pipeline/silver_datex_parse.py) projects UTM 33 metres to latitude/longitude.
