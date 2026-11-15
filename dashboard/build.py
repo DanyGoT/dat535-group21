@@ -33,6 +33,7 @@ CONDITIONS = ["mode", "hour", "precipitation", "road_surface", "road_situation",
 
 
 def published(root, day):
+    """The day's Gold run marker, refused unless the run is complete and ready."""
     marker = json.loads((root / "gold" / "_runs" / f"operating_date={day}" / "latest.json").read_text())
     if marker.get("schema_version") != 2 or marker.get("status") != "complete" or marker.get("ready") is not True:
         raise ValueError(f"Gold {day} is not a complete, ready schema-2 run")
@@ -42,7 +43,8 @@ def published(root, day):
 def check(root, markers, table):
     """Each day's partition must hold exactly the rows of the run its marker names."""
     for day, marker in markers.items():
-        runs = pq.read_table(root / "gold" / table / f"operating_date={day}", columns=["_gold_run_id"])["_gold_run_id"]
+        folder = root / "gold" / table / f"operating_date={day}"
+        runs = pq.read_table(folder, columns=["_gold_run_id"])["_gold_run_id"]
         if len(runs) != marker["tables"][table]["rows"] or set(pc.unique(runs).to_pylist()) - {marker["run_id"]}:
             raise ValueError(f"Gold {table} for {day} disagrees with its run marker")
 
@@ -50,7 +52,8 @@ def check(root, markers, table):
 def load(root, markers, table, columns, where=None):
     """All days of a checked Gold table. `where` filters while scanning, so a shard never holds
     the other shards' rows: all 4 M transfer rows at once took 5-7 GB."""
-    days = ds.dataset([ds.dataset(root / "gold" / table / f"operating_date={day}", format="parquet") for day in markers])
+    days = ds.dataset([ds.dataset(root / "gold" / table / f"operating_date={day}", format="parquet")
+                       for day in markers])
     return days.to_table(columns=columns, filter=where).to_pandas()
 
 
@@ -63,15 +66,17 @@ def trimmed(counts):
 def hub_shard(root, markers, hubs, hours, shard):
     """Hourly departures and listed line pairs for one shard of hubs, read on its own."""
     ids = hubs.index[hubs["shard"] == shard].to_list()
+    shard_hours = hours[hours.index.get_level_values("hub_id").isin(ids)]
     out = {hub: {"hours": [[int(i[-1]), *map(int, v)] for i, v in zip(group.index, group.to_numpy())], "transfers": []}
-           for hub, group in hours[hours.index.get_level_values("hub_id").isin(ids)].groupby(level="hub_id")}
+           for hub, group in shard_hours.groupby(level="hub_id")}
     rows = load(root, markers, "transfer_reliability",
                 [*PAIR, "hour", "from_origin_name", "to_destination_name", *CONNECTIONS[:3], "gap_change_counts"],
                 ds.field("hub_id").isin(ids))
     gaps = np.stack(rows.pop("gap_change_counts").to_numpy()) if len(rows) else np.zeros((0, len(GAPS)), int)
     rows[GAPS] = gaps
     by_hour = rows.groupby([*PAIR, "hour"])[GAPS].sum()
-    pairs = rows.groupby(PAIR)[CONNECTIONS].sum().join(rows.groupby(PAIR)[["from_origin_name", "to_destination_name"]].last())
+    by_pair = rows.groupby(PAIR)
+    pairs = by_pair[CONNECTIONS].sum().join(by_pair[["from_origin_name", "to_destination_name"]].last())
     pairs = pairs[pairs[GAPS].sum(axis=1) >= MIN_KNOWN]
     hourly = {key: {int(i[-1]): trimmed(v) for i, v in zip(group.index, group.to_numpy())}
               for key, group in by_hour[by_hour.index.droplevel("hour").isin(pairs.index)].groupby(level=PAIR)}
@@ -91,6 +96,7 @@ def script(path, prefix, value):
 
 
 def build(root, days, dist):
+    """Write the site for the given Gold days to dist. Returns (hubs on the map, line pairs listed)."""
     markers = {day: published(root, day) for day in days}
     for table in ("stop_reliability", "transfer_reliability", "departure_conditions", "line_scorecard"):
         check(root, markers, table)
@@ -101,10 +107,12 @@ def build(root, days, dist):
     for name in ASSETS:
         shutil.copy(HERE / name, dist / name)
 
-    stops = load(root, markers, "stop_reliability", ["hub_id", "hour", "hub_name", "hub_latitude", "hub_longitude", *DEPARTURES])
+    stops = load(root, markers, "stop_reliability",
+                 ["hub_id", "hour", "hub_name", "hub_latitude", "hub_longitude", *DEPARTURES])
     if stops["scored_departures"].sum() != scored:
         raise ValueError("stop_reliability does not reconcile to the Gold run markers")
-    hubs = stops.groupby("hub_id")[DEPARTURES].sum().join(stops.groupby("hub_id")[["hub_name", "hub_latitude", "hub_longitude"]].last())
+    by_hub = stops.groupby("hub_id")
+    hubs = by_hub[DEPARTURES].sum().join(by_hub[["hub_name", "hub_latitude", "hub_longitude"]].last())
     # Silver flags missing or invalid coordinates but keeps the stop; the map needs both.
     placed = hubs["hub_latitude"].between(-90, 90) & hubs["hub_longitude"].between(-180, 180)
     hubs = hubs[(hubs.index != UNKNOWN_HUB) & (hubs["scored_departures"] >= MIN_DEPARTURES) & placed]
@@ -137,7 +145,7 @@ def build(root, days, dist):
                   *[int(r[c]) for c in DEPARTURES]] for hub, r in hubs.iterrows()],
         "lines": {i: [r["public_code"], r["line_name"], r["mode"], r["operator_name"]] for i, r in lines.iterrows()},
         "condition_columns": [*CONDITIONS, "scored_departures", "late_departures"],
-        "conditions": cube.values.tolist(),
+        "conditions": cube.to_numpy().tolist(),
     })
     return len(hubs), pairs
 
