@@ -130,7 +130,7 @@ return spark.read \
 
 # pipeline/bronze.py, ingest_feed
 status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
-    .when(col("received_at").isNull() | col("payload").isNull(), "incomplete") \
+    .when(col("received_at").isNull() | col("endpoint").isNull() | col("payload").isNull(), "incomplete") \
     .when(col("endpoint") != feed, "wrong_endpoint") \
     .otherwise("ok")
 ```

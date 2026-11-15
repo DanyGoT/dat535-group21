@@ -153,6 +153,12 @@ class IngestTest(LandingCase):
         ok = [r for r in self.read("vehicles").collect() if r["_bronze_status"] == "ok"]
         self.assertEqual([(r["feed"], r["hour"], r["payload"]) for r in ok], [("vehicles", "05", VEHICLE_MSG)])
 
+    def test_line_without_endpoint_is_incomplete(self):
+        # Without the check, a null endpoint compares as unknown and the row passed as ok.
+        self.put("sx", "hour=07.jsonl.gz", json.dumps({"received_at": "2026-10-15T07:00:00.000Z", "payload": ET_XML}) + "\n")
+        record = bronze.run(self.landing, self.out, DAY, feeds=["sx"], spark=self.spark, hours=["07"])
+        self.assertEqual(record["feeds"]["sx"]["bad_rows"], {"incomplete": 1})
+
     def test_rerun_replaces_only_that_day(self):
         other = date(2026, 10, 14)
         self.put("et", "hour=23.jsonl.gz", line("et"), day=other)

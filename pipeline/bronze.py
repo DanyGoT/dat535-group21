@@ -182,7 +182,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
     raw = read_landing(spark, files, [("received_at", StringType()), ("endpoint", StringType()),
                                       ("payload", StringType())])
     status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
-        .when(col("received_at").isNull() | col("payload").isNull(), "incomplete") \
+        .when(col("received_at").isNull() | col("endpoint").isNull() | col("payload").isNull(), "incomplete") \
         .when(col("endpoint") != feed, "wrong_endpoint") \
         .otherwise("ok")
     bronze = with_evidence(raw, feed, status, rid, ingested_at)
