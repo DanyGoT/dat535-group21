@@ -113,8 +113,8 @@ function lineName(id) {
 }
 const lineCode = (id) => (G.lines[id] && G.lines[id][0]) || lineName(id);
 const GAP_ZERO = -G.rules.gap_low_min; // index of "gap unchanged"
-function expand(trimmed) {
-  const counts = new Array(22).fill(0);
+function expand(trimmed, length = 22) {
+  const counts = new Array(length).fill(0);
   trimmed.slice(1).forEach((v, i) => { counts[trimmed[0] + i] = v; });
   return counts;
 }
@@ -151,7 +151,11 @@ new ResizeObserver(() => map.invalidateSize()).observe($("#map")); // the panel'
 const bands = [[-0.12, "--better-2"], [-0.04, "--better-1"], [0.04, "--even"], [0.12, "--worse-1"], [Infinity, "--worse-2"]];
 const colour = (share) => css(bands.find(([edge]) => share - national < edge)[1]);
 const renderer = L.canvas({ padding: 0.4 });
-const ring = L.circleMarker([0, 0], { radius: 0, color: css("--ink"), weight: 2.5, fill: false, interactive: false });
+const rings = [null, "4 3"].map((dashArray) =>
+  L.circleMarker([0, 0], { renderer, radius: 0, color: css("--ink"), weight: 2.5, dashArray, fill: false, interactive: false }));
+function mark(list) {
+  rings.forEach((r, i) => (list[i] ? r.setLatLng([list[i].lat, list[i].lon]).setRadius(list[i].radius + 4).addTo(map) : r.remove()));
+}
 for (const hub of hubs) { // busiest first, so small stops are drawn on top
   const share = hub.late_departures / hub.scored_departures;
   hub.radius = Math.max(2.5, Math.min(13, Math.sqrt(hub.scored_departures) / 6));
@@ -159,7 +163,7 @@ for (const hub of hubs) { // busiest first, so small stops are drawn on top
     fillOpacity: 0.9, color: css("--surface"), weight: 0.6 })
     .bindTooltip(() => el("div", {}, el("strong", {}, hub.name), el("br"),
       `${pct(share)} late of ${nf.format(hub.scored_departures)} departures`))
-    .on("click", () => select(hub, false))
+    .on("click", (e) => pick(hub, e.originalEvent.shiftKey, false))
     .addTo(map);
 }
 const legend = L.control({ position: "bottomleft" });
@@ -183,7 +187,7 @@ function showMatches() {
     onmousedown: (e) => { e.preventDefault(); choose(h); } }, h.name, el("small", {}, `${nf.format(h.scored_departures)} dep.`))));
   matches.hidden = !found.length;
 }
-function choose(hub) { matches.hidden = true; find.value = hub.name; select(hub, true); }
+function choose(hub) { matches.hidden = true; find.value = hub.name; pick(hub, false, true); }
 find.addEventListener("input", showMatches);
 find.addEventListener("blur", () => { matches.hidden = true; });
 find.addEventListener("keydown", (e) => {
@@ -197,42 +201,58 @@ find.addEventListener("keydown", (e) => {
 });
 
 // ---------- hub panel ----------
-let current = null;
+let shown = []; // the one or two stops in the panel
+let adding = false; // the next pick becomes the second stop
 const state = { arrival: null, pair: null, spare: 2 };
 
 function intro() {
   const busiest = hubs.slice(0, 3);
   $("#hub").replaceChildren(el("div", { class: "hint" },
     el("p", {}, "Pick a stop on the map or search for one. You will see when its departures run late and, where lines meet, how often a connection held."),
+    el("p", { class: "section" }, "Shift-click a second stop to estimate a transfer between two nearby stops, such as a bus stop and a station."),
     el("p", { class: "section" }, "Busiest: ", busiest.flatMap((h, i) => [i ? ", " : "",
       el("a", { href: "#", onclick: (e) => { e.preventDefault(); choose(h); } }, h.name)]), ".")));
 }
 
-async function select(hub, move) {
-  current = hub;
-  Object.assign(state, { arrival: null, pair: null });
-  ring.setLatLng([hub.lat, hub.lon]).setRadius(hub.radius + 4).addTo(map);
-  if (move) map.setView([hub.lat, hub.lon], Math.max(map.getZoom(), 14));
-  const share = hub.late_departures / hub.scored_departures;
-  const box = el("div", { class: "hub" },
-    el("h2", {}, hub.name),
-    el("p", { class: "facts" }, `${nf.format(hub.scored_departures)} timed departures. ${pct(share)} left 3+ min late ` +
-      `(national ${pct(national)}). ${nf.format(hub.cancelled_departures)} reported cancellations.`));
-  $("#hub").replaceChildren(box);
-  const bins = [["Early", "departures_early"], ["On time", "departures_on_time"], ["1–3", "departures_1_3_min"],
-    ["3–5", "departures_3_5_min"], ["5–10", "departures_5_10_min"], ["10+", "departures_10_min_plus"]];
-  const most = Math.max(...bins.map(([, c]) => hub[c])) / hub.scored_departures;
-  box.append(el("div", { class: "section" }, el("h3", {}, "How late, in minutes"),
-    columns(bins.map(([label, c], i) => ({ label, value: hub[c] / hub.scored_departures, cls: i >= 3 ? "late" : "",
+function pick(hub, add, move) {
+  if ((add || adding) && shown.length && shown[0] !== hub) compare(shown[0], hub);
+  else select(hub, move);
+}
+
+const BINS = [["Early", "departures_early"], ["On time", "departures_on_time"], ["1–3", "departures_1_3_min"],
+  ["3–5", "departures_3_5_min"], ["5–10", "departures_5_10_min"], ["10+", "departures_10_min_plus"]];
+const facts = (hub) => `${nf.format(hub.scored_departures)} timed departures. ` +
+  `${pct(hub.late_departures / hub.scored_departures)} left 3+ min late (national ${pct(national)}). ` +
+  `${nf.format(hub.cancelled_departures)} reported cancellations.`;
+
+function delays(hub) {
+  const most = Math.max(...BINS.map(([, c]) => hub[c])) / hub.scored_departures;
+  return el("div", { class: "section" }, el("h3", {}, "How late, in minutes"),
+    columns(BINS.map(([label, c], i) => ({ label, value: hub[c] / hub.scored_departures, cls: i >= 3 ? "late" : "",
       title: `${label}${i > 1 ? " min" : ""}: ${pct(hub[c] / hub.scored_departures)} (${nf.format(hub[c])})` })),
     { max: Math.min(1, Math.ceil(most * 10) / 10) }),
-    el("p", { class: "note" }, "Early is more than a minute before the aimed time; on time is within a minute either side.")));
+    el("p", { class: "note" }, "Early is more than a minute before the aimed time; on time is within a minute either side."));
+}
+
+async function select(hub, move) {
+  const token = shown = [hub];
+  adding = false;
+  Object.assign(state, { arrival: null, pair: null });
+  mark(shown);
+  if (move) map.setView([hub.lat, hub.lon], Math.max(map.getZoom(), 14));
+  const add = el("button", { type: "button", class: "link", onclick: () => {
+    adding = true;
+    add.replaceWith(el("p", { class: "note" }, "Click a second stop on the map or search for it."));
+  } }, "Compare with a nearby stop");
+  const box = el("div", { class: "hub" }, el("h2", {}, hub.name), el("p", { class: "facts" }, facts(hub)), add);
+  $("#hub").replaceChildren(box);
+  box.append(delays(hub));
   let content;
   try { content = (await loadShard(hub.shard))[hub.id]; } catch {
     box.append(el("p", { class: "section empty" }, `Could not load hubs/${String(hub.shard).padStart(2, "0")}.js. Rebuild the dashboard.`));
     return;
   }
-  if (current !== hub) return;
+  if (shown !== token) return;
   const byHour = new Map(content.hours.map(([h, scored, late]) => [h, { scored, late }]));
   box.append(el("div", { class: "section" }, el("h3", {}, "Late departures by hour"),
     columns([...Array(24).keys()].map((h) => {
@@ -306,6 +326,122 @@ function renderTransfers(box, pairs) {
         }), { every: 3 }),
         el("p", { class: "note" }, "Faded bars rest on fewer than 5 connections."))));
   }
+  update();
+}
+
+// ---------- two stops ----------
+// Gold pairs calls only within one hub, so a transfer between two hubs is estimated, not observed:
+// the arriving line's arrival delays at one stop against the leaving line's departure delays at the
+// other, in the same time of day, taken as independent.
+const BANDS = G.rules.bands.map(([name, start], i, all) => {
+  const hh = (h) => String(h).padStart(2, "0"), end = i + 1 < all.length ? all[i + 1][1] : 24;
+  return { name, hours: `${hh(start)}–${hh(end)}` };
+});
+function histogram(entry, band) { // minute counts from rules.delay_low_min, one band or all (null)
+  const counts = new Array(G.rules.delay_bins).fill(0);
+  entry.bands.forEach((t, i) => { if (band == null || band === i) expand(t, counts.length).forEach((v, m) => { counts[m] += v; }); });
+  return counts;
+}
+// Each delay is spread evenly over its floored minute, so k whole minutes of slack left after
+// both delays hold for k >= 1, half the time for k = 0 and never below.
+function estimate(arrive, leave, spare) {
+  let p = 0;
+  arrive.forEach((ca, a) => { if (ca) leave.forEach((cl, d) => { const k = d - a + spare; if (k >= 0) p += ca * cl * (k ? 1 : 0.5); }); });
+  return p / (sum(arrive) * sum(leave));
+}
+function metres(a, b) {
+  const rad = Math.PI / 180, x = (b.lon - a.lon) * rad * Math.cos(((a.lat + b.lat) / 2) * rad), y = (b.lat - a.lat) * rad;
+  return 6371000 * Math.hypot(x, y);
+}
+
+async function compare(a, b) {
+  const token = shown = [a, b];
+  adding = false;
+  mark(shown);
+  const m = metres(a, b);
+  const stops = [a, b].map((hub) => el("div", { class: "section stop" },
+    el("h3", {}, hub.name, " ", el("button", { type: "button", class: "link", onclick: () => select(hub, false) }, "show alone")),
+    el("p", { class: "facts" }, facts(hub)), delays(hub)));
+  const box = el("div", { class: "hub" }, el("h2", {}, "Transfer between two stops"),
+    el("p", { class: "facts" }, `${nf.format(Math.round(m / 10) * 10)} m apart in a straight line, ` +
+      `about ${Math.max(1, Math.round(m / 80))} min on foot.`));
+  $("#hub").replaceChildren(box);
+  let content;
+  try { content = await Promise.all([a, b].map((hub) => loadShard(hub.shard).then((s) => s[hub.id]))); } catch {
+    box.append(el("p", { class: "section empty" }, "Could not load the stops' line delays. Rebuild the dashboard."), ...stops);
+    return;
+  }
+  if (shown !== token) return;
+  for (const c of content) for (const list of Object.values(c.delays)) list.sort((x, y) => (y.line === "") - (x.line === "") || y.calls - x.calls);
+
+  const pick = { flip: 0, arrive: 0, leave: 0, band: null };
+  const sides = () => pick.flip ? [b, a, content[1].delays.arrival, content[0].delays.departure]
+    : [a, b, content[0].delays.arrival, content[1].delays.departure];
+  const label = (e, way) => e.line ? `${lineCode(e.line)} ${way} ${e.end || "?"}` : "Any line";
+  const lines = el("div", { class: "controls" }), results = el("div");
+  const value = el("output", { for: "spare" }, `${state.spare} min`);
+  function chooseLines() {
+    const [from, to, arrivals, departures] = sides();
+    const list = (title, entries, way, key) => el("label", {}, title, el("select", {
+      onchange: (e) => { pick[key] = e.target.selectedIndex; update(); } },
+    entries.map((e, i) => el("option", { title: e.line ? lineName(e.line) : "", selected: i === pick[key] },
+      `${label(e, way)} (${nf.format(sum(histogram(e)))})`))));
+    lines.replaceChildren(list(`Arriving at ${from.name} on`, arrivals, "from", "arrive"),
+      list(`Leaving ${to.name} on`, departures, "to", "leave"));
+  }
+  box.append(
+    el("div", { class: "controls" },
+      el("label", {}, "Direction", el("select", { onchange: (e) => {
+        Object.assign(pick, { flip: e.target.selectedIndex, arrive: 0, leave: 0 }); chooseLines(); update(); } },
+      el("option", {}, `Arrive at ${a.name}, leave from ${b.name}`), el("option", {}, `Arrive at ${b.name}, leave from ${a.name}`))),
+      lines,
+      el("label", {}, "Time of day", el("select", { onchange: (e) => { pick.band = e.target.selectedIndex ? e.target.selectedIndex - 1 : null; update(); } },
+        el("option", {}, "All day"), BANDS.map((band) => el("option", {}, `${band.name}, ${band.hours}`)))),
+      el("label", { for: "spare" }, "Spare minutes", el("div", { class: "buffer" },
+        el("input", { id: "spare", type: "range", min: 0, max: 10, step: 1, value: state.spare,
+          oninput: (e) => { state.spare = Number(e.target.value); value.textContent = `${state.spare} min`; update(); } }),
+        value))),
+    el("p", { class: "note" }, "Spare minutes are the planned gap minus the walk."),
+    results, ...stops);
+
+  function update() {
+    const [from, to, arrivals, departures] = sides(), spare = state.spare;
+    const arriving = arrivals[pick.arrive], leaving = departures[pick.leave];
+    if (!arriving || !leaving) {
+      results.replaceChildren(el("p", { class: "empty" }, `Too few timed calls at ${arriving ? to.name : from.name} to estimate a transfer.`));
+      return;
+    }
+    const counts = (band) => [histogram(arriving, band), histogram(leaving, band)];
+    const [arrive, leave] = counts(pick.band), n = [sum(arrive), sum(leave)];
+    const enough = Math.min(...n) >= G.rules.min_known_connections;
+    const when = pick.band == null ? "over the whole day" : `in the ${BANDS[pick.band].name.toLowerCase()} (${BANDS[pick.band].hours})`;
+    if (!Math.min(...n)) {
+      results.replaceChildren(el("p", { class: "empty" }, `No timed calls ${when} for this pair of lines.`));
+      return;
+    }
+    const points = [...Array(11).keys()].map((s) => estimate(arrive, leave, s));
+    results.replaceChildren(el("div", { class: "split" },
+      el("div", { class: `answer ${enough ? "" : "thin"}` }, el("span", { class: "big" }, pct(points[spare])),
+        el("p", {}, "estimated chance the connection holds with ", el("strong", {}, `${spare} spare minute${spare === 1 ? "" : "s"}`),
+          `, arriving at ${from.name} on ${label(arriving, "from").replace("Any", "any")} and leaving ${to.name} ` +
+          `on ${label(leaving, "to").replace("Any", "any")}, ${when}. ` +
+          `From ${nf.format(n[0])} timed arrivals and ${nf.format(n[1])} timed departures` +
+          (leaving.cancelled ? `; ${nf.format(leaving.cancelled)} cancelled departure${leaving.cancelled === 1 ? "" : "s"} over the day.` : ".") +
+          (enough ? "" : ` Fewer than ${G.rules.min_known_connections} on one side: a rough guide only.`))),
+      el("div", {}, el("h3", {}, "Chance against spare minutes"), curve(points, spare)),
+      el("div", {}, el("h3", {}, `Chance by time of day, ${spare} spare min`),
+        columns(BANDS.map((band, i) => {
+          const [x, y] = counts(i), k = Math.min(sum(x), sum(y));
+          return { label: band.hours, value: k ? estimate(x, y, spare) : null, thin: k < G.rules.min_known_connections,
+            title: k ? `${band.name}: ${pct(estimate(x, y, spare))} from ${nf.format(sum(x))} arrivals and ${nf.format(sum(y))} departures`
+              : `${band.name}: no timed calls on one side` };
+        })),
+        el("p", { class: "note" }, `Faded bars rest on fewer than ${G.rules.min_known_connections} calls on one side.`)),
+      el("p", { class: "note" }, "An estimate, not observed connections: Gold pairs arrivals and departures only within one stop place. " +
+        "It takes the arriving line's arrival delays and the leaving line's departure delays at these stops in the same time of day, " +
+        "assumes the two are independent and spreads each delay evenly over its minute.")));
+  }
+  chooseLines();
   update();
 }
 
