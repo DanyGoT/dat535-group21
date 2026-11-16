@@ -151,7 +151,7 @@ transitions, so additional failures while already unhealthy send no new alert.
 The topic name is the secret. Batch failures are not covered. See the [status-page style](switchboard-style.md).
 
 [exporter.py](../../collector/exporter.py) reads landing names and sizes, state files, monitor
-results, disk and memory. [Prometheus](../../collector/observability/prometheus.yml) scrapes
+results, disk and memory, and hourly the size of each batch layer in `{prod,dev}/`. [Prometheus](../../collector/observability/prometheus.yml) scrapes
 every 30 s. Retention is limited to 365 days or 5 GB. Its localhost OTLP receiver is available
 for future job metrics. Grafana's `DAT535 Collector` dashboard is provisioned from the repo
 and available anonymously, read-only, through `/grafana/`.

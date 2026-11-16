@@ -3,7 +3,8 @@
 
 Serves GET /metrics in the Prometheus text format. Every scrape looks at the landing
 zone (file sizes and names only, never contents), the receiver's and the DATEX poller's
-state files, the monitor's status.json, disk and memory usage. Never writes anything. Bind to localhost only:
+state files, the monitor's status.json, disk and memory usage. Once an hour it also adds up
+the sizes of the batch outputs next to the landing zone ({prod,dev}/<layer>). Never writes anything. Bind to localhost only:
 Prometheus scrapes it, nothing else should.
 
 Environment:
@@ -32,6 +33,7 @@ from monitor import (DATEX_PREFIX, archived, feeds_from_env, landing_dir, newest
 
 HOUR_FILE = re.compile(r"hour=(\d{2})\.jsonl(\.gz|\.part)?$")
 DATE_DIR = re.compile(r"date=(\d{4}-\d{2}-\d{2})$")
+LAYER_EVERY = 3600  # seconds between size counts of the batch outputs (0.6 s on 2026-11-16)
 
 HELP = {
     "dat535_landing_closed_bytes": ("gauge", "Bytes on disk in closed hourly files (gzip)."),
@@ -68,6 +70,7 @@ HELP = {
     "dat535_swap_used_bytes": ("gauge", "Swap in use (SwapTotal - SwapFree)."),
     "dat535_filesystem_size_bytes": ("gauge", "Size of the filesystem holding this volume."),
     "dat535_filesystem_free_bytes": ("gauge", "Free bytes on the filesystem holding this volume."),
+    "dat535_layer_bytes": ("gauge", "Bytes per batch layer in prod/ and dev/ (decoded = Silver's decode cache), counted hourly."),
     "dat535_exporter_scrape_duration_seconds": ("gauge", "Time spent collecting these metrics."),
 }
 
@@ -218,6 +221,30 @@ def collect_disk(volumes, out):
         out.append(("dat535_filesystem_free_bytes", {"volume": volume}, u.free))
 
 
+def dir_bytes(path):
+    total = 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.stat(os.path.join(root, name)).st_size
+            except FileNotFoundError:
+                continue  # removed while counting (staging, cleanup)
+    return total
+
+
+def layer_sizes(data):
+    sizes = []
+    for env in ("prod", "dev"):
+        for layer in sorted(p for p in Path(data, env).glob("*") if p.is_dir()):
+            total = dir_bytes(layer)
+            if layer.name == "silver":
+                decoded = dir_bytes(layer / "_decoded")
+                sizes.append(({"env": env, "layer": "decoded"}, decoded))
+                total -= decoded
+            sizes.append(({"env": env, "layer": layer.name}, total))
+    return sizes
+
+
 def label_str(labels):
     if not labels:
         return ""
@@ -249,6 +276,12 @@ class Collector:
         self.static = static
         self.status_dir = status_dir
         self.volumes = {"landing": landing, "home": str(Path.home())}
+        self.layers, self.layers_at = [], None
+
+    def collect_layers(self, out):
+        if self.layers_at is None or time.monotonic() - self.layers_at > LAYER_EVERY:
+            self.layers, self.layers_at = layer_sizes(Path(self.landing).parent), time.monotonic()
+        out += [("dat535_layer_bytes", labels, b) for labels, b in self.layers]
 
     def collect(self):
         start = time.monotonic()
@@ -260,7 +293,8 @@ class Collector:
         steps += [lambda: collect_receiver(self.state_file, out),
                   lambda: collect_monitor(self.status_dir, out),
                   lambda: collect_memory(out),
-                  lambda: collect_disk(self.volumes, out)]
+                  lambda: collect_disk(self.volumes, out),
+                  lambda: self.collect_layers(out)]
         for step in steps:
             try:
                 step()
