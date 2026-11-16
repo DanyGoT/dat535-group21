@@ -131,7 +131,7 @@ Both workflows upload Bronze and Silver run records. [Silver](../pipeline/silver
 publication and readiness contracts.
 
 [Gold](../../pipeline/gold.py) runs by hand for an operating day once both its Entur Silver and
-the same UTC day of DATEX Silver are ready. It publishes four tables, and
+the same UTC day of DATEX Silver are ready. It publishes five tables, and
 [dashboard/build.py](../../dashboard/build.py) packages chosen days as a static site. See
 [what is built](../pipeline/gold-example.md#run-on-the-vm) and [evidence](../report/evidence/README.md).
 

@@ -457,7 +457,7 @@ More: [DATEX content](../datex/content.md#in-silver),
 ## 5. Gold: answering a question
 
 [`gold.py`](../../pipeline/gold.py) reads one day of ready Entur Silver and the same UTC day of
-DATEX Silver and publishes four tables. Every count is additive, so the
+DATEX Silver and publishes five tables. Every count is additive, so the
 [dashboard](../../dashboard/README.md) sums days instead of averaging rates.
 
 | Table | One row is | Question |
@@ -465,9 +465,10 @@ DATEX Silver and publishes four tables. Every count is additive, so the
 | `line_scorecard` | Line × day | Which lines run on time or cancel? |
 | `stop_reliability` | Hub × local hour | Where and when do departures leave late? |
 | `transfer_reliability` | Hub × arriving line × departing line × hour | Will my connection hold? |
+| `line_stop_delays` | Hub × line × arrival or departure × trip end × hour | How late does this line arrive or leave here? |
 | `departure_conditions` | Mode × hour × weather, surface, situation and traffic level | Do late departures go with road conditions? |
 
-All four use one definition of a timed departure, and late means 3 minutes or more:
+All of them use one definition of a timed departure, and late means 3 minutes or more:
 
 ```python
 # pipeline/gold.py, scored_departure
@@ -544,9 +545,9 @@ percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000)
     AS delay_percentiles
 ```
 
-Before publishing, one more query (`TOTALS_SQL`) sums the four tables: scorecard totals must equal
-Silver's rows, and the map and conditions tables must split exactly the scorecard's timed and
-late departures.
+Before publishing, one more query (`TOTALS_SQL`) sums the five tables: scorecard totals must equal
+Silver's rows, the map and conditions tables must split exactly the scorecard's timed and
+late departures, and the line delays must hold the same timed departures and cancellations.
 
 On 2026-11-05, 08 and 09 ([run records](evidence/README.md#gold-with-road-data-2026-11-05-08-and-09)),
 each day took 46–69 s and at most 2.94 GiB RSS. Nationally, a connection held 52 % of the time

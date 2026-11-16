@@ -1,7 +1,7 @@
 # Gold: what is built
 
 One manual job, [`gold.py`](../../pipeline/gold.py), turns one operating day of published Entur
-and DATEX Silver into four tables. A static [dashboard](../../dashboard/README.md) sums them over
+and DATEX Silver into five tables. A static [dashboard](../../dashboard/README.md) sums them over
 several days into a stop map, a transfer explorer and a road-conditions comparison.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
@@ -15,6 +15,7 @@ Related: [Silver](silver.md#tables), [product plan](gold.md),
 | `line_scorecard` | Line × operating day | Which lines run on time or cancel? | #2 punctuality scorecard |
 | `stop_reliability` | Hub × local hour | Where and when do departures leave late? | Map for #3 delay hotspots |
 | `transfer_reliability` | Hub × arriving line and origin × departing line and destination × local hour | Will my connection hold? | #8 transfer reliability |
+| `line_stop_delays` | Hub × line × arrival or departure × trip end × local hour | How late does this line arrive or leave here? | Input to #8 across nearby stops |
 | `departure_conditions` | Mode × local hour × four road-condition levels | Do late departures go with weather, roadworks or congestion? | First slice of #4 and #5 |
 
 Every count is additive. Consumers sum days and compute rates from the sums. No table stores an
@@ -37,7 +38,9 @@ percentiles, which stay per day.
 - **Unknowns.** Missing real-time is unknown, never on time and never cancelled. Calls without a
   quay go to the `__unknown_hub__` row, lines without an ID to `__unknown_line__`.
 - **Reconciliation before publication.** Scorecard journeys and calls equal Silver's rows. The
-  map and the conditions table split exactly the scorecard's timed and late departures.
+  map and the conditions table split exactly the scorecard's timed and late departures. The
+  departure rows of `line_stop_delays` hold exactly the scorecard's timed departures and the
+  map's cancellations.
 
 ## `line_scorecard`
 
@@ -89,6 +92,20 @@ fractional seconds; only the gap change is floored.
 does not depend on the gap. Walking time is the reader's input: NeTEx interchanges and NSR
 walking times are not parsed. A connection that holds on paper may still be missed on foot.
 
+## `line_stop_delays`
+
+Delays per line at a hub, for transfers between two hubs that Gold does not pair: a bus stop and a
+railway station a short walk apart without a shared NSR parent.
+
+- **Arrivals** are calls with an aimed (or planned) arrival, alighting allowed. They are timed
+  when reported, not cancelled, with an `arrival_delay_s` and no `implausible_arrival_delay` flag.
+  `end_id` is the journey's origin hub.
+- **Departures** are calls with an aimed (or planned) departure, boarding allowed. They are timed
+  by the shared rule above. `end_id` is the journey's destination hub.
+- `calls` counts both kinds, `cancelled_calls` the reported cancellations among them.
+  `delay_counts[i]` counts timed calls whose delay floored to whole minutes is `i − 10`, clipped
+  to −10..+30. Calls neither timed nor cancelled are unknown.
+
 ## `departure_conditions`
 
 Each timed departure gets four levels at its quay and aimed time, then rows are counted per mode,
@@ -117,12 +134,23 @@ each partition's row count and run ID and reconciles departures to the markers. 
 `dashboard/dist/`, a static site that opens from disk or any static host:
 
 - `data.js` holds hubs with at least 20 timed departures, the condition counts and line labels.
-- `hubs/NN.js` are 32 shards of per-hub hours and line pairs with at least 20 observed
-  connections, loaded when a hub is opened.
+- `hubs/NN.js` are 32 shards of per-hub hours, line pairs with at least 20 observed
+  connections, and line delays with at least 20 timed calls, loaded when a hub is opened. Line
+  delays are summed into five local time-of-day bands (00–06, 06–09, 09–15, 15–18, 18–24),
+  because one line at one stop runs too rarely for single hours. Each hub also gets an "any
+  line" entry per direction.
 
 The road view compares each level with its reference within the same mode and hour, weighting
 strata by the level's departures and skipping strata where the reference has fewer than 30.
 Rush hour therefore cannot pass for congestion. Region and line are not controlled.
+
+Shift-click (or "Compare with a nearby stop") puts two hubs side by side. The reader picks the
+arriving line at one, the leaving line at the other, and a time-of-day band. Gold pairs calls
+only within one hub, so the page *estimates* that transfer from `line_stop_delays`: the arriving
+line's arrival delays against the leaving line's departure delays in the same band, taken as
+independent, each delay spread evenly over its floored minute. With *k* whole minutes left
+after spare minutes and both delays, the connection holds for k ≥ 1 and half the time for k = 0.
+Cancellations are reported beside the estimate, not inside it, as in the transfer explorer.
 
 ```sh
 flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
@@ -155,17 +183,20 @@ DATEX under `silver/_runs/datex/observation_date=D/`. Neither run contacts Entur
 
 | Path under the output root | Contents |
 | -------------------------- | -------- |
-| `gold/<table>/operating_date=D/*.parquet` | The four tables |
+| `gold/<table>/operating_date=D/*.parquet` | The five tables |
 | `gold/line_scorecard/operating_date=D/_preview/` | `report.md` (top 25 lines) and `scorecard.csv` |
 | `gold/_runs/operating_date=D/<run_id>.json` | Lineage, totals, table sizes, condition coverage, runtime |
 | `gold/_runs/operating_date=D/latest.json` | Publication and readiness marker |
 
-The shared [publisher](../../pipeline/silver.py) replaces the selected day of all four tables and
+The shared [publisher](../../pipeline/silver.py) replaces the selected day of all five tables and
 rolls back ordinary failures. [Offline tests](../../pipeline/tests/test_gold.py) cover grains,
-denominators, cancellations, quality exclusions, transfer pairing, condition levels including
+denominators, cancellations, quality exclusions, transfer pairing, line delays, condition levels including
 NPRA's offset periods, partial input, reruns and mismatched lineage.
 
 ## Validated
+
+These are schema-2 runs from before `line_stop_delays`; the dashboard builder needs schema-3 runs
+with it, so the three days must be rerun.
 
 Run on 2026-11-11 against prod Silver, writing to a separate output root. All three days had
 both sources `complete, ready=true`. They are the only days where both exist: DATEX Silver is

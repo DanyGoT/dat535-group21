@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily Gold over published Silver: line scorecard, stop map, transfer chances, road conditions.
+"""Daily Gold over published Silver: line scorecard, stop map, transfer chances, line delays, road conditions.
 
 Reads one Norwegian operating day of Entur Silver and the same UTC day of DATEX Silver.
 Every count is additive: consumers sum days, never average rates. Partial Silver needs
@@ -45,6 +45,7 @@ KEYS = {
         "operating_date", "hub_id", "from_line_id", "from_origin_id",
         "to_line_id", "to_destination_id", "hour",
     ],
+    "line_stop_delays": ["operating_date", "hub_id", "line_id", "direction", "end_id", "hour"],
     "departure_conditions": [
         "operating_date", "mode", "hour", "precipitation", "road_surface",
         "road_situation", "traffic",
@@ -69,6 +70,8 @@ MAX_SLACK_S = 15 * 60
 # Gap change in whole minutes, clipped to this range. A connection planned with b spare
 # minutes holds when the change is >= -b (exact for b in 0..10).
 GAP_LOW, GAP_HIGH = -11, 10
+# Arrival and departure delay per line at a hub in whole minutes, floor(delay / 60), clipped.
+DELAY_LOW, DELAY_HIGH = -10, 30
 
 WEATHER_MAX_M = 10_000
 
@@ -140,6 +143,12 @@ def cancelled_call():
     journey = F.coalesce(F.col("journey_cancelled"), F.lit(False))
     call = F.coalesce(F.col("call_cancelled"), F.lit(False))
     return journey | call
+
+
+def reported_cancellation():
+    """A journey-level cancellation reaches planned calls that got no update of their own (silver.build_calls)."""
+    F = functions()
+    return F.coalesce(F.col("journey_cancelled"), F.lit(False)) | (F.col("has_realtime") & cancelled_call())
 
 
 def scored_departure():
@@ -326,11 +335,8 @@ def build_stops(calls, quay_hub, hub_labels):
     F = functions()
     scored = scored_departure()
     at = F.coalesce("aimed_departure_at", "planned_departure_at")
-    # A journey cancellation also reaches planned calls that got no update of their own.
-    journey_cancelled = F.coalesce(F.col("journey_cancelled"), F.lit(False))
-    reported_cancel = journey_cancelled | (F.col("has_realtime") & cancelled_call())
     boarding = F.coalesce(F.col("for_boarding"), F.lit(True))
-    cancelled = reported_cancel & boarding & at.isNotNull()
+    cancelled = reported_cancellation() & boarding & at.isNotNull()
     return (
         calls.filter(scored | cancelled)
         .join(F.broadcast(quay_hub), "quay_id", "left")
@@ -345,6 +351,46 @@ def build_stops(calls, quay_hub, hub_labels):
 # --- Transfers ---
 
 
+def hub_calls(calls, quay_hub):
+    """Calls with their hub and their journey's first and last call and hub. Endpoints come from
+    all calls, so an unmapped first or last quay stays an (unknown) endpoint."""
+    F = functions()
+    calls = calls.join(F.broadcast(quay_hub), "quay_id", "left").withColumn("hub_id", F.coalesce("hub_id", F.lit(UNKNOWN_HUB)))
+    ends = calls.groupBy("journey_id").agg(
+        F.min("call_order").alias("first_order"), F.max("call_order").alias("last_order"),
+        F.min_by("hub_id", "call_order").alias("origin_id"), F.max_by("hub_id", "call_order").alias("destination_id"))
+    return calls.join(ends, "journey_id")
+
+
+def build_line_stops(calls, quay_hub, hub_labels):
+    """Arrival and departure delays per hub, line, trip end and local hour, as minute histograms.
+    The dashboard estimates a transfer between two nearby hubs from them, which Gold does not pair.
+    Arrivals carry their journey's origin, departures its destination. Departures are counted
+    exactly as in stop_reliability, so the two reconcile."""
+    F = functions()
+    calls = hub_calls(calls, quay_hub).withColumn("line_id", F.coalesce("line_id", F.lit(UNKNOWN_LINE)))
+    arrived = F.col("has_realtime") & ~cancelled_call() & F.col("arrival_delay_s").isNotNull() & \
+        ~F.isnan("arrival_delay_s") & ~F.array_contains("dq_issue", "implausible_arrival_delay")
+    sides = []
+    for direction, allowed, end, timed in (("arrival", "for_alighting", "origin_id", arrived),
+                                           ("departure", "for_boarding", "destination_id", scored_departure())):
+        at = F.coalesce(f"aimed_{direction}_at", f"planned_{direction}_at")
+        sides.append(calls.filter(at.isNotNull() & F.coalesce(F.col(allowed), F.lit(True))).select(
+            "operating_date", "hub_id", "line_id", F.lit(direction).alias("direction"), F.col(end).alias("end_id"),
+            local_hour(at).alias("hour"), reported_cancellation().alias("_cancelled"),
+            F.when(timed, F.col(f"{direction}_delay_s")).alias("_delay")))
+    # greatest/least skip nulls, so an unknown delay must stay null before clipping.
+    minute = F.when(F.col("_delay").isNotNull(),
+                    F.least(F.greatest(F.floor(F.col("_delay") / 60), F.lit(DELAY_LOW)), F.lit(DELAY_HIGH)))
+    rows = sides[0].unionByName(sides[1]).withColumn("_minute", minute)
+    return rows.groupBy(*KEYS["line_stop_delays"]).agg(
+        F.count("*").alias("calls"), count_if(F.col("_cancelled"), "cancelled_calls"),
+        F.array(*[F.sum(F.when(F.col("_minute") == m, 1).otherwise(0)) for m in range(DELAY_LOW, DELAY_HIGH + 1)])
+        .alias("delay_counts")) \
+        .join(F.broadcast(hub_labels.select(F.col("hub_id").alias("end_id"), F.col("hub_name").alias("end_name"))),
+              "end_id", "left")
+
+
 def build_transfers(calls, quay_hub, hub_labels):
     """Observed connections: how the planned gap between an arrival and a departure changed.
 
@@ -352,20 +398,7 @@ def build_transfers(calls, quay_hub, hub_labels):
     destination aimed 0-15 min later. One row per hub, line pair and local arrival hour.
     """
     F = functions()
-    calls = (
-        calls.filter(F.col("line_id").isNotNull())
-        .join(F.broadcast(quay_hub), "quay_id", "left")
-        .withColumn("hub_id", F.coalesce("hub_id", F.lit(UNKNOWN_HUB)))
-    )
-    # Each journey's first and last call: where it came from and where it goes.
-    # (From all calls, so an unmapped end quay stays an unknown endpoint.)
-    ends = calls.groupBy("journey_id").agg(
-        F.min("call_order").alias("first_order"),
-        F.max("call_order").alias("last_order"),
-        F.min_by("hub_id", "call_order").alias("origin_id"),
-        F.max_by("hub_id", "call_order").alias("destination_id"),
-    )
-    calls = calls.join(ends, "journey_id")
+    calls = hub_calls(calls.filter(F.col("line_id").isNotNull()), quay_hub)
 
     def side(prefix, kind, line, end, keep, flags):
         # One side of a connection: the arrivals ("a") or the departures ("b").
@@ -592,21 +625,28 @@ transfer AS (
 ),
 stop AS (
     SELECT coalesce(sum(scored_departures), 0) AS scored,
-           coalesce(sum(late_departures), 0) AS late
+           coalesce(sum(late_departures), 0) AS late,
+           coalesce(sum(cancelled_departures), 0) AS cancelled
     FROM {stop_reliability}
 ),
 conditions AS (
     SELECT coalesce(sum(scored_departures), 0) AS scored,
            coalesce(sum(late_departures), 0) AS late
     FROM {departure_conditions}
+), line_stop AS (
+    SELECT coalesce(sum(aggregate(delay_counts, 0L, (n, c) -> n + c)), 0) AS scored,
+           coalesce(sum(cancelled_calls), 0) AS cancelled
+    FROM {line_stop_delays} WHERE direction = 'departure'
 )
 SELECT line.*,
        transfer.*,
        stop.scored = line.scored_departures AND stop.late = line.late_departures
            AS stop_reliability_reconciles,
        conditions.scored = line.scored_departures AND conditions.late = line.late_departures
-           AS departure_conditions_reconciles
-FROM line, transfer, stop, conditions
+           AS departure_conditions_reconciles,
+       line_stop.scored = line.scored_departures AND line_stop.cancelled = stop.cancelled
+           AS line_stop_delays_reconciles
+FROM line, transfer, stop, conditions, line_stop
 """
 
 REPORT_COLUMNS = (
@@ -704,7 +744,7 @@ def check_totals(totals, entur):
         or totals["input_calls"] != silver_tables["stop_call"]["rows"]
     ):
         raise ValueError("Gold totals do not reconcile to Silver; refusing publication")
-    for table in ("stop_reliability", "departure_conditions"):
+    for table in ("stop_reliability", "departure_conditions", "line_stop_delays"):
         if not totals.pop(f"{table}_reconciles"):
             raise ValueError(
                 f"{table} does not reconcile to the line scorecard; refusing publication"
@@ -740,7 +780,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
     record: dict = dict(
         run_id=rid,
         operating_date=str(day),
-        schema_version=2,
+        schema_version=3,
         status="running",
         ready=False,
         started_at=iso(utcnow()),
@@ -775,6 +815,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
             ),
             "stop_reliability": build_stops(calls, quay_hub, hub_labels),
             "transfer_reliability": build_transfers(calls, quay_hub, hub_labels),
+            "line_stop_delays": build_line_stops(calls, quay_hub, hub_labels),
             "departure_conditions": build_conditions(calls, roads, day),
         }
 

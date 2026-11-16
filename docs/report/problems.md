@@ -10,6 +10,7 @@ Entries:
 
 | Date | Incident |
 | ---- | -------- |
+| 2026-11-16 | [Dashboard map took one click](#2026-11-16--the-dashboard-map-took-only-one-click) |
 | 2026-11-11 | [Dashboard builder memory](#2026-11-11--the-dashboard-builder-needed-more-memory-than-the-spark-job) |
 | 2026-11-11 | [Travel-time periods off by 10 ms](#2026-11-11--npra-travel-time-periods-start-10-ms-after-the-boundary) |
 | 2026-11-09 | [Empty DATEX delivery](#2026-11-09--failing-loudly-on-an-empty-snapshot-would-have-blocked-a-day-for-good) |
@@ -43,6 +44,18 @@ Entry template:
 ```
 
 ---
+
+## 2026-11-16 — The dashboard map took only one click
+
+- **Area:** Gold
+- **Symptom:** The first click on a stop opened it. Every later click on the map did nothing.
+- **Evidence:** In a browser, the canvas holding the stop markers received no DOM events after the
+  first selection, and the map had two `<canvas>` elements in its overlay pane instead of one.
+- **Cause:** The markers were drawn on a canvas renderer of their own, the selection ring on
+  Leaflet's default one. Adding the ring created a second full-size canvas above the markers. A
+  canvas renderer only hands clicks to its own layers, and the ring is not interactive.
+- **Fix:** [dashboard/app.js](../../dashboard/app.js) draws the rings on the markers' renderer.
+- **Lesson:** With canvas rendering in Leaflet, every layer that shares a pane needs the same renderer.
 
 ## 2026-11-11 — The dashboard builder needed more memory than the Spark job
 

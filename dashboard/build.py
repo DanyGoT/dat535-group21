@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pyarrow.compute as pc
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
@@ -34,7 +35,14 @@ PAIR = ["hub_id", "from_line_id", "from_origin_id", "to_line_id", "to_destinatio
 GAPS = [f"gap_{i}" for i in range(22)]
 CONNECTIONS = ["connections", "cancelled_connections", "unknown_connections", *GAPS]
 CONDITIONS = ["mode", "hour", "precipitation", "road_surface", "road_situation", "traffic"]
-TABLES = ("stop_reliability", "transfer_reliability", "departure_conditions", "line_scorecard")
+# Gold's delay_counts: minutes -10 (or less) .. +30 (or more).
+DELAYS = [f"delay_{i}" for i in range(41)]
+# Time-of-day bands by first local hour: one line at one stop runs too rarely for single hours.
+BANDS = [["Night", 0], ["Morning peak", 6], ["Daytime", 9], ["Afternoon peak", 15], ["Evening", 18]]
+TABLES = (
+    "stop_reliability", "transfer_reliability", "line_stop_delays",
+    "departure_conditions", "line_scorecard",
+)
 
 
 # --- Reading Gold ---
@@ -45,12 +53,12 @@ def published(root, day):
     path = root / "gold" / "_runs" / f"operating_date={day}" / "latest.json"
     marker = json.loads(path.read_text())
     ready = (
-        marker.get("schema_version") == 2
+        marker.get("schema_version") == 3
         and marker.get("status") == "complete"
         and marker.get("ready") is True
     )
     if not ready:
-        raise ValueError(f"Gold {day} is not a complete, ready schema-2 run")
+        raise ValueError(f"Gold {day} is not a complete, ready schema-3 run")
     return marker
 
 
@@ -84,6 +92,30 @@ def trimmed(counts):
         return [0]
     first, last = nonzero[0], nonzero[-1]
     return [int(first), *map(int, counts[first:last + 1])]
+
+
+def line_delays(root, markers, ids):
+    """Per hub and direction: every line and trip end with enough timed calls, plus all lines
+    together (line ""), with a minute histogram per time-of-day band."""
+    rows = load(root, markers, "line_stop_delays", ["hub_id", "direction", "line_id", "end_id", "end_name", "hour",
+                                                    "calls", "cancelled_calls", "delay_counts"], ds.field("hub_id").isin(ids))
+    rows[DELAYS] = np.stack(rows.pop("delay_counts").to_numpy()) if len(rows) else np.zeros((0, len(DELAYS)), int)
+    rows["band"] = np.searchsorted([start for _, start in BANDS], rows["hour"], side="right") - 1
+    rows = pd.concat([rows.assign(line_id="", end_id="", end_name=None), rows])
+    key = ["hub_id", "direction", "line_id", "end_id"]
+    totals = rows.groupby(key)[["calls", "cancelled_calls", *DELAYS]].sum().join(rows.groupby(key)["end_name"].last())
+    totals = totals[totals[DELAYS].sum(axis=1) >= MIN_KNOWN]
+    bands = rows.groupby([*key, "band"])[DELAYS].sum()
+    bands = {k: dict(zip(g.index.get_level_values("band"), g.to_numpy()))
+             for k, g in bands[bands.index.droplevel("band").isin(totals.index)].groupby(level=key)}
+    out = {}
+    for (hub, direction, line, end), row in totals.iterrows():
+        counts = bands[(hub, direction, line, end)]
+        out.setdefault(hub, {"arrival": [], "departure": []})[direction].append({
+            "line": line, "end_id": end, "end": row["end_name"], "calls": int(row["calls"]),
+            "cancelled": int(row["cancelled_calls"]),
+            "bands": [trimmed(counts[b]) if b in counts else [0] for b in range(len(BANDS))]})
+    return out, set(totals.index.get_level_values("line_id")) - {""}
 
 
 def hub_shard(root, markers, hubs, hours, shard):
@@ -139,7 +171,11 @@ def hub_shard(root, markers, hubs, hours, shard):
             "hours": hourly[key],
         })
 
-    lines = set(pairs.index.get_level_values("from_line_id"))
+    delays, lines = line_delays(root, markers, ids)
+    for hub, content in out.items():
+        content["delays"] = delays.get(hub, {"arrival": [], "departure": []})
+
+    lines |= set(pairs.index.get_level_values("from_line_id"))
     lines |= set(pairs.index.get_level_values("to_line_id"))
     return out, lines
 
@@ -219,6 +255,9 @@ def build(root, days, dist):
             "min_departures": MIN_DEPARTURES,
             "min_known_connections": MIN_KNOWN,
             "gap_low_min": -11,
+            "delay_low_min": -10,
+            "delay_bins": len(DELAYS),
+            "bands": BANDS,
             "shards": SHARDS,
         },
         "hub_columns": ["id", "name", "lat", "lon", "shard", *DEPARTURES],
