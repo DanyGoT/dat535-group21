@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
 """Entur vehicle positions collector.
 
-Holds one GraphQL subscription to all vehicles in Norway (Entur Vehicle Positions API v2,
-`graphql-transport-ws` over a websocket) and appends every message the server sends,
-unchanged, as one JSON line to the hourly landing file:
+One GraphQL subscription (graphql-transport-ws over a websocket) to every vehicle in Norway.
+Every message is appended unchanged, as one JSON line, to
+<landing>/vehicles/date=D/hour=HH.jsonl.part (same line format as receiver.py).
+Reconnects with backoff; each new subscription starts with a snapshot of all vehicles, so
+expect duplicates after a reconnect.
 
-    <landing>/vehicles/date=YYYY-MM-DD/hour=HH.jsonl.part  (gzipped to .jsonl.gz when the hour ends)
-
-Same line format ({"received_at", "endpoint", "payload"}) and hourly files (hourly.py) as
-receiver.py. Protocol pings are answered, not stored. Reconnects with backoff when
-the connection drops, errors or goes silent; every new subscription starts with a snapshot of
-all current vehicles, so expect duplicates after a reconnect.
-
-Needs the `websockets` package (Ubuntu: `apt install python3-websockets`, version 10.4).
-
-Environment:
-    DAT535_LANDING_DIR      landing root (default: ./landing)
-    ET_CLIENT_NAME          ET-Client-Name header (default: uis-dat535group21-collector)
-    VEHICLES_URL            default: wss://api.entur.io/realtime/v2/vehicles/subscriptions
+Needs `websockets` 10.4 (Ubuntu: python3-websockets).
+Environment: DAT535_LANDING_DIR, ET_CLIENT_NAME, VEHICLES_URL.
 """
 
 import asyncio
@@ -37,10 +28,10 @@ log = logging.getLogger("vehicles")
 FEED = "vehicles"
 SUBPROTOCOL = "graphql-transport-ws"
 ACK_TIMEOUT_S = 30
-SILENCE_LIMIT_S = 300       # no message for this long = connection presumed dead
+SILENCE_LIMIT_S = 300  # no message for this long = connection presumed dead
 MIN_BACKOFF_S = 10
 MAX_BACKOFF_S = 300
-STABLE_S = 600              # a connection that lasted this long resets the backoff
+STABLE_S = 600  # a connection that lasted this long resets the backoff
 MAX_MESSAGE = 64 * 1024 * 1024
 ROTATE_CHECK_S = 10
 
@@ -82,28 +73,37 @@ class ProtocolError(Exception):
 
 async def session(url, client_name, writer, silence_s=SILENCE_LIMIT_S):
     """One connection: subscribe, then store messages until the server completes or fails."""
-    async with websockets.connect(url, subprotocols=[SUBPROTOCOL],
-                                  extra_headers={"ET-Client-Name": client_name},
-                                  open_timeout=30, max_size=MAX_MESSAGE) as ws:
+    connection = websockets.connect(
+        url,
+        subprotocols=[SUBPROTOCOL],
+        extra_headers={"ET-Client-Name": client_name},
+        open_timeout=30,
+        max_size=MAX_MESSAGE,
+    )
+    async with connection as ws:
+        # Handshake: init -> ack, then subscribe.
         await ws.send(json.dumps({"type": "connection_init", "payload": {}}))
         ack = json.loads(await asyncio.wait_for(ws.recv(), ACK_TIMEOUT_S))
         if ack.get("type") != "connection_ack":
             raise ProtocolError(f"expected connection_ack, got {str(ack)[:200]}")
-        await ws.send(json.dumps({"id": "1", "type": "subscribe", "payload": {"query": QUERY}}))
+        subscribe = {"id": "1", "type": "subscribe", "payload": {"query": QUERY}}
+        await ws.send(json.dumps(subscribe))
         log.info("subscribed to %s", url)
+
         while True:
             text = await asyncio.wait_for(ws.recv(), silence_s)
             if isinstance(text, bytes):
                 text = text.decode("utf-8")
             kind = json.loads(text).get("type")
+            # Protocol pings are answered, not stored.
             if kind == "ping":
                 await ws.send(json.dumps({"type": "pong"}))
                 continue
             if kind == "pong":
                 continue
             now = utcnow()
-            writer.append(json.dumps({"received_at": iso(now), "endpoint": FEED, "payload": text},
-                                     ensure_ascii=False) + "\n", now)
+            line = {"received_at": iso(now), "endpoint": FEED, "payload": text}
+            writer.append(json.dumps(line, ensure_ascii=False) + "\n", now)
             if kind == "error":
                 raise ProtocolError(f"subscription error: {text[:500]}")
             if kind == "complete":
@@ -136,22 +136,31 @@ async def rotate(writer):
 
 
 async def main_async(url, client_name, writer):
-    tasks = [asyncio.create_task(collect(url, client_name, writer)),
-             asyncio.create_task(rotate(writer))]
+    tasks = [
+        asyncio.create_task(collect(url, client_name, writer)),
+        asyncio.create_task(rotate(writer)),
+    ]
+
+    def shutdown(sig):
+        log.info("signal %s, shutting down", sig)
+        for t in tasks:
+            t.cancel()
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda s=sig: (log.info("signal %s, shutting down", s),
-                                                    [t.cancel() for t in tasks]))
+        loop.add_signal_handler(sig, shutdown, sig)
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def main():
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
     client_name = os.environ.get("ET_CLIENT_NAME", "uis-dat535group21-collector")
-    url = os.environ.get("VEHICLES_URL",
-                         "wss://api.entur.io/realtime/v2/vehicles/subscriptions")
+    default_url = "wss://api.entur.io/realtime/v2/vehicles/subscriptions"
+    url = os.environ.get("VEHICLES_URL", default_url)
     writer = HourlyWriter(landing, FEED)
     log.info("collecting %s into %s (websockets %s)", url, writer.dir, websockets.__version__)
     try:

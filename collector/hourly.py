@@ -1,9 +1,8 @@
 """Hourly JSON Lines files in the landing zone, shared by every collector.
 
-    <landing>/<name>/date=YYYY-MM-DD/hour=HH.jsonl.part  (gzipped to .jsonl.gz when the hour ends)
+    <landing>/<name>/date=YYYY-MM-DD/hour=HH.jsonl.part   (-> .jsonl.gz when the hour ends)
 
-<name> is the dataset: siri-et, siri-sx (receiver.py), vehicles (vehicles.py), datex-<feed>
-(datex.py). Dates and hours are UTC. Closed files are never touched again. Standard library only.
+<name>: siri-et, siri-sx, vehicles or datex-<feed>. UTC. Closed files are never touched again.
 """
 
 import gzip
@@ -17,7 +16,7 @@ from pathlib import Path
 
 log = logging.getLogger("hourly")
 
-BODY_CHUNK = 1 << 20                # spooled payloads are copied this much at a time
+BODY_CHUNK = 1 << 20  # spooled payloads are copied this much at a time
 
 
 def utcnow():
@@ -29,16 +28,10 @@ def iso(dt):
 
 
 class HourlyWriter:
-    """Appends lines to <root>/<name>/date=.../hour=HH.jsonl.part.
+    """Appends lines to this hour's .part; a background thread gzips each finished hour.
 
-    When the hour ends the .part is closed and handed to a background thread, which
-    gzips it to hour=HH.jsonl.gz (via .gz.tmp, then an atomic rename) and removes the
-    .part. Compression never blocks incoming lines.
-
-    Hours only move forward. Callers read the clock before taking the lock, so a reading
-    from before the hour can arrive after another thread opened the next one: such a line
-    goes into the open hour, and rotate() leaves it open. Reopening or closing an hour out
-    of order would leave a .part that can never be finalized next to its .gz.
+    Hours only move forward: a line stamped just before the hour that arrives after the next
+    hour opened goes into the open hour. Reopening an old hour would leave a .part beside its .gz.
     """
 
     def __init__(self, root, name):
@@ -61,6 +54,7 @@ class HourlyWriter:
         return now.strftime("%Y-%m-%d"), now.strftime("%H")
 
     def _close(self):
+        # Hand the finished hour to the compressor thread: compressing never blocks new lines.
         if self.fh is None:
             return
         self.fh.flush()
@@ -88,8 +82,7 @@ class HourlyWriter:
                 self.pending.put(part)
 
     def adopt_current(self, now):
-        """Take over this hour's .part left by a restart, so rotate() closes it when the hour
-        ends even if no push arrives before then."""
+        """Take over this hour's .part left by a restart, so rotate() closes it on time."""
         with self.lock:
             if self._part(self._key(now)).exists():
                 self._file(now)
@@ -161,6 +154,7 @@ def finalize(part):
         else:
             log.error("not finalizing %s: %s already exists", part, final.name)
         return
+    # Write .gz.tmp, then rename: a reader never sees half a .gz.
     tmp = final.with_name(final.name + ".tmp")
     with open(part, "rb") as src, open(tmp, "wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:

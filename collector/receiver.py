@@ -1,30 +1,13 @@
 #!/usr/bin/env python3
 """Entur SIRI pub/sub receiver.
 
-Holds SIRI 2.0 subscriptions (ET, SX) with Entur and appends every push, unchanged,
-as one JSON line to the hourly landing file:
-
-    <landing>/siri-<feed>/date=YYYY-MM-DD/hour=HH.jsonl.part  (gzipped to .jsonl.gz when the hour ends)
-
-Dates and hours are UTC. Heartbeats are pushes too and are stored like everything else.
+Holds SIRI 2.0 subscriptions (ET, SX) with Entur and appends every push (heartbeats too),
+unchanged, as one JSON line to <landing>/siri-<feed>/date=D/hour=HH.jsonl.part.
 No parsing, no filtering. Standard library only.
 
-Push bodies are streamed to an anonymous spool file (never held in memory whole), checked
-to be complete UTF-8, and only then appended to the .part. The spool lives outside the
-landing tree so nothing but finished lines ever appears there.
-
-Environment:
-    DAT535_LANDING_DIR      landing root (default: ./landing)
-    RECEIVER_SPOOL_DIR      spool for pushes being received; same filesystem as the landing
-                            root, outside it (default: <landing>/../receiver-spool)
-    RECEIVER_BIND           listen address (default: 127.0.0.1)
-    RECEIVER_PORT           listen port (default: 8750)
-    RECEIVER_PUBLIC_URL     base URL Entur can reach, e.g. https://collector.example.org
-                            unset = receive only, never subscribe (local testing)
-    RECEIVER_STATE_FILE     small JSON status file for the monitor (default: ./run/receiver.json)
-    RECEIVER_FEEDS          comma-separated feeds (default: et,sx)
-    ET_CLIENT_NAME          ET-Client-Name header and SIRI requestor (default: uis-dat535group21-collector)
-    ENTUR_SUBSCRIBE_URL     default: https://api.entur.io/realtime/v1/subscribe
+Environment: DAT535_LANDING_DIR, RECEIVER_SPOOL_DIR, RECEIVER_BIND (127.0.0.1),
+RECEIVER_PORT (8750), RECEIVER_PUBLIC_URL (unset: receive only, never subscribe),
+RECEIVER_STATE_FILE, RECEIVER_FEEDS (et,sx), ET_CLIENT_NAME, ENTUR_SUBSCRIBE_URL.
 """
 
 import codecs
@@ -49,16 +32,16 @@ from hourly import HourlyWriter, iso, utcnow
 log = logging.getLogger("receiver")
 
 FEED_PATHS = {"/siri/et": "et", "/siri/sx": "sx"}
-MAX_BODY = 256 * 1024 * 1024        # refuse absurd bodies on a public endpoint
-BODY_CHUNK = 1 << 20                # pushes are streamed through memory this much at a time
-MAX_LINE = 8192                     # chunk-size and trailer lines
+MAX_BODY = 256 * 1024 * 1024  # refuse absurd bodies on a public endpoint
+BODY_CHUNK = 1 << 20  # pushes are streamed through memory this much at a time
+MAX_LINE = 8192  # chunk-size and trailer lines
 SPOOL_PREFIX = "push-"
 ROTATE_CHECK_S = 10
 
-HEARTBEAT = timedelta(seconds=60)   # Entur clamps to 30-60 s
-SILENCE_LIMIT = 3 * HEARTBEAT       # no push for this long = subscription presumed dead
-RENEW_AFTER = timedelta(hours=24)   # re-subscribe periodically, long before termination
-TERMINATION = timedelta(days=7)     # InitialTerminationTime
+HEARTBEAT = timedelta(seconds=60)  # Entur clamps to 30-60 s
+SILENCE_LIMIT = 3 * HEARTBEAT  # no push for this long = subscription presumed dead
+RENEW_AFTER = timedelta(hours=24)  # re-subscribe periodically, long before termination
+TERMINATION = timedelta(days=7)  # InitialTerminationTime
 MIN_RESUBSCRIBE = timedelta(minutes=5)  # never hit /subscribe more often than this per feed
 SUBSCRIBE_TIMEOUT_S = 30
 
@@ -72,8 +55,14 @@ class Subscriptions:
         self.subscribe_url = subscribe_url
         self.lock = threading.Lock()
         self.state = {
-            f: {"id": f"{client_name}-{f}", "subscribed_at": None, "expires_at": None,
-                "last_attempt": None, "last_push": None, "last_error": None}
+            f: {
+                "id": f"{client_name}-{f}",
+                "subscribed_at": None,
+                "expires_at": None,
+                "last_attempt": None,
+                "last_push": None,
+                "last_error": None,
+            }
             for f in feeds
         }
 
@@ -82,11 +71,14 @@ class Subscriptions:
             self.state[feed]["last_push"] = now
 
     def snapshot(self):
+        def show(v):
+            return iso(v) if isinstance(v, datetime) else v
+
         with self.lock:
-            return {f: {k: iso(v) if isinstance(v, datetime) else v for k, v in s.items()}
-                    for f, s in self.state.items()}
+            return {f: {k: show(v) for k, v in s.items()} for f, s in self.state.items()}
 
     def _due(self, s, now):
+        """Subscribe now? Never, right after an attempt; yes when new, old or silent."""
         if s["last_attempt"] and now - s["last_attempt"] < MIN_RESUBSCRIBE:
             return False
         if s["subscribed_at"] is None:
@@ -114,14 +106,19 @@ class Subscriptions:
 
     def _post(self, body, timeout):
         req = urllib.request.Request(
-            self.subscribe_url, data=body.encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/xml", "ET-Client-Name": self.client_name})
+            self.subscribe_url,
+            data=body.encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/xml", "ET-Client-Name": self.client_name},
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
     def _subscribe(self, feed, sub_id, now):
-        body = subscription_request(feed, sub_id, f"{self.public_url}/siri/{feed}",
-                                    self.client_name, now, now + TERMINATION)
+        address = f"{self.public_url}/siri/{feed}"
+        body = subscription_request(
+            feed, sub_id, address, self.client_name, now, now + TERMINATION
+        )
         try:
             resp = self._post(body, SUBSCRIBE_TIMEOUT_S)
         except (urllib.error.URLError, OSError) as e:
@@ -207,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     writers = {}
     subs: "Subscriptions | None" = None
-    spool_dir = None                    # None = system temp dir (tests); main() sets it
+    spool_dir = None  # None = system temp dir (tests); main() sets it
 
     def log_message(self, format, *args):
         log.debug("%s %s", self.address_string(), format % args)
@@ -228,11 +225,9 @@ class Handler(BaseHTTPRequestHandler):
         return line
 
     def _spool_body(self, spool):
-        """Stream the body (Content-Length or chunked) into `spool`, already escaped as the
-        inside of a JSON string, so the append is a plain copy.
+        """Stream the body into `spool`, already JSON-escaped, so landing it is a plain copy.
 
-        Raises Aborted on EOF mid-body, ValueError (incl. UnicodeDecodeError) on a body
-        we refuse. Returns the body size in bytes.
+        Returns its size. Raises Aborted if the client hangs up, ValueError if we refuse it.
         """
         decoder = codecs.getincrementaldecoder("utf-8")()
         got = 0
@@ -245,10 +240,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise Aborted(f"connection closed mid-body ({got} body bytes received)")
                 got += len(data)
                 n -= len(data)
-                # json.dumps escapes per character, so escaping piecewise gives the same
-                # bytes as escaping the whole payload; the decoder holds back split sequences.
-                spool.write(json.dumps(decoder.decode(data), ensure_ascii=False)[1:-1]
-                            .encode("utf-8"))
+                # Escaping piece by piece gives the same bytes as escaping it all at once;
+                # the decoder holds back a UTF-8 sequence split between pieces.
+                escaped = json.dumps(decoder.decode(data), ensure_ascii=False)[1:-1]
+                spool.write(escaped.encode("utf-8"))
 
         if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
             while True:
@@ -275,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             if length > MAX_BODY:
                 raise ValueError("body too large")
             take(length)
-        decoder.decode(b"", final=True)   # truncated UTF-8 sequence at the end
+        decoder.decode(b"", final=True)  # raises on a truncated UTF-8 sequence at the end
         return got
 
     def do_HEAD(self):
@@ -290,14 +285,19 @@ class Handler(BaseHTTPRequestHandler):
         if feed is None or feed not in self.writers:
             self.close_connection = True
             return self._reply(404)
+        # Spool first (anonymous file, outside landing): only complete pushes are landed.
         with tempfile.TemporaryFile(dir=self.spool_dir, prefix=SPOOL_PREFIX) as spool:
             try:
                 self._spool_body(spool)
             except Aborted as e:
-                log.warning("aborted push on %s from %s (Transfer-Encoding=%s, "
-                            "Content-Length=%s): %s", self.path, self.client_address[0],
-                            self.headers.get("Transfer-Encoding"),
-                            self.headers.get("Content-Length"), e)
+                log.warning(
+                    "aborted push on %s from %s (Transfer-Encoding=%s, Content-Length=%s): %s",
+                    self.path,
+                    self.client_address[0],
+                    self.headers.get("Transfer-Encoding"),
+                    self.headers.get("Content-Length"),
+                    e,
+                )
                 self.close_connection = True
                 return
             except ValueError as e:
@@ -305,9 +305,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return self._reply(400)
             now = utcnow()
-            # Same bytes as json.dumps({..., "payload": payload}, ensure_ascii=False) + "\n".
-            head = json.dumps({"received_at": iso(now), "endpoint": feed, "payload": ""},
-                              ensure_ascii=False)[:-2]
+            # head + spooled payload + tail = json.dumps(line with payload) + "\n".
+            line = {"received_at": iso(now), "endpoint": feed, "payload": ""}
+            head = json.dumps(line, ensure_ascii=False)[:-2]
             spool.seek(0)
             self.writers[feed].append_spooled(head, spool, '"}\n', now)
         if self.subs:
@@ -316,22 +316,31 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def write_state(path, subs, started_at):
-    state = {"pid": os.getpid(), "started_at": iso(started_at), "updated_at": iso(utcnow()),
-             "subscribing": bool(subs.public_url), "feeds": subs.snapshot()}
+    state = {
+        "pid": os.getpid(),
+        "started_at": iso(started_at),
+        "updated_at": iso(utcnow()),
+        "subscribing": bool(subs.public_url),
+        "feeds": subs.snapshot(),
+    }
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(state, indent=1))
     os.replace(tmp, path)
 
 
 def main():
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
     landing = Path(os.environ.get("DAT535_LANDING_DIR", "landing"))
-    spool_dir = Path(os.environ.get("RECEIVER_SPOOL_DIR",
-                                    landing.absolute().parent / "receiver-spool"))
+    # The spool is on the landing's filesystem but outside it.
+    default_spool = landing.absolute().parent / "receiver-spool"
+    spool_dir = Path(os.environ.get("RECEIVER_SPOOL_DIR", default_spool))
     bind = os.environ.get("RECEIVER_BIND", "127.0.0.1")
     port = int(os.environ.get("RECEIVER_PORT", "8750"))
-    feeds = [f.strip() for f in os.environ.get("RECEIVER_FEEDS", "et,sx").split(",") if f.strip()]
+    feeds = os.environ.get("RECEIVER_FEEDS", "et,sx").split(",")
+    feeds = [f.strip() for f in feeds if f.strip()]
     state_file = Path(os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"))
     client_name = os.environ.get("ET_CLIENT_NAME", "uis-dat535group21-collector")
 
@@ -348,15 +357,18 @@ def main():
 
     started_at = utcnow()
     Handler.writers = {f: HourlyWriter(landing, f"siri-{f}") for f in feeds}
-    subs = Subscriptions(feeds, os.environ.get("RECEIVER_PUBLIC_URL"), client_name,
-                         os.environ.get("ENTUR_SUBSCRIBE_URL",
-                                        "https://api.entur.io/realtime/v1/subscribe"))
+    subscribe_url = os.environ.get(
+        "ENTUR_SUBSCRIBE_URL", "https://api.entur.io/realtime/v1/subscribe"
+    )
+    public_url = os.environ.get("RECEIVER_PUBLIC_URL")
+    subs = Subscriptions(feeds, public_url, client_name, subscribe_url)
     Handler.subs = subs
     Handler.spool_dir = spool_dir
     server = ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
     stop = threading.Event()
 
+    # Every 10 s: close finished hours, keep subscriptions alive, write the monitor's state.
     def background():
         while not stop.is_set():
             now = utcnow()
@@ -374,8 +386,10 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    log.info("listening on %s:%d, feeds=%s, landing=%s, subscribing=%s",
-             bind, port, ",".join(feeds), landing, bool(subs.public_url))
+    log.info(
+        "listening on %s:%d, feeds=%s, landing=%s, subscribing=%s",
+        bind, port, ",".join(feeds), landing, bool(subs.public_url),
+    )
     bg = threading.Thread(target=background, daemon=True)
     bg.start()
     server.serve_forever()
