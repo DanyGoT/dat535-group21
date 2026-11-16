@@ -190,6 +190,29 @@ class GoldTest(SparkCase):
         self.assertEqual((rows["E"].cancelled_connections, sum(rows["E"].gap_change_counts)), (1, 0))
         self.assertEqual((rows["U"].unknown_connections, sum(rows["U"].gap_change_counts)), (1, 0))
 
+    def test_segments_measure_running_time_between_hubs(self):
+        calls = [
+            # +2 min from Stop to the hub, then dwell (left out), then -3 min to Other stop.
+            stop("s1", 1, "L", "Q:1", depart=0, depart_delay=30),
+            stop("s1", 2, "L", "Q:H1", arrive=5, depart=6, arrive_delay=150, depart_delay=170),
+            stop("s1", 3, "L", "Q:H2", arrive=7, depart=8, arrive_delay=170, depart_delay=200),  # same hub
+            stop("s1", 4, "L", "Q:2", arrive=15, arrive_delay=20),
+            stop("s2", 1, "L", "Q:1", depart=1), stop("s2", 2, "L", "Q:H1", arrive=6, arrive_delay=2000),  # clipped
+            stop("s3", 1, "L", "Q:1", depart=60),
+            stop("s3", 2, "L", "Q:H1", arrive=65, arrive_delay=5000, dq_issue=["implausible_arrival_delay"], depart=66),
+            stop("s3", 3, "L", "Q:X", arrive=70),  # quay missing in NSR: not drawable
+        ]
+        frames = self.frames(calls)
+        rows = {(r.from_hub_id, r.to_hub_id, r.hour): r for r in G.build_segments(frames["stop_call"], *self.hubs(frames)).collect()}
+        self.assertEqual(set(rows), {("SP:1", "P:H", 9), ("SP:1", "P:H", 10), ("P:H", "SP:2", 9)})
+        gained = rows["SP:1", "P:H", 9]
+        self.assertEqual((gained.segments, gained.timed_segments, gained.delay_change_s, gained.gained_1_min_plus,
+                          gained.from_name, gained.to_name), (2, 2, 120.0 + G.MAX_CHANGE_S, 2, "Stop", "Hub"))
+        self.assertEqual((rows["SP:1", "P:H", 10].segments, rows["SP:1", "P:H", 10].timed_segments), (1, 0))
+        recovered = rows["P:H", "SP:2", 9]
+        self.assertEqual((recovered.delay_change_s, recovered.recovered_1_min_plus, recovered.gained_1_min_plus),
+                         (-180.0, 1, 0))
+
     def test_conditions_and_stops_split_the_same_departures(self):
         calls = [
             stop("d1", 1, "L", "Q:1", depart=0, depart_delay=240),

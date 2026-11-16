@@ -1,7 +1,7 @@
 # Gold: product plan
 
 This page defines proposed Gold products and their consumers. The manual
-[Gold job](gold-example.md) delivers #2, a hub map for #3, an observed version of #8 and a
+[Gold job](gold-example.md) delivers #2, a hub map and a segment map for #3, an observed version of #8 and a
 first slice of #4 and #5. Departure risk and the other products remain future work.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
@@ -94,8 +94,9 @@ punctuality. BigQuery access and contents remain
 
 **Consumer.** Transit planners locate where lateness accumulates or is recovered.
 
-**Output.** Delay gained between consecutive stops, per line × direction × stop pair ×
-hour of week.
+**Output.** Delay gained between consecutive stops, per line × stop pair × hour. Delivered
+per operating day as [`segment_delay`](gold-example.md#segment_delay); hour of week comes from
+summing days by weekday.
 
 **Inputs.** Stop calls and NSR coordinates for a map. DATEX travel times could help
 separate slow roads from dwell time.
@@ -204,7 +205,7 @@ webcams. Costs are in [DATEX sources](../datex/sources.md#cost-per-day) and
 ## Order of work
 
 1. Daily reference archives and Entur/DATEX Silver are implemented. BigQuery checks remain planned.
-2. Done: Gold reads schema-2 Silver and DATEX, and publishes #2, the #3 map, #8 and a condition
+2. Done: Gold reads schema-2 Silver and DATEX, and publishes #2, the #3 maps, #8 and a condition
    comparison for #4/#5 ([what is built](gold-example.md)).
 3. Build the #1 profile, then the model and its planned-time baselines.
 4. Turn the condition comparison into per-line #4/#5 products, with Frost for ferries.
