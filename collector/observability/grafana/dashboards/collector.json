@@ -367,7 +367,7 @@
       "id": 6,
       "type": "stat",
       "title": "Disk full in",
-      "description": "Free space on the landing volume divided by how fast it shrank over the last 24 h, so landing, Bronze, Silver and caches all count. Empty while free space is not shrinking (after a cleanup).",
+      "description": "Free space on the landing volume divided by the growth of stored data over the last 24 h.",
       "gridPos": {
         "x": 20,
         "y": 0,
