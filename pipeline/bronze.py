@@ -1,25 +1,15 @@
 #!/usr/bin/env python3
-"""Bronze: closed hourly SIRI and vehicle-position landing files -> one compacted Parquet
-dataset per feed and day.
+"""Bronze: closed hourly landing files of SIRI ET/SX and vehicles -> one Parquet dataset per day.
 
-Reads   $DAT535_LANDING_DIR/<dataset>/date=D/hour=HH.jsonl.gz  (and legacy hour=HH.jsonl)
-Writes  $DAT535_OUTPUT_DIR/bronze/<dataset>/date=D/*.parquet
-        $DAT535_OUTPUT_DIR/bronze/_runs/date=D/<run_id>.json   (one record per run)
+Payloads stay unchanged strings (parsing is Silver's job). Bad lines are kept and flagged in
+_bronze_status, never dropped. Rerunning a date replaces that date only.
 
-<dataset> is siri-et, siri-sx or vehicles (DATASETS). The raw payload (SIRI XML, or the
-vehicle subscription's JSON message) is kept unchanged as a string; parsing it is Silver's
-job. Lines that are not valid JSON, or lack a field, are kept with `_bronze_status` set,
-never dropped.
-Rerunning a date replaces that date only, so reruns and late reruns are safe.
-`--hours` limits a run to some hours of the day (the dev workflow's small run); the date's
-partition then holds only those hours.
-Landing is read-only here: open (*.part) and in-progress (*.tmp) files are never read.
-
-Usage:
-    python pipeline/bronze.py                    # yesterday (UTC)
-    python pipeline/bronze.py --date 2026-10-15
+    python pipeline/bronze.py                     # yesterday (UTC)
     python pipeline/bronze.py --date 2026-10-15 --feeds et,vehicles
-    python pipeline/bronze.py --hours 08         # yesterday, 08:00-09:00 UTC only
+    python pipeline/bronze.py --hours 08          # only 08:00-09:00 UTC (the dev run)
+
+Reads  $DAT535_LANDING_DIR/<dataset>/date=D/hour=HH.jsonl.gz   (never *.part or *.tmp)
+Writes $DAT535_OUTPUT_DIR/bronze/<dataset>/date=D/*.parquet and bronze/_runs/date=D/<run>.json
 """
 
 import argparse
@@ -35,20 +25,20 @@ from pathlib import Path
 
 if find_spec("findspark") is not None:
     import findspark
+
     findspark.init()
 
 log = logging.getLogger("bronze")
 
 FEEDS = ("et", "sx", "vehicles")
-# Landing and Bronze directory of each feed: receiver.py writes siri-et and siri-sx,
-# vehicles.py writes vehicles.
+# Landing/Bronze folder per feed (receiver.py writes siri-*, vehicles.py writes vehicles).
 DATASETS = {"et": "siri-et", "sx": "siri-sx", "vehicles": "vehicles"}
 HOURS = [f"{h:02d}" for h in range(24)]
 CLOSED = re.compile(r"^hour=(\d{2})\.jsonl(\.gz)?$")
 OPEN = re.compile(r"^hour=(\d{2})\.jsonl\.part$")
-# Spark 3.5's JSON reader (Jackson 2.15) caps strings at 20,000,000 characters and marks longer
-# lines corrupt. Real payloads are longer: ET pushes of 21.6M and 22.8M characters on
-# 2026-10-22, every DATEX situation snapshot (~28.6M). The reader option lifts the cap.
+
+# Spark's JSON reader marks strings over 20M characters corrupt by default. Real payloads are
+# longer (ET pushes of 22.8M, every DATEX situation snapshot ~28.6M), so lift the cap.
 MAX_STRING_LEN = 2**31 - 1
 
 
@@ -61,7 +51,7 @@ def iso(dt):
 
 
 def run_id():
-    """GitHub run id + attempt in CI, so a rerun of the same workflow is distinguishable."""
+    """GitHub run id + attempt in CI (so reruns differ), else a local timestamp id."""
     gh = os.environ.get("GITHUB_RUN_ID")
     if gh:
         return f"gh-{gh}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
@@ -69,7 +59,7 @@ def run_id():
 
 
 def parse_hours(text):
-    """"08,09" -> ["08", "09"]: two-digit UTC hours, sorted, no duplicates."""
+    """'08,09' -> ['08', '09']: two-digit UTC hours, sorted, no duplicates."""
     hours = sorted({f"{int(h):02d}" for h in text.split(",") if h.strip()})
     if not hours or any(h not in HOURS for h in hours):
         raise ValueError(f"hours must be 0-23, comma-separated: {text!r}")
@@ -77,14 +67,7 @@ def parse_hours(text):
 
 
 def scan_day(landing, dataset, day, hours=HOURS):
-    """Closed files of one landing dataset (e.g. siri-et) and UTC day, plus which hours are
-    missing or still open.
-
-    Only `hours` are looked at; files of other hours are ignored.
-
-    Returns (files sorted by hour, missing hours, open hours). Raises if an hour has both a
-    .jsonl and a .jsonl.gz, which the collectors never produce: a human must look at it.
-    """
+    """Closed landing files of one dataset and day. Returns (files, missing hours, open hours)."""
     folder = Path(landing) / dataset / f"date={day}"
     closed, open_hours = {}, []
     if folder.is_dir():
@@ -92,36 +75,35 @@ def scan_day(landing, dataset, day, hours=HOURS):
             m = CLOSED.match(path.name) or OPEN.match(path.name)
             if not m or m.group(1) not in hours:
                 continue
-            if CLOSED.match(path.name):
-                if m.group(1) in closed:
-                    raise RuntimeError(f"two closed files for one hour: {closed[m.group(1)]} and {path}")
-                closed[m.group(1)] = path
-            else:
-                open_hours.append(m.group(1))
+            hour = m.group(1)
+            if not CLOSED.match(path.name):
+                open_hours.append(hour)
+                continue
+            # .jsonl and .jsonl.gz for one hour: the collectors never do that; a human must look.
+            if hour in closed:
+                raise RuntimeError(f"two closed files for one hour: {closed[hour]} and {path}")
+            closed[hour] = path
     missing = [h for h in hours if h not in closed]
     return [closed[h] for h in sorted(closed)], missing, open_hours
 
 
 def create_spark(app_name="DAT535-Bronze", settings=None):
     from pyspark.sql import SparkSession
-    # Local mode runs everything in the driver JVM; the 1g default is too small for
-    # payloads of up to ~15 MB per line across several parallel tasks.
-    # zstd, not snappy: one ET hour (2026-10-22 08 UTC, 589 MB gzipped) became 1,621 MB of
-    # snappy Parquet but 558 MB of zstd, written in the same time (126 s vs 129 s). Snappy
-    # barely compresses multi-MB XML strings; zstd beats even the landing gzip.
-    # Reader batch 256, not 4096: reading that hour's payloads back with the default batch
-    # killed a 3 GB driver (4 tasks x 4096 rows of up to 15.9M characters); 256 read it in 23 s.
-    # Cached plans keep their partitioning: in Spark 3.5.0 a join with a cached DataFrame can
-    # skip a needed shuffle and lose matches (SPARK-45282; 2026-11-07, 44 % instead of 99.6 %).
-    builder: SparkSession.Builder = SparkSession.builder # pyright: ignore[reportAssignmentType]
-    builder = builder \
-        .appName(app_name) \
-        .config("spark.driver.memory", os.environ.get("SPARK_DRIVER_MEMORY", "4g")) \
-        .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
-        .config("spark.sql.parquet.compression.codec", "zstd") \
-        .config("spark.sql.parquet.columnarReaderBatchSize", "256") \
-        .config("spark.sql.optimizer.canChangeCachedPlanOutputPartitioning", "false") \
+
+    builder: SparkSession.Builder = SparkSession.builder  # pyright: ignore[reportAssignmentType]
+    builder = (
+        builder.appName(app_name)
+        # Local mode runs everything in the driver; 1g is too small for ~15 MB lines.
+        .config("spark.driver.memory", os.environ.get("SPARK_DRIVER_MEMORY", "4g"))
+        .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        # zstd: one ET hour became 558 MB, against 1,621 MB with snappy, in the same time.
+        .config("spark.sql.parquet.compression.codec", "zstd")
+        # 256 rows per read batch: the default 4096 killed a 3 GB driver on multi-MB payloads.
+        .config("spark.sql.parquet.columnarReaderBatchSize", "256")
+        # Spark 3.5.0 bug SPARK-45282: a join with a cached frame could lose matches.
+        .config("spark.sql.optimizer.canChangeCachedPlanOutputPartitioning", "false")
         .config("spark.sql.session.timeZone", "UTC")
+    )
     for name, value in (settings or {}).items():
         builder = builder.config(name, value)
     spark = builder.getOrCreate()
@@ -130,81 +112,95 @@ def create_spark(app_name="DAT535-Bronze", settings=None):
 
 
 def read_landing(spark, files, fields):
-    """The lines of closed hour files with an explicit schema: the line format is ours
-    (collector/), so nothing is inferred. A line that is not JSON keeps its text in
-    _bronze_raw_line instead of failing the read."""
+    """Read hour files with an explicit schema. A non-JSON line lands in _bronze_raw_line."""
     from pyspark.sql.types import StringType, StructField, StructType
 
-    schema = StructType([StructField(name, kind) for name, kind in fields]
-                        + [StructField("_bronze_raw_line", StringType())])
-    return spark.read \
-        .schema(schema) \
-        .option("mode", "PERMISSIVE") \
-        .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
-        .option("encoding", "UTF-8") \
-        .option("maxStringLen", MAX_STRING_LEN) \
+    # The line format is ours (collector/), so nothing is inferred.
+    columns = [StructField(name, kind) for name, kind in fields]
+    schema = StructType(columns + [StructField("_bronze_raw_line", StringType())])
+    return (
+        spark.read.schema(schema)
+        .option("mode", "PERMISSIVE")
+        .option("columnNameOfCorruptRecord", "_bronze_raw_line")
+        .option("encoding", "UTF-8")
+        .option("maxStringLen", MAX_STRING_LEN)
         .json([str(f) for f in files])
+    )
 
 
 def with_evidence(raw, feed, status, rid, ingested_at):
-    """The landed columns unchanged, plus where each row came from, what its payload was,
-    and which run wrote it."""
-    from pyspark.sql.functions import col, input_file_name, lit, octet_length, regexp_extract, sha2
+    """The landed columns unchanged, plus source file, payload hash and size, status and run."""
+    from pyspark.sql.functions import (
+        col,
+        input_file_name,
+        lit,
+        octet_length,
+        regexp_extract,
+        sha2,
+    )
 
     landed = [c for c in raw.columns if c != "_bronze_raw_line"]
-    return raw \
-        .withColumn("_bronze_source_file", input_file_name()) \
-        .withColumn("hour", regexp_extract(col("_bronze_source_file"), r"hour=(\d{2})\.jsonl", 1)) \
-        .withColumn("feed", lit(feed)) \
-        .withColumn("_bronze_payload_sha256", sha2(col("payload"), 256)) \
-        .withColumn("_bronze_payload_bytes", octet_length(col("payload"))) \
-        .withColumn("_bronze_status", status) \
-        .withColumn("_bronze_ingested_at", lit(ingested_at)) \
-        .withColumn("_bronze_run_id", lit(rid)) \
-        .select(*landed, "feed", "hour",
-                "_bronze_payload_sha256", "_bronze_payload_bytes", "_bronze_status", "_bronze_raw_line",
-                "_bronze_source_file", "_bronze_ingested_at", "_bronze_run_id")
+    hour = regexp_extract(col("_bronze_source_file"), r"hour=(\d{2})\.jsonl", 1)
+    return (
+        raw.withColumn("_bronze_source_file", input_file_name())
+        .withColumn("hour", hour)
+        .withColumn("feed", lit(feed))
+        .withColumn("_bronze_payload_sha256", sha2(col("payload"), 256))
+        .withColumn("_bronze_payload_bytes", octet_length(col("payload")))
+        .withColumn("_bronze_status", status)
+        .withColumn("_bronze_ingested_at", lit(ingested_at))
+        .withColumn("_bronze_run_id", lit(rid))
+        .select(
+            *landed,
+            "feed",
+            "hour",
+            "_bronze_payload_sha256",
+            "_bronze_payload_bytes",
+            "_bronze_status",
+            "_bronze_raw_line",
+            "_bronze_source_file",
+            "_bronze_ingested_at",
+            "_bronze_run_id",
+        )
+    )
 
 
 def status_counts(written):
-    """{_bronze_status: rows} of a written partition: reads one narrow column, no payloads."""
-    return {r["_bronze_status"]: r["count"] for r in written.groupBy("_bronze_status").count().collect()}
+    """{_bronze_status: rows} of a written partition (reads one narrow column, no payloads)."""
+    rows = written.groupBy("_bronze_status").count().collect()
+    return {r["_bronze_status"]: r["count"] for r in rows}
 
 
 def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
-    """Read the closed hour files of one feed/day and overwrite that day's Bronze partition.
-
-    Returns {"rows": n, "bad_rows": {status: n}}.
-    """
+    """Overwrite one feed's Bronze day from its hour files. Returns {rows, bad_rows}."""
     from pyspark.sql.functions import col, when
     from pyspark.sql.types import StringType
 
-    raw = read_landing(spark, files, [("received_at", StringType()), ("endpoint", StringType()),
-                                      ("payload", StringType())])
-    status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
-        .when(col("received_at").isNull() | col("endpoint").isNull() | col("payload").isNull(), "incomplete") \
-        .when(col("endpoint") != feed, "wrong_endpoint") \
+    fields = [("received_at", StringType()), ("endpoint", StringType()), ("payload", StringType())]
+    raw = read_landing(spark, files, fields)
+
+    missing_field = col("received_at").isNull() | col("endpoint").isNull() | col("payload").isNull()
+    status = (
+        when(col("_bronze_raw_line").isNotNull(), "corrupt")
+        .when(missing_field, "incomplete")
+        .when(col("endpoint") != feed, "wrong_endpoint")
         .otherwise("ok")
+    )
     bronze = with_evidence(raw, feed, status, rid, ingested_at)
 
-    # No cache and no coalesce: a day of ET is ~200 GB of raw lines. Gzip is not splittable,
-    # so Spark reads one task per hour file and writes about one Parquet file per hour.
-    # Writes straight into the day's directory instead of partitionBy("date"): partitionBy sorts
-    # by the partition column first, which spills the whole day to local disk. Readers of the
-    # feed root still get `date` from the directory name.
+    # No cache, no coalesce: an ET day is ~200 GB of raw lines. Gzip can't be split, so it is
+    # one task and about one Parquet file per hour. Written straight into the day's folder:
+    # partitionBy("date") would sort, and spill, the whole day first.
     partition = Path(out_root) / DATASETS[feed] / f"date={day}"
-    bronze.write \
-        .mode("overwrite") \
-        .parquet(str(partition))
+    bronze.write.mode("overwrite").parquet(str(partition))
 
     counts = status_counts(spark.read.parquet(str(partition)))
-    return {"rows": sum(counts.values()),
-            "bad_rows": {k: v for k, v in counts.items() if k != "ok"}}
+    bad_rows = {k: v for k, v in counts.items() if k != "ok"}
+    return {"rows": sum(counts.values()), "bad_rows": bad_rows}
 
 
 def write_run_record(out_root, day, rid, record, name=None):
-    """Driver-side JSON, one file per run (<name or run id>.json); atomic rename so readers
-    never see half a file."""
+    """Write _runs/date=D/<name or run id>.json atomically, so readers never see half a file."""
     folder = Path(out_root) / "_runs" / f"date={day}"
     folder.mkdir(parents=True, exist_ok=True)
     final = folder / f"{name or rid}.json"
@@ -215,21 +211,28 @@ def write_run_record(out_root, day, rid, record, name=None):
 
 
 def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
-    """Bronze for one UTC day (or some of its hours). Returns the run record (also written
-    under _runs/)."""
+    """Bronze for one UTC day (or some of its hours). Returns the run record."""
     out_root = Path(output_dir) / "bronze"
     rid = run_id()
     started = utcnow()
-    record = {"run_id": rid, "env": os.environ.get("DAT535_ENV", "local"), "date": str(day),
-              "landing": str(landing), "started_at": iso(started), "feeds": {}}
+    record = {
+        "run_id": rid,
+        "env": os.environ.get("DAT535_ENV", "local"),
+        "date": str(day),
+        "landing": str(landing),
+        "started_at": iso(started),
+        "feeds": {},
+    }
     if hours != HOURS:
         record["hours"] = list(hours)
+
     for feed in feeds:
         dataset = DATASETS[feed]
         files, missing, open_hours = scan_day(landing, dataset, day, hours)
         entry = {"files": len(files), "missing_hours": missing, "open_hours": open_hours}
         if open_hours:
-            log.warning("%s %s: hours still open %s; rerun once they close", dataset, day, open_hours)
+            log.warning("%s %s: hours still open %s; rerun once closed", dataset, day, open_hours)
+
         if not files:
             log.warning("%s %s: no closed files, skipped", dataset, day)
             entry.update(rows=0, bad_rows={}, skipped=True)
@@ -237,9 +240,12 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
             if spark is None:
                 spark = create_spark()
             entry.update(ingest_feed(spark, files, feed, day, out_root, rid, iso(started)))
-            log.info("%s %s: %d files, %d rows, bad %s, missing hours %s",
-                     dataset, day, len(files), entry["rows"], entry["bad_rows"], missing or "none")
+            log.info(
+                "%s %s: %d files, %d rows, bad %s, missing hours %s",
+                dataset, day, len(files), entry["rows"], entry["bad_rows"], missing or "none",
+            )
         record["feeds"][feed] = entry
+
     record["finished_at"] = iso(utcnow())
     path = write_run_record(out_root, day, rid, record)
     log.info("run record: %s", path)
@@ -247,18 +253,29 @@ def run(landing, output_dir, day, feeds=FEEDS, spark=None, hours=HOURS):
 
 
 def cli(doc, feeds, run, logger, argv=None):
-    """The command line of both Bronze jobs: parse --date, --feeds and --hours, then run. Errors are
-    logged to the job's own logger."""
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    """Command line of both Bronze jobs: --date, --feeds and --hours, then run."""
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     p = argparse.ArgumentParser(description=doc.splitlines()[0])
-    p.add_argument("--date", type=Date.fromisoformat,
-                   default=(utcnow() - timedelta(days=1)).date(),
-                   help="UTC day to ingest, YYYY-MM-DD (default: yesterday)")
-    p.add_argument("--feeds", default=",".join(feeds),
-                   help=f"comma-separated feeds (default: {','.join(feeds)})")
-    p.add_argument("--hours", type=parse_hours, default=HOURS,
-                   help="comma-separated UTC hours, e.g. 08,09 (default: the whole day)")
+    p.add_argument(
+        "--date",
+        type=Date.fromisoformat,
+        default=(utcnow() - timedelta(days=1)).date(),
+        help="UTC day to ingest, YYYY-MM-DD (default: yesterday)",
+    )
+    p.add_argument(
+        "--feeds",
+        default=",".join(feeds),
+        help=f"comma-separated feeds (default: {','.join(feeds)})",
+    )
+    p.add_argument(
+        "--hours",
+        type=parse_hours,
+        default=HOURS,
+        help="comma-separated UTC hours, e.g. 08,09 (default: the whole day)",
+    )
     args = p.parse_args(argv)
     chosen = [f.strip() for f in args.feeds.split(",") if f.strip()]
     unknown = set(chosen) - set(feeds)

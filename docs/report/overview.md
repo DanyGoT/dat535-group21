@@ -87,6 +87,7 @@ def finalize(part):
     base = part.with_name(part.name[: -len(".part")])
     final = base.with_name(base.name + ".gz")
     ...
+    # Write .gz.tmp, then rename: a reader never sees half a .gz.
     tmp = final.with_name(final.name + ".tmp")
     with open(part, "rb") as src, open(tmp, "wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
@@ -117,22 +118,27 @@ More: [landing contract](../system/architecture.md#landing-zone),
 Unreadable lines remain labelled evidence.
 
 ```python
-# pipeline/bronze.py, read_landing: an explicit schema, the line format is ours
-schema = StructType([StructField(name, kind) for name, kind in fields]
-                    + [StructField("_bronze_raw_line", StringType())])
-return spark.read \
-    .schema(schema) \
-    .option("mode", "PERMISSIVE") \
-    .option("columnNameOfCorruptRecord", "_bronze_raw_line") \
-    .option("encoding", "UTF-8") \
-    .option("maxStringLen", MAX_STRING_LEN) \
+# pipeline/bronze.py, read_landing
+# The line format is ours (collector/), so nothing is inferred.
+columns = [StructField(name, kind) for name, kind in fields]
+schema = StructType(columns + [StructField("_bronze_raw_line", StringType())])
+return (
+    spark.read.schema(schema)
+    .option("mode", "PERMISSIVE")
+    .option("columnNameOfCorruptRecord", "_bronze_raw_line")
+    .option("encoding", "UTF-8")
+    .option("maxStringLen", MAX_STRING_LEN)
     .json([str(f) for f in files])
+)
 
 # pipeline/bronze.py, ingest_feed
-status = when(col("_bronze_raw_line").isNotNull(), "corrupt") \
-    .when(col("received_at").isNull() | col("endpoint").isNull() | col("payload").isNull(), "incomplete") \
-    .when(col("endpoint") != feed, "wrong_endpoint") \
+missing_field = col("received_at").isNull() | col("endpoint").isNull() | col("payload").isNull()
+status = (
+    when(col("_bronze_raw_line").isNotNull(), "corrupt")
+    .when(missing_field, "incomplete")
+    .when(col("endpoint") != feed, "wrong_endpoint")
     .otherwise("ok")
+)
 ```
 
 Rows add source file, hour, payload SHA-256 and size, status and run ID.
@@ -191,7 +197,11 @@ repeated. [`parse_et`](../../pipeline/silver_parse.py) skips repeated states.
 for call_index, call in enumerate(calls):
     raw_order = call.findtext("Order")
     state = hash((call.tag, tuple((child.tag, child.text) for child in call)))
-    actuals = (1 if call.find("ActualArrivalTime") is not None else 0) + (2 if call.find("ActualDepartureTime") is not None else 0)
+    actuals = 0
+    if call.find("ActualArrivalTime") is not None:
+        actuals += 1
+    if call.find("ActualDepartureTime") is not None:
+        actuals += 2
     if not says_something_new(last, (op, jid, raw_order), state, recorded, actuals):
         continue
     ...
@@ -208,11 +218,20 @@ found a task-boundary limit. Of 33.0 M predictions, 2 moved by 3 s and 100 recei
 
 ```python
 # pipeline/silver.py, normalize_journeys
-joined = joined.withColumn("date_source", F.when(F.col("operating_date").isNotNull(), "framed")
-                           .when(F.col("_mapped_date").isNotNull(), "alias")
-                           .otherwise(F.col("derived_date_source"))) \
-    .withColumn("operating_date", F.coalesce("operating_date", "_mapped_date", "derived_operating_date")) \
+date_source = (
+    F.when(date.isNotNull(), "framed")
+    .when(mapped_date.isNotNull(), "alias")
+    .otherwise(F.col("derived_date_source"))
+)
+joined = (
+    issues(joined, ("operating_date_derived", derived))
+    .withColumn("date_source", date_source)
+    .withColumn(
+        "operating_date",
+        F.coalesce("operating_date", "_mapped_date", "derived_operating_date"),
+    )
     .drop("derived_operating_date", "derived_date_source")
+)
 ```
 
 Precedence is explicit `framed` day, plan `alias`, date inside the ID, then the Oslo date of the
@@ -231,16 +250,26 @@ rather than a ranking window: the winner is picked as rows are combined, before 
 ```python
 # pipeline/silver.py
 def latest(df, key, actual_first=False):
+    """One row per key: the newest by producer time, then arrival time, then tie-breakers."""
     F = functions()
     order = []
     if actual_first:
-        order.append(F.col("actual_arrival_at").isNotNull() | F.col("actual_departure_at").isNotNull())
+        arrived = F.col("actual_arrival_at").isNotNull()
+        departed = F.col("actual_departure_at").isNotNull()
+        order.append(arrived | departed)
     if "recorded_at" in df.columns:
         order.append(F.col("recorded_at"))
     order += [F.col("received_at"), F.col("payload_sha256"), F.col("entity_index")]
+
+    # max_by compares the struct field by field; null is smallest, so a missing time loses.
     values = [c for c in df.columns if c not in key]
-    return df.groupBy(*key).agg(F.max_by(F.struct(*values), F.struct(*order)).alias("_latest")) \
-        .select(*key, "_latest.*").select(*df.columns)
+    newest = F.max_by(F.struct(*values), F.struct(*order))
+    return (
+        df.groupBy(*key)
+        .agg(newest.alias("_latest"))
+        .select(*key, "_latest.*")
+        .select(*df.columns)
+    )
 ```
 
 ### The denominator: planned but never reported
@@ -252,8 +281,11 @@ An unreported call is unknown.
 # pipeline/silver.py, merge_plan
 merged = rt.withColumn("has_realtime", F.lit(True)).join(planned, key, "full")
 ...
-.withColumn("realtime_status", F.when(~F.col("has_realtime"), "no_realtime")
-            .when(~F.col("has_plan"), "realtime_only").otherwise("matched"))
+status = (
+    F.when(~F.col("has_realtime"), "no_realtime")
+    .when(~F.col("has_plan"), "realtime_only")
+    .otherwise("matched")
+)
 ```
 
 The [2026-10-29 run](evidence/silver-2026-10-29.json) had 1,802,968 matched calls,
@@ -271,13 +303,20 @@ Late replays cannot undo newer knowledge.
 
 ```python
 # pipeline/silver.py, asof_intervals
-df = df.filter(F.col("recorded_at").isNotNull() & F.col("received_at").isNotNull()) \
+# Known only once both the producer stamped it and we received it.
+df = (
+    df.filter(F.col("recorded_at").isNotNull() & F.col("received_at").isNotNull())
     .withColumn("available_at", F.greatest("recorded_at", "received_at"))
+)
 ...
+# Drop a late replay of older data: it must beat everything seen before it.
 knowledge = Window.partitionBy(*key).orderBy("available_at")
 seen = knowledge.rowsBetween(Window.unboundedPreceding, Window.currentRow)
-df = df.withColumn("_best_seen", F.max("_priority").over(seen)) \
-    .filter(F.col("_priority") == F.col("_best_seen")).drop("_priority", "_best_seen")
+df = (
+    df.withColumn("_best_seen", F.max("_priority").over(seen))
+    .filter(F.col("_priority") == F.col("_best_seen"))
+    .drop("_priority", "_best_seen")
+)
 return df.withColumn("next_available_at", F.lead("available_at").over(knowledge))
 ```
 
@@ -291,13 +330,12 @@ The `actual` reference is retrospective. Planned departure-risk features must us
 ```python
 # pipeline/silver.py
 def issues(df, *rules):
-    """Add named facts about invalid values. Keep the row and all its reasons."""
+    """Append the name of every (name, condition) rule that holds to dq_issue. Rows are kept."""
     F = functions()
-    additions = [F.when(condition, F.lit(name)) for name, condition in rules]
-    return df.withColumn("dq_issue", F.sort_array(F.array_distinct(F.concat(
-        F.coalesce(F.col("dq_issue"), empty_issues()),
-        F.filter(F.array(*additions).cast("array<string>"), lambda x: x.isNotNull())
-    ))))
+    hits = F.array(*[F.when(condition, F.lit(name)) for name, condition in rules])
+    new = F.filter(hits.cast("array<string>"), lambda x: x.isNotNull())
+    old = F.coalesce(F.col("dq_issue"), empty_issues())
+    return df.withColumn("dq_issue", F.sort_array(F.array_distinct(F.concat(old, new))))
 ```
 
 Tables are staged, declared keys checked and issues counted before publication.
@@ -356,16 +394,21 @@ Applicable days without a time mean the whole local day.
 
 ```python
 # pipeline/silver_datex_parse.py, active_intervals
-time_from, time_to = period["time_from"] or "00:00:00", period["time_to"] or "00:00:00"
+# Yesterday's window can reach into today; it belongs to the weekday it starts on.
 for offset in (-1, 0, 1):
     local_day = day + timedelta(days=offset)
     if period["days"] and WEEKDAYS[local_day.weekday()] not in period["days"]:
         continue
-    begin = datetime.combine(local_day, wall_clock(time_from), OSLO)
-    finish = datetime.combine(local_day, wall_clock(time_to), OSLO)
-    if finish <= begin:
-        finish = datetime.combine(local_day + timedelta(days=1), wall_clock(time_to), OSLO)
-    spans.append((max(low, begin.astimezone(timezone.utc)), min(high, finish.astimezone(timezone.utc))))
+    # Days without a time of day mean the whole local day (midnight to midnight).
+    clock_from = wall_clock(period["time_from"] or "00:00:00")
+    clock_to = wall_clock(period["time_to"] or "00:00:00")
+    begin = datetime.combine(local_day, clock_from, OSLO)
+    finish = datetime.combine(local_day, clock_to, OSLO)
+    if finish <= begin:  # crosses midnight
+        finish = datetime.combine(local_day + timedelta(days=1), clock_to, OSLO)
+    begin_utc = begin.astimezone(timezone.utc)
+    finish_utc = finish.astimezone(timezone.utc)
+    spans.append((max(low, begin_utc), min(high, finish_utc)))
 ```
 
 ### Joining by place without comparing everything
@@ -376,15 +419,28 @@ A full comparison of 100,000 quays with 100,000 road points would need 10 billio
 ```python
 # pipeline/silver_datex.py, near
 around = F.array(F.lit(-1), F.lit(0), F.lit(1))
-q = quays.withColumn("_d_lat", F.explode(around)).withColumn("_d_lon", F.explode(around)) \
-    .withColumn("_cell_lat", F.floor(F.col("quay_latitude") / 0.01) + F.col("_d_lat")) \
-    .withColumn("_cell_lon", F.floor(F.col("quay_longitude") / 0.02) + F.col("_d_lon")).drop("_d_lat", "_d_lon")
-p = points.withColumn("_cell_lat", F.floor(F.col("latitude") / 0.01)) \
+# Each quay in its own cell and its 8 neighbours.
+q = (
+    quays.withColumn("_d_lat", F.explode(around))
+    .withColumn("_d_lon", F.explode(around))
+    .withColumn("_cell_lat", F.floor(F.col("quay_latitude") / 0.01) + F.col("_d_lat"))
+    .withColumn("_cell_lon", F.floor(F.col("quay_longitude") / 0.02) + F.col("_d_lon"))
+    .drop("_d_lat", "_d_lon")
+)
+p = (
+    points.withColumn("_cell_lat", F.floor(F.col("latitude") / 0.01))
     .withColumn("_cell_lon", F.floor(F.col("longitude") / 0.02))
-joined = q.join(p, ["_cell_lat", "_cell_lon"]).withColumn(
-    "distance_m", haversine_m(F.col("quay_latitude"), F.col("quay_longitude"), F.col("latitude"), F.col("longitude")))
-return joined.filter(F.col("distance_m") <= radius_m).groupBy("quay_id", *key) \
+)
+distance = haversine_m(
+    F.col("quay_latitude"), F.col("quay_longitude"), F.col("latitude"), F.col("longitude")
+)
+return (
+    q.join(p, ["_cell_lat", "_cell_lon"])
+    .withColumn("distance_m", distance)
+    .filter(F.col("distance_m") <= radius_m)
+    .groupBy("quay_id", *key)
     .agg(F.round(F.min("distance_m"), 1).alias("distance_m"))
+)
 ```
 
 [`utm33_to_wgs84`](../../pipeline/silver_datex_parse.py) projects UTM 33 metres to latitude/longitude.
@@ -415,11 +471,19 @@ All four use one definition of a timed departure, and late means 3 minutes or mo
 
 ```python
 # pipeline/gold.py, scored_departure
-return F.col("has_realtime") & ~cancelled_call() & F.coalesce(F.col("for_boarding"), F.lit(True)) & \
-    F.col("actual_departure_at").isNotNull() & F.col("aimed_departure_at").isNotNull() & \
-    delay.isNotNull() & ~F.isnan(delay) & \
-    ~F.array_contains("dq_issue", "departure_before_arrival") & \
-    ~F.array_contains("dq_issue", "implausible_departure_delay")
+# A terminal call can have an actual departure even where boarding is forbidden.
+boarding = F.coalesce(F.col("for_boarding"), F.lit(True))
+return (
+    F.col("has_realtime")
+    & ~cancelled_call()
+    & boarding
+    & F.col("actual_departure_at").isNotNull()
+    & F.col("aimed_departure_at").isNotNull()
+    & delay.isNotNull()
+    & ~F.isnan(delay)
+    & ~F.array_contains("dq_issue", "departure_before_arrival")
+    & ~F.array_contains("dq_issue", "implausible_departure_delay")
+)
 ```
 
 Transfers are observed rather than modelled. Each arrival at a hub is paired with the first
@@ -428,13 +492,22 @@ with every departure at the hub, so it becomes an equi-join on 15-minute buckets
 
 ```python
 # pipeline/gold.py, build_transfers
+# Equi-join on 15-minute buckets: a departure up to 15 min after an arrival in bucket k
+# lies in bucket k or k+1.
 bucket = F.floor(F.col("a_at") / MAX_SLACK_S)
 arrivals = arrivals.withColumn("_bucket", F.explode(F.array(bucket, bucket + 1)))
 departures = departures.withColumn("_bucket", F.floor(F.col("b_at") / MAX_SLACK_S))
-pairs = arrivals.join(departures, ["operating_date", "hub_id", "_bucket"]).filter(
-    (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S) & (F.col("from_line_id") != F.col("to_line_id")))
+within_slack = (F.col("b_at") - F.col("a_at")).between(0, MAX_SLACK_S)
+other_line = F.col("from_line_id") != F.col("to_line_id")
+pairs = (
+    arrivals.join(departures, ["operating_date", "hub_id", "_bucket"])
+    .filter(within_slack & other_line)
+)
+
+# Keep only the first departure per arrival and (line, destination).
 arrival = ["a_journey", "a_order", "to_line_id", "to_destination_id"]
-first = F.min_by(F.struct(*[c for c in pairs.columns if c not in arrival]), F.struct("b_at", "b_journey"))
+rest = [c for c in pairs.columns if c not in arrival]
+first = F.min_by(F.struct(*rest), F.struct("b_at", "b_journey"))
 pairs = pairs.groupBy(*arrival).agg(first.alias("_first")).select(*arrival, "_first.*")
 ```
 
@@ -448,16 +521,27 @@ DataFrame columns, so the query counts the same departures as the other three ta
 
 ```python
 # pipeline/gold.py, build_scorecard
-calls = calls.withColumn("scored", scored_departure()).withColumn("cancelled", cancelled_call())
-return calls.sparkSession.sql(SCORECARD_SQL, calls=calls, journeys=journeys, lines=lines,
-                              operators=operators, unknown=UNKNOWN_LINE, late=LATE_S)
+calls = (
+    calls.withColumn("scored", scored_departure())
+    .withColumn("cancelled", cancelled_call())
+)
+return calls.sparkSession.sql(
+    SCORECARD_SQL,
+    calls=calls,
+    journeys=journeys,
+    lines=lines,
+    operators=operators,
+    unknown=UNKNOWN_LINE,
+    late=LATE_S,
+)
 ```
 
 ```sql
 -- pipeline/gold.py, SCORECARD_SQL (call grain)
 count_if(scored) AS scored_departures,
 count_if(scored AND departure_delay_s >= {late}) AS late_departures,
-percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000) AS delay_percentiles
+percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000)
+    AS delay_percentiles
 ```
 
 Before publishing, one more query (`TOTALS_SQL`) sums the four tables: scorecard totals must equal
