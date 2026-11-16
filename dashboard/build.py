@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Package the Gold dashboard: a map of hubs, transfer chances and road conditions.
+"""Package the Gold dashboard: a map of hubs, transfer chances, delay between stops and road conditions.
 
 Reads only published Gold days (Parquet and run markers) with pandas/pyarrow, as installed in
 the VM's ~/spark-env. Counts are summed across days; rates are computed from the sums, never
 averaged. Writes a static site: index.html, app.js, style.css, data.js and per-hub shards
+and segments.js
 loaded on demand. No Spark, no server, no source API requests.
 """
 
@@ -22,6 +23,7 @@ ASSETS = ("index.html", "app.js", "style.css")
 SHARDS = 32
 MIN_DEPARTURES = 20  # a hub needs this many timed departures to appear on the map
 MIN_KNOWN = 20  # a line pair needs this many observed connections to be listed
+MIN_SEGMENTS = 30  # a hub pair needs this many timed runs between them to be drawn
 UNKNOWN_HUB = "__unknown_hub__"
 DEPARTURES = ["scored_departures", "late_departures", "departures_early", "departures_on_time",
               "departures_1_3_min", "departures_3_5_min", "departures_5_10_min", "departures_10_min_plus",
@@ -29,14 +31,17 @@ DEPARTURES = ["scored_departures", "late_departures", "departures_early", "depar
 PAIR = ["hub_id", "from_line_id", "from_origin_id", "to_line_id", "to_destination_id"]
 GAPS = [f"gap_{i}" for i in range(22)]  # Gold's gap_change_counts: minutes -11 (or less) .. +10 (or more)
 CONNECTIONS = ["connections", "cancelled_connections", "unknown_connections", *GAPS]
+SEGMENT = ["from_hub_id", "to_hub_id"]
+SEGMENT_SUMS = ["timed_segments", "delay_change_s", "gained_1_min_plus", "recovered_1_min_plus"]
+SEGMENT_PLACES = ["from_name", "from_latitude", "from_longitude", "to_name", "to_latitude", "to_longitude"]
 CONDITIONS = ["mode", "hour", "precipitation", "road_surface", "road_situation", "traffic"]
 
 
 def published(root, day):
     """The day's Gold run marker, refused unless the run is complete and ready."""
     marker = json.loads((root / "gold" / "_runs" / f"operating_date={day}" / "latest.json").read_text())
-    if marker.get("schema_version") != 2 or marker.get("status") != "complete" or marker.get("ready") is not True:
-        raise ValueError(f"Gold {day} is not a complete, ready schema-2 run")
+    if marker.get("schema_version") != 3 or marker.get("status") != "complete" or marker.get("ready") is not True:
+        raise ValueError(f"Gold {day} is not a complete, ready schema-3 run")
     return marker
 
 
@@ -90,6 +95,22 @@ def hub_shard(root, markers, hubs, hours, shard):
     return out, set(pairs.index.get_level_values("from_line_id")) | set(pairs.index.get_level_values("to_line_id"))
 
 
+def segments(root, markers):
+    """Hub pairs with their runs, delay change and gains summed over lines and days, as rows of
+    [from, to, from lat, from lon, to lat, to lon, timed runs, change s, gained, recovered]."""
+    rows = load(root, markers, "segment_delay", [*SEGMENT, *SEGMENT_SUMS, *SEGMENT_PLACES])
+    if rows["timed_segments"].sum() != sum(m["totals"]["timed_segments"] for m in markers.values()):
+        raise ValueError("segment_delay does not reconcile to the Gold run markers")
+    by_pair = rows.groupby(SEGMENT)
+    pairs = by_pair[SEGMENT_SUMS].sum().join(by_pair[SEGMENT_PLACES].last())
+    placed = np.logical_and.reduce([pairs[f"{end}_{axis}"].between(-limit, limit)
+                                    for end in ("from", "to") for axis, limit in (("latitude", 90), ("longitude", 180))])
+    pairs = pairs[(pairs["timed_segments"] >= MIN_SEGMENTS) & placed]
+    return [[r["from_name"], r["to_name"], *(round(r[c], 5) for c in SEGMENT_PLACES if c.endswith("tude")),
+             int(r["timed_segments"]), round(r["delay_change_s"]), int(r["gained_1_min_plus"]),
+             int(r["recovered_1_min_plus"])] for _, r in pairs.iterrows()]
+
+
 def script(path, prefix, value):
     # JSONP-style scripts load from file:// as well as from any static host.
     path.write_text(prefix + json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str) + ");\n")
@@ -98,7 +119,7 @@ def script(path, prefix, value):
 def build(root, days, dist):
     """Write the site for the given Gold days to dist. Returns (hubs on the map, line pairs listed)."""
     markers = {day: published(root, day) for day in days}
-    for table in ("stop_reliability", "transfer_reliability", "departure_conditions", "line_scorecard"):
+    for table in ("stop_reliability", "transfer_reliability", "segment_delay", "departure_conditions", "line_scorecard"):
         check(root, markers, table)
     scored = sum(m["totals"]["scored_departures"] for m in markers.values())
     if dist.exists():
@@ -127,6 +148,9 @@ def build(root, days, dist):
         pairs += sum(len(h["transfers"]) for h in content.values())
         script(dist / "hubs" / f"{shard:02d}.js", f"window.goldShard({shard},", content)
 
+    drawn = segments(root, markers)
+    script(dist / "segments.js", "window.goldSegments(", drawn)
+
     conditions = load(root, markers, "departure_conditions", [*CONDITIONS, "scored_departures", "late_departures"])
     if conditions["scored_departures"].sum() != scored:
         raise ValueError("departure_conditions does not reconcile to the Gold run markers")
@@ -139,7 +163,8 @@ def build(root, days, dist):
                   "datex_run_id": m["datex_run_id"], "totals": m["totals"]} for d, m in markers.items()],
         "rules": {"late_seconds": first["late_seconds"], "max_transfer_slack_s": first["max_transfer_slack_s"],
                   "weather_max_m": first["weather_max_m"], "min_departures": MIN_DEPARTURES,
-                  "min_known_connections": MIN_KNOWN, "gap_low_min": -11, "shards": SHARDS},
+                  "min_known_connections": MIN_KNOWN, "min_segments": MIN_SEGMENTS,
+                  "max_segment_change_s": first["max_segment_change_s"], "gap_low_min": -11, "shards": SHARDS},
         "hub_columns": ["id", "name", "lat", "lon", "shard", *DEPARTURES],
         "hubs": [[hub, r["hub_name"], round(r["hub_latitude"], 5), round(r["hub_longitude"], 5), int(r["shard"]),
                   *[int(r[c]) for c in DEPARTURES]] for hub, r in hubs.iterrows()],
@@ -147,7 +172,7 @@ def build(root, days, dist):
         "condition_columns": [*CONDITIONS, "scored_departures", "late_departures"],
         "conditions": cube.to_numpy().tolist(),
     })
-    return len(hubs), pairs
+    return len(hubs), pairs, len(drawn)
 
 
 def main(argv=None):
@@ -156,9 +181,9 @@ def main(argv=None):
     parser.add_argument("--date", action="append", required=True, help="operating day; repeat for several")
     parser.add_argument("--dist", type=Path, default=HERE / "dist")
     args = parser.parse_args(argv)
-    hubs, pairs = build(args.output_dir, sorted(set(args.date)), args.dist)
+    hubs, pairs, drawn = build(args.output_dir, sorted(set(args.date)), args.dist)
     sizes = sorted((p.stat().st_size, p.name) for p in args.dist.rglob("*.js"))
-    print(f"{hubs} hubs, {pairs} line pairs; {sum(s for s, _ in sizes) / 1e6:.1f} MB, "
+    print(f"{hubs} hubs, {pairs} line pairs, {drawn} segments; {sum(s for s, _ in sizes) / 1e6:.1f} MB, "
           f"largest {sizes[-1][1]} {sizes[-1][0] / 1e6:.1f} MB")
 
 

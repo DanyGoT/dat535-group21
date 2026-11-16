@@ -1,8 +1,8 @@
 # System overview
 
 A guided tour with code and evidence for the report and presentation.
-Delivered Gold describes past days: a line scorecard, a stop map, observed transfer chances and
-late departures under road conditions, shown in a static dashboard. Departure-risk prediction is planned.
+Delivered Gold describes past days: a line scorecard, a stop map, observed transfer chances, delay
+gained or recovered between stops and late departures under road conditions, shown in a static dashboard. Departure-risk prediction is planned.
 
 Up: [README](../../README.md) · Related: [evidence](evidence/README.md), [problem log](problems.md)
 
@@ -26,7 +26,7 @@ flowchart LR
     B --> SE[Silver Entur<br/>journeys, stop calls, predictions]
     B --> SD[Silver DATEX<br/>situations, weather, travel times]
     L -. plan and stops .-> SE
-    SE --> G[Gold delivered<br/>scorecard, stops, transfers, conditions]
+    SE --> G[Gold delivered<br/>scorecard, stops, transfers, segments, conditions]
     SD --> G
     G --> DB[Static dashboard]
     SE -.-> P[Gold planned<br/>departure-risk prediction]
@@ -401,7 +401,7 @@ More: [DATEX content](../datex/content.md#in-silver),
 ## 5. Gold: answering a question
 
 [`gold.py`](../../pipeline/gold.py) reads one day of ready Entur Silver and the same UTC day of
-DATEX Silver and publishes four tables. Every count is additive, so the
+DATEX Silver and publishes five tables. Every count is additive, so the
 [dashboard](../../dashboard/README.md) sums days instead of averaging rates.
 
 | Table | One row is | Question |
@@ -409,9 +409,10 @@ DATEX Silver and publishes four tables. Every count is additive, so the
 | `line_scorecard` | Line × day | Which lines run on time or cancel? |
 | `stop_reliability` | Hub × local hour | Where and when do departures leave late? |
 | `transfer_reliability` | Hub × arriving line × departing line × hour | Will my connection hold? |
+| `segment_delay` | Line × hub × next hub × hour | Where is delay gained, and where recovered? |
 | `departure_conditions` | Mode × hour × weather, surface, situation and traffic level | Do late departures go with road conditions? |
 
-All four use one definition of a timed departure, and late means 3 minutes or more:
+The departure tables share one definition of a timed departure, and late means 3 minutes or more:
 
 ```python
 # pipeline/gold.py, scored_departure
@@ -460,7 +461,7 @@ count_if(scored AND departure_delay_s >= {late}) AS late_departures,
 percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000) AS delay_percentiles
 ```
 
-Before publishing, one more query (`TOTALS_SQL`) sums the four tables: scorecard totals must equal
+Before publishing, one more query (`TOTALS_SQL`) sums the tables: scorecard totals must equal
 Silver's rows, and the map and conditions tables must split exactly the scorecard's timed and
 late departures.
 

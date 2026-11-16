@@ -137,17 +137,21 @@ $("#foot").append(
 // ---------- views ----------
 document.querySelectorAll(".views button").forEach((button) => button.addEventListener("click", () => {
   document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
-  $("#network").hidden = button.dataset.view !== "network";
-  $("#roads").hidden = button.dataset.view !== "roads";
+  for (const view of ["network", "segments", "roads"]) $(`#${view}`).hidden = button.dataset.view !== view;
   if (button.dataset.view === "network") map.invalidateSize();
+  if (button.dataset.view === "segments") showSegments();
 }));
 
 // ---------- map ----------
-const map = L.map("map", { preferCanvas: true, minZoom: 4 }).setView([64.5, 12], 5);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19,
-}).addTo(map);
-new ResizeObserver(() => map.invalidateSize()).observe($("#map")); // the panel's height sets the map's
+function baseMap(id) {
+  const m = L.map(id, { preferCanvas: true, minZoom: 4 }).setView([64.5, 12], 5);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19,
+  }).addTo(m);
+  new ResizeObserver(() => m.invalidateSize()).observe($(`#${id}`)); // the panel's height sets the map's
+  return m;
+}
+const map = baseMap("map");
 const bands = [[-0.12, "--better-2"], [-0.04, "--better-1"], [0.04, "--even"], [0.12, "--worse-1"], [Infinity, "--worse-2"]];
 const colour = (share) => css(bands.find(([edge]) => share - national < edge)[1]);
 const renderer = L.canvas({ padding: 0.4 });
@@ -379,6 +383,77 @@ function diverging(diff, scale) {
   box.title = `${diff > 0 ? "+" : ""}${diff.toFixed(1)} percentage points late compared with the reference in the same mode and hour`;
   return box;
 }
+
+// ---------- delay between stops ----------
+// Loaded on first view: segments.js holds one row per hub pair (see dashboard/build.py).
+const SEG_BANDS = [[-60, "--better-2", "recovers 1+ min"], [-15, "--better-1", "recovers 15–60 s"],
+  [15, "--even", "within 15 s"], [60, "--worse-1", "gains 15–60 s"], [Infinity, "--worse-2", "gains 1+ min"]];
+const signed = (x, text) => `${x > 0 ? "+" : x < 0 ? "−" : "±"}${text}`;
+const perRun = (s) => signed(s.mean, `${Math.abs(s.mean / 60).toFixed(1)} min`);
+const total = (s) => signed(s.change, `${nf.format(Math.round(Math.abs(s.change) / 3600))} h`);
+let segMap = null, segs = [];
+
+function showSegments() {
+  if (segMap) { segMap.invalidateSize(); return; }
+  segMap = baseMap("segmap");
+  window.goldSegments = drawSegments;
+  document.head.append(el("script", { src: "segments.js", onerror: () => $("#seglists").replaceChildren(
+    el("p", { class: "empty" }, "Could not load segments.js. Rebuild the dashboard.")) }));
+}
+
+// Each direction sits 3 px to the right of travel, so A→B and B→A are drawn side by side.
+function rightOfTravel(s) {
+  const a = segMap.latLngToLayerPoint(s.a), b = segMap.latLngToLayerPoint(s.b);
+  const d = b.subtract(a), len = Math.hypot(d.x, d.y) || 1, n = L.point((-3 * d.y) / len, (3 * d.x) / len);
+  return [segMap.layerPointToLatLng(a.add(n)), segMap.layerPointToLatLng(b.add(n))];
+}
+
+function segmentText(s) {
+  return el("div", {}, el("strong", {}, `${s.from} → ${s.to}`), el("br"),
+    `${perRun(s)} per run over ${nf.format(s.runs)} runs (${total(s)} in all)`, el("br"),
+    `Gained 1+ min on ${pct(s.gained / s.runs)}, recovered 1+ min on ${pct(s.recovered / s.runs)}`);
+}
+
+function drawSegments(rows) {
+  segs = rows.map(([from, to, fy, fx, ty, tx, runs, change, gained, recovered]) => ({ from: from || "?", to: to || "?",
+    a: L.latLng(fy, fx), b: L.latLng(ty, tx), runs, change, gained, recovered, mean: change / runs }));
+  const renderer = L.canvas({ padding: 0.4 });
+  // Strongest last, so they are drawn on top of the neutral ones.
+  for (const s of [...segs].sort((x, y) => Math.abs(x.mean) - Math.abs(y.mean))) {
+    s.line = L.polyline(rightOfTravel(s), { renderer, color: css(SEG_BANDS.find(([edge]) => s.mean < edge)[1]),
+      weight: Math.max(1.5, Math.min(6, Math.sqrt(s.runs) / 8)), opacity: 0.9 })
+      .bindTooltip(() => segmentText(s), { sticky: true }).on("click", () => focusSegment(s)).addTo(segMap);
+  }
+  segMap.on("zoomend", () => segs.forEach((s) => s.line.setLatLngs(rightOfTravel(s))));
+  const legend = L.control({ position: "bottomleft" });
+  legend.onAdd = () => el("div", { class: "legend" }, el("b", {}, "Delay per run to the next stop"),
+    SEG_BANDS.map(([, token, label]) => el("div", {}, el("i", { style: `background:${css(token)}` }), label)),
+    el("div", {}, `Width: number of runs, at least ${G.rules.min_segments}`));
+  legend.addTo(segMap);
+  renderSegmentLists();
+}
+
+function focusSegment(s) {
+  segMap.fitBounds(L.latLngBounds(s.a, s.b), { maxZoom: 15, padding: [60, 60] });
+  s.line.bringToFront().openTooltip(L.latLngBounds(s.a, s.b).getCenter());
+}
+
+function renderSegmentLists() {
+  const byTotal = $("#rank").value === "total", key = byTotal ? (s) => s.change : (s) => s.mean;
+  const sorted = [...segs].sort((x, y) => key(y) - key(x));
+  const list = (items) => el("ol", { class: "pairs segs" }, items.map((s) => el("li", {},
+    el("button", { type: "button", onclick: () => focusSegment(s), title: `${nf.format(s.runs)} runs` },
+      el("span", { class: "name" }, `${s.from} → ${s.to}`),
+      el("span", { class: `pct ${s.mean > 0 ? "gain" : "loss"}` }, byTotal ? total(s) : perRun(s))))));
+  $("#seglists").replaceChildren(
+    el("div", { class: "section" }, el("h3", {}, "Gains the most delay"), list(sorted.filter((s) => s.mean > 0).slice(0, 15))),
+    el("div", { class: "section" }, el("h3", {}, "Recovers the most delay"),
+      list(sorted.filter((s) => s.mean < 0).slice(-15).reverse())),
+    el("p", { class: "section note" }, `${nf.format(segs.length)} stop pairs with at least ${G.rules.min_segments} timed runs. ` +
+      `Each run's change is capped at ±${G.rules.max_segment_change_s / 60} min. Operators that copy aimed into actual ` +
+      "times show no change. Where the timetable has slack, recovery is planned, not a sign of fast running."));
+}
+$("#rank").addEventListener("change", () => { if (segs.length) renderSegmentLists(); });
 
 intro();
 renderRoads();
