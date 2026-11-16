@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 """Front page server. Point a tunnel here, never at landing.
 
-Serves the monitor's status directory (the main page) read-only and proxies /grafana/
-to the local Grafana, which is read-only itself (anonymous viewers, no login).
+Serves the monitor's status directory read-only (GET/HEAD, no listings, no dotfiles) and
+proxies /grafana/ (GET, HEAD, POST; no websockets) to the local, read-only Grafana.
 
-Status directory: GET/HEAD only (anything else gets 501), no directory listings, no dotfiles.
-/grafana/: GET, HEAD and POST are forwarded (Grafana's panels query with POST); no websockets.
-
-Environment:
-    MONITOR_STATUS_DIR   directory to serve (default: ./status)
-    STATUS_BIND          default: 127.0.0.1
-    STATUS_PORT          default: 8751
-    GRAFANA_URL          upstream for /grafana/ (default: http://127.0.0.1:8753)
+Environment: MONITOR_STATUS_DIR (status), STATUS_BIND (127.0.0.1), STATUS_PORT (8751),
+GRAFANA_URL (http://127.0.0.1:8753).
 """
 
 import http.client
@@ -23,13 +17,19 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PROXY_PREFIX = "/grafana"
-MAX_PROXY_BODY = 4 * 1024 * 1024    # dashboard queries are small
+MAX_PROXY_BODY = 4 * 1024 * 1024  # dashboard queries are small
 PROXY_TIMEOUT_S = 60
-HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
-              "trailer", "trailers", "transfer-encoding", "upgrade", "proxy-connection"}
 
-PAGE_CSP = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-            "frame-src 'self'; form-action 'none'; frame-ancestors 'none'")
+# Headers that belong to one connection and must not be forwarded.
+HOP_BY_HOP = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+    "trailer", "trailers", "transfer-encoding", "upgrade", "proxy-connection",
+}
+
+PAGE_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+    "frame-src 'self'; form-action 'none'; frame-ancestors 'none'"
+)
 
 
 class StatusHandler(SimpleHTTPRequestHandler):
@@ -78,6 +78,7 @@ class StatusHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def proxy(self):
+        """Forward this request to Grafana and stream its answer back."""
         if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
             return self.send_error(411)
         try:
@@ -90,14 +91,18 @@ class StatusHandler(SimpleHTTPRequestHandler):
 
         # Host stays as the browser sent it: Grafana compares it with Origin on POST.
         forwarded = {"x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "expect"}
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP | forwarded}
+        dropped = HOP_BY_HOP | forwarded
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in dropped}
+        client = self.client_address[0]
         chain = self.headers.get("X-Forwarded-For")
-        headers["X-Forwarded-For"] = f"{chain}, {self.client_address[0]}" if chain else self.client_address[0]
-        headers["X-Forwarded-Host"] = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "")
+        headers["X-Forwarded-For"] = f"{chain}, {client}" if chain else client
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "")
+        headers["X-Forwarded-Host"] = host
         headers["X-Forwarded-Proto"] = self.headers.get("X-Forwarded-Proto") or "http"
 
-        conn = http.client.HTTPConnection(self.upstream.hostname, self.upstream.port or 80,
-                                          timeout=PROXY_TIMEOUT_S)
+        conn = http.client.HTTPConnection(
+            self.upstream.hostname, self.upstream.port or 80, timeout=PROXY_TIMEOUT_S
+        )
         try:
             conn.request(self.command, self.path, body=body, headers=headers)
             resp = conn.getresponse()
@@ -130,11 +135,13 @@ def main():
     directory.mkdir(parents=True, exist_ok=True)
     bind = os.environ.get("STATUS_BIND", "127.0.0.1")
     port = int(os.environ.get("STATUS_PORT", "8751"))
-    StatusHandler.upstream = urllib.parse.urlsplit(os.environ.get("GRAFANA_URL", "http://127.0.0.1:8753"))
-    server = ThreadingHTTPServer((bind, port), partial(StatusHandler, directory=str(directory)))
+    grafana = os.environ.get("GRAFANA_URL", "http://127.0.0.1:8753")
+    StatusHandler.upstream = urllib.parse.urlsplit(grafana)
+    handler = partial(StatusHandler, directory=str(directory))
+    server = ThreadingHTTPServer((bind, port), handler)
     server.daemon_threads = True
-    print(f"serving {directory} on {bind}:{port}, {PROXY_PREFIX}/ -> "
-          f"{StatusHandler.upstream.geturl()}", flush=True)
+    upstream = StatusHandler.upstream.geturl()
+    print(f"serving {directory} on {bind}:{port}, {PROXY_PREFIX}/ -> {upstream}", flush=True)
     server.serve_forever()
 
 

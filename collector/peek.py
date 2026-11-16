@@ -1,26 +1,14 @@
 #!/usr/bin/env python3
-"""Real messages from the landing zone, parsed and formatted for reading. Read-only.
+"""Print a few real messages from the landing zone, parsed and indented. Read-only.
 
-Skips heartbeats and other protocol messages and shows the data itself:
-
-    et        one EstimatedVehicleJourney per push, as indented XML
-    sx        one PtSituationElement per push, as indented XML
-    vehicles  a few vehicles per message, as indented JSON
-
-By default it samples the hour being written (newest .part) at random offsets, so every run
-shows different messages; if it holds too little data (SX early in an hour), the last
-closed hours fill in. A closed hour (.jsonl.gz) can only be read from the start, so
---file on one shows its first data messages instead.
+Skips heartbeats; shows one ET journey or SX situation per push, or a few vehicles. Samples
+the hour being written at random (topped up from the last closed hours), so every run differs.
 
     python3 ~/dat535-collector/peek.py et
     python3 ~/dat535-collector/peek.py vehicles -n 3
-    python3 ~/dat535-collector/peek.py sx --file /data/dat535/landing/siri-sx/date=2026-10-17/hour=12.jsonl.gz
+    python3 ~/dat535-collector/peek.py sx --file <landing>/siri-sx/date=D/hour=12.jsonl.gz
 
-Also a library for notebooks/peek.ipynb: sample() returns parsed messages, flatten() turns an
-XML element into a dict for pandas.
-
-Environment:
-    DAT535_LANDING_DIR      landing root (default: ./landing)
+Also used by notebooks/peek.ipynb: sample() for messages, flatten() for pandas rows.
 """
 
 import argparse
@@ -38,18 +26,17 @@ SIRI_NS = "http://www.siri.org.uk/siri"
 # Per SIRI feed: the element that carries one unit of data.
 SIRI_ITEM = {"et": "EstimatedVehicleJourney", "sx": "PtSituationElement"}
 FEEDS = ["et", "sx", "vehicles"]
-VEHICLES_SHOWN = 2          # vehicles printed per message (a message holds up to 20)
-MAX_TRIES = 200             # random reads before falling back to reading from the start
-RECENT_HOURS = 3            # closed hours to top up from when the open hour has too little
+VEHICLES_SHOWN = 2  # vehicles printed per message (a message holds up to 20)
+MAX_TRIES = 200  # random reads before falling back to reading from the start
+RECENT_HOURS = 3  # closed hours to top up from when the open hour has too little
 
 ET.register_namespace("", SIRI_NS)
 
 
 def parse_line(feed, line):
-    """One landing line as {"received_at", "payload_bytes", "items"}, or None if it holds no data.
+    """One landing line as {received_at, payload_bytes, items}, or None if it holds no data.
 
-    items: the message's EstimatedVehicleJourney / PtSituationElement elements (et, sx) or
-    vehicle dicts (vehicles). Heartbeats, protocol messages and half-written lines give None.
+    items: the ET journeys / SX situations (XML elements), or the vehicles (dicts).
     """
     try:
         rec = json.loads(line)
@@ -64,18 +51,21 @@ def parse_line(feed, line):
         else:
             items = list(ET.fromstring(payload).iter(f"{{{SIRI_NS}}}{SIRI_ITEM[feed]}"))
     except (ValueError, KeyError, ET.ParseError):
-        return None     # a line still being written at the end of a .part, or unparseable
+        return None  # a line still being written at the end of a .part, or unparseable
     if not items:
         return None
-    return {"received_at": rec.get("received_at"), "payload_bytes": len(payload.encode("utf-8")),
-            "items": items}
+    return {
+        "received_at": rec.get("received_at"),
+        "payload_bytes": len(payload.encode("utf-8")),
+        "items": items,
+    }
 
 
 def to_text(item):
     """An item as readable text: indented XML without the namespace, or indented JSON."""
     if isinstance(item, dict) or isinstance(item, list):
         return json.dumps(item, indent=2, ensure_ascii=False)
-    item = ET.fromstring(ET.tostring(item))     # a copy, so indenting leaves the original alone
+    item = ET.fromstring(ET.tostring(item))  # a copy, so indenting leaves the original alone
     ET.indent(item)
     return ET.tostring(item, encoding="unicode").replace(f' xmlns="{SIRI_NS}"', "", 1)
 
@@ -85,10 +75,13 @@ def format_message(feed, msg):
     items = msg["items"]
     if feed == "vehicles":
         shown = random.sample(items, min(VEHICLES_SHOWN, len(items)))
-        what, body = f"{len(shown)} of {len(items)} vehicles in this message", to_text(shown)
+        what = f"{len(shown)} of {len(items)} vehicles in this message"
+        body = to_text(shown)
     else:
-        what, body = f"{SIRI_ITEM[feed]} 1 of {len(items)} in this push", to_text(random.choice(items))
-    return f"{feed} · received {msg['received_at']} · {fmt_bytes(msg['payload_bytes'])} payload · {what}", body
+        what = f"{SIRI_ITEM[feed]} 1 of {len(items)} in this push"
+        body = to_text(random.choice(items))
+    size = fmt_bytes(msg["payload_bytes"])
+    return f"{feed} · received {msg['received_at']} · {size} payload · {what}", body
 
 
 def local(tag):
@@ -96,9 +89,10 @@ def local(tag):
 
 
 def flatten(elem):
-    """An XML element's leaf values as a flat dict, keys as paths without the namespace
-    (e.g. "FramedVehicleJourneyRef/DatedVehicleJourneyRef"). Repeated children (calls) are
-    skipped; flatten each of them separately. Handy for pandas.DataFrame([...])."""
+    """An XML element's leaf values as {path: text}, e.g. "FramedVehicleJourneyRef/...".
+
+    Repeated children (calls) are skipped: flatten each of them separately.
+    """
     out = {}
 
     def walk(e, prefix):
@@ -133,8 +127,7 @@ def current_part(landing, feed):
 
 
 def _read_part(path, n, pick):
-    """Random lines of an uncompressed file: seek, skip to the next full line, keep picks.
-    Falls back to reading from the start when data is rare (SX is mostly heartbeats)."""
+    """Up to n picked lines of an uncompressed file, from random offsets."""
     size = path.stat().st_size
     found, seen = [], set()
     with open(path, "rb") as fh:
@@ -142,7 +135,7 @@ def _read_part(path, n, pick):
             if len(found) == n or size == 0:
                 break
             fh.seek(random.randrange(size))
-            fh.readline()                       # rest of the line we landed in
+            fh.readline()  # rest of the line we landed in
             start = fh.tell()
             line = fh.readline()
             if start not in seen and line.endswith(b"\n"):
@@ -150,6 +143,7 @@ def _read_part(path, n, pick):
                 out = pick(line.decode("utf-8"))
                 if out:
                     found.append(out)
+        # Data is rare (SX is mostly heartbeats): read the rest from the start.
         fh.seek(0)
         while len(found) < n:
             start = fh.tell()
@@ -164,6 +158,7 @@ def _read_part(path, n, pick):
 
 
 def _read_gz(path, n, pick):
+    # A .gz can only be read from the start.
     found = []
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         for line in fh:
@@ -176,16 +171,21 @@ def _read_gz(path, n, pick):
 
 
 def sample(feed, n=2, path=None, landing=None):
-    """Up to n parsed data messages (see parse_line) from `path`, else from the hour being
-    written, topped up from the last closed hours when it has too little (SX early in an hour)."""
-    pick = lambda line: parse_line(feed, line)
+    """Up to n parsed data messages from `path`, else from the hour being written and the last
+    closed hours."""
+
+    def pick(line):
+        return parse_line(feed, line)
+
     if path is not None:
         path = Path(path)
-        return (_read_gz if path.name.endswith(".gz") else _read_part)(path, n, pick)
+        read = _read_gz if path.name.endswith(".gz") else _read_part
+        return read(path, n, pick)
     landing = landing or os.environ.get("DAT535_LANDING_DIR", "landing")
     part = current_part(landing, feed)
     found = _read_part(part, n, pick) if part else []
-    closed = sorted((Path(landing) / landing_dir(feed)).glob("date=*/hour=*.jsonl.gz"), reverse=True)
+    folder = Path(landing) / landing_dir(feed)
+    closed = sorted(folder.glob("date=*/hour=*.jsonl.gz"), reverse=True)
     for gz in closed[:RECENT_HOURS]:
         if len(found) >= n:
             break

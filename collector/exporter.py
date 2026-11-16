@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
-"""Read-only Prometheus exporter for the collector.
+"""Read-only Prometheus exporter for the collector: GET /metrics.
 
-Serves GET /metrics in the Prometheus text format. Every scrape looks at the landing
-zone (file sizes and names only, never contents), the receiver's and the DATEX poller's
-state files, the monitor's status.json, disk and memory usage. Never writes anything. Bind to localhost only:
-Prometheus scrapes it, nothing else should.
+Each scrape reads the landing zone (names and sizes only, never contents), the collectors'
+state files, the monitor's status.json, disk and memory. Writes nothing. Bind to localhost.
 
-Environment:
-    DAT535_LANDING_DIR      landing root (default: ./landing)
-    RECEIVER_STATE_FILE     written by the receiver (default: ./run/receiver.json)
-    DATEX_STATE_FILE        written by the DATEX poller (default: ./run/datex.json)
-    MONITOR_FEEDS           feeds to report (default: see monitor.feeds_from_env)
-    MONITOR_STATIC          daily downloads to report (default: see monitor.static_from_env)
-    MONITOR_STATUS_DIR      where the monitor writes status.json (default: ./status)
-    EXPORTER_BIND           default: 127.0.0.1
-    EXPORTER_PORT           default: 8752
+Environment: DAT535_LANDING_DIR, RECEIVER_STATE_FILE, DATEX_STATE_FILE, MONITOR_FEEDS,
+MONITOR_STATIC, MONITOR_STATUS_DIR, EXPORTER_BIND (127.0.0.1), EXPORTER_PORT (8752).
 """
 
 import json
@@ -27,8 +18,16 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from monitor import (DATEX_PREFIX, archived, feeds_from_env, landing_dir, newest_static, parse_iso, pid_alive,
-                     static_from_env)
+from monitor import (
+    DATEX_PREFIX,
+    archived,
+    feeds_from_env,
+    landing_dir,
+    newest_static,
+    parse_iso,
+    pid_alive,
+    static_from_env,
+)
 
 HOUR_FILE = re.compile(r"hour=(\d{2})\.jsonl(\.gz|\.part)?$")
 DATE_DIR = re.compile(r"date=(\d{4}-\d{2}-\d{2})$")
@@ -36,35 +35,49 @@ DATE_DIR = re.compile(r"date=(\d{4}-\d{2}-\d{2})$")
 HELP = {
     "dat535_landing_closed_bytes": ("gauge", "Bytes on disk in closed hourly files (gzip)."),
     "dat535_landing_closed_files": ("gauge", "Closed hourly files."),
-    "dat535_landing_open_bytes": ("gauge", "Size of the newest .part file (uncompressed, restarts every hour)."),
-    "dat535_landing_open_modified_timestamp_seconds": ("gauge", "Last write to the newest .part file."),
-    "dat535_landing_pending_parts": ("gauge", "Older .part files not yet compressed (normal for minutes after the hour, stuck if it stays)."),
-    "dat535_landing_first_hour_timestamp_seconds": ("gauge", "Start of the oldest hour in the landing zone."),
+    "dat535_landing_open_bytes":
+        ("gauge", "Size of the newest .part file (uncompressed, restarts every hour)."),
+    "dat535_landing_open_modified_timestamp_seconds":
+        ("gauge", "Last write to the newest .part file."),
+    "dat535_landing_pending_parts":
+        ("gauge", "Older .part files not yet compressed (normal for minutes after the hour, stuck "
+         "if it stays)."),
+    "dat535_landing_first_hour_timestamp_seconds":
+        ("gauge", "Start of the oldest hour in the landing zone."),
     "dat535_landing_day_bytes": ("gauge", "Bytes on disk in closed hourly files per UTC date."),
     "dat535_landing_day_hours": ("gauge", "Closed hours per UTC date (24 = complete day)."),
     "dat535_receiver_up": ("gauge", "1 if the receiver process is alive."),
     "dat535_receiver_start_timestamp_seconds": ("gauge", "When the receiver process started."),
-    "dat535_receiver_subscribing": ("gauge", "1 if the receiver holds Entur subscriptions (public URL set)."),
-    "dat535_subscription_last_push_timestamp_seconds": ("gauge", "Last push (data or heartbeat) from Entur."),
-    "dat535_subscription_expiry_timestamp_seconds": ("gauge", "When the current subscription terminates at Entur."),
+    "dat535_receiver_subscribing":
+        ("gauge", "1 if the receiver holds Entur subscriptions (public URL set)."),
+    "dat535_subscription_last_push_timestamp_seconds":
+        ("gauge", "Last push (data or heartbeat) from Entur."),
+    "dat535_subscription_expiry_timestamp_seconds":
+        ("gauge", "When the current subscription terminates at Entur."),
     "dat535_subscription_error": ("gauge", "1 if the last subscribe attempt failed."),
     "dat535_datex_up": ("gauge", "1 if the DATEX poller process is alive."),
-    "dat535_datex_polling": ("gauge", "1 if the DATEX poller has credentials and polls (0 = idle)."),
+    "dat535_datex_polling":
+        ("gauge", "1 if the DATEX poller has credentials and polls (0 = idle)."),
     "dat535_datex_start_timestamp_seconds": ("gauge", "When the DATEX poller process started."),
-    "dat535_datex_polls_total": ("counter", "DATEX polls since the poller started, by result (changed, unchanged, error)."),
+    "dat535_datex_polls_total":
+        ("counter", "DATEX polls since the poller started, by result (changed, unchanged, error)."),
     "dat535_datex_last_ok_timestamp_seconds": ("gauge", "Last successful DATEX poll."),
-    "dat535_datex_last_change_timestamp_seconds": ("gauge", "Last DATEX poll that returned a new snapshot."),
+    "dat535_datex_last_change_timestamp_seconds":
+        ("gauge", "Last DATEX poll that returned a new snapshot."),
     "dat535_datex_poll_interval_seconds": ("gauge", "Configured DATEX poll interval."),
-    "dat535_datex_consecutive_errors": ("gauge", "DATEX polls failed in a row (0 = last poll succeeded)."),
+    "dat535_datex_consecutive_errors":
+        ("gauge", "DATEX polls failed in a row (0 = last poll succeeded)."),
     "dat535_datex_snapshot_bytes": ("gauge", "Size of the last new DATEX snapshot (decoded)."),
     "dat535_monitor_ok": ("gauge", "1 if all monitor checks passed on the last run."),
     "dat535_monitor_check_ok": ("gauge", "1 if this monitor check passed on the last run."),
     "dat535_monitor_last_run_timestamp_seconds": ("gauge", "When the monitor last ran."),
-    "dat535_static_last_archive_timestamp_seconds": ("gauge", "When the newest daily file (NeTEx, NSR) was archived."),
+    "dat535_static_last_archive_timestamp_seconds":
+        ("gauge", "When the newest daily file (NeTEx, NSR) was archived."),
     "dat535_static_last_archive_bytes": ("gauge", "Size of the newest daily file."),
     "dat535_static_days": ("gauge", "Days with an archived file."),
     "dat535_memory_total_bytes": ("gauge", "Physical memory (MemTotal)."),
-    "dat535_memory_available_bytes": ("gauge", "Memory available to new processes without swapping (MemAvailable)."),
+    "dat535_memory_available_bytes":
+        ("gauge", "Memory available to new processes without swapping (MemAvailable)."),
     "dat535_swap_used_bytes": ("gauge", "Swap in use (SwapTotal - SwapFree)."),
     "dat535_filesystem_size_bytes": ("gauge", "Size of the filesystem holding this volume."),
     "dat535_filesystem_free_bytes": ("gauge", "Free bytes on the filesystem holding this volume."),
@@ -73,10 +86,12 @@ HELP = {
 
 
 def hour_ts(date, hour):
-    return datetime.strptime(f"{date} {hour}", "%Y-%m-%d %H").replace(tzinfo=timezone.utc).timestamp()
+    start = datetime.strptime(f"{date} {hour}", "%Y-%m-%d %H").replace(tzinfo=timezone.utc)
+    return start.timestamp()
 
 
 def collect_landing(landing, feed, out):
+    """Closed and open hour files of one feed, in total and per day."""
     root = Path(landing) / landing_dir(feed)
     if not root.is_dir():
         return
@@ -139,8 +154,11 @@ def collect_receiver(state_file, out):
     out.append(("dat535_receiver_subscribing", {}, int(bool(state.get("subscribing")))))
     for feed, s in (state.get("feeds") or {}).items():
         lab = {"feed": feed}
-        for key, name in (("last_push", "dat535_subscription_last_push_timestamp_seconds"),
-                          ("expires_at", "dat535_subscription_expiry_timestamp_seconds")):
+        times = (
+            ("last_push", "dat535_subscription_last_push_timestamp_seconds"),
+            ("expires_at", "dat535_subscription_expiry_timestamp_seconds"),
+        )
+        for key, name in times:
             t = parse_iso(s.get(key))
             if t:
                 out.append((name, lab, t.timestamp()))
@@ -159,11 +177,14 @@ def collect_datex(state_file, out):
     if started:
         out.append(("dat535_datex_start_timestamp_seconds", {}, started.timestamp()))
     for feed, s in (state.get("feeds") or {}).items():
-        lab = {"feed": f"datex-{feed}"}     # same label value as the landing metrics
+        lab = {"feed": f"datex-{feed}"}  # same label value as the landing metrics
         for result, n in (s.get("polls") or {}).items():
             out.append(("dat535_datex_polls_total", {**lab, "result": result}, n))
-        for key, name in (("last_ok", "dat535_datex_last_ok_timestamp_seconds"),
-                          ("last_change", "dat535_datex_last_change_timestamp_seconds")):
+        times = (
+            ("last_ok", "dat535_datex_last_ok_timestamp_seconds"),
+            ("last_change", "dat535_datex_last_change_timestamp_seconds"),
+        )
+        for key, name in times:
             t = parse_iso(s.get(key))
             if t:
                 out.append((name, lab, t.timestamp()))
@@ -189,7 +210,8 @@ def collect_monitor(status_dir, out):
 def collect_static(landing, dataset, out):
     path = newest_static(landing, dataset)
     lab = {"dataset": dataset}
-    days = sum(1 for d in (Path(landing) / dataset).glob("date=*") if any(archived(p) for p in d.iterdir()))
+    folders = (Path(landing) / dataset).glob("date=*")
+    days = sum(1 for d in folders if any(archived(p) for p in d.iterdir()))
     out.append(("dat535_static_days", lab, days))
     if path:
         st = path.stat()
@@ -205,7 +227,8 @@ def collect_memory(out, meminfo="/proc/meminfo"):
             kb[key] = int(rest.split()[0])
     out.append(("dat535_memory_total_bytes", {}, kb["MemTotal"] * 1024))
     out.append(("dat535_memory_available_bytes", {}, kb["MemAvailable"] * 1024))
-    out.append(("dat535_swap_used_bytes", {}, (kb.get("SwapTotal", 0) - kb.get("SwapFree", 0)) * 1024))
+    swap_used = kb.get("SwapTotal", 0) - kb.get("SwapFree", 0)
+    out.append(("dat535_swap_used_bytes", {}, swap_used * 1024))
 
 
 def collect_disk(volumes, out):
@@ -221,7 +244,10 @@ def collect_disk(volumes, out):
 def label_str(labels):
     if not labels:
         return ""
-    esc = lambda v: str(v).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+    def esc(v):
+        return str(v).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
     return "{" + ",".join(f'{k}="{esc(v)}"' for k, v in labels.items()) + "}"
 
 
@@ -235,8 +261,8 @@ def render(samples):
         lines.append(f"# HELP {name} {text}")
         lines.append(f"# TYPE {name} {kind}")
         for labels, value in rows:
-            lines.append(f"{name}{label_str(labels)} {value:.17g}" if isinstance(value, float)
-                         else f"{name}{label_str(labels)} {value}")
+            shown = f"{value:.17g}" if isinstance(value, float) else f"{value}"
+            lines.append(f"{name}{label_str(labels)} {shown}")
     return "\n".join(lines) + "\n"
 
 
@@ -257,10 +283,12 @@ class Collector:
         steps += [lambda d=d: collect_static(self.landing, d, out) for d in self.static]
         if self.datex_state_file and any(f.startswith(DATEX_PREFIX) for f in self.feeds):
             steps.append(lambda: collect_datex(self.datex_state_file, out))
-        steps += [lambda: collect_receiver(self.state_file, out),
-                  lambda: collect_monitor(self.status_dir, out),
-                  lambda: collect_memory(out),
-                  lambda: collect_disk(self.volumes, out)]
+        steps += [
+            lambda: collect_receiver(self.state_file, out),
+            lambda: collect_monitor(self.status_dir, out),
+            lambda: collect_memory(out),
+            lambda: collect_disk(self.volumes, out),
+        ]
         for step in steps:
             try:
                 step()
@@ -291,10 +319,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    Handler.collector = Collector(os.environ.get("DAT535_LANDING_DIR", "landing"),
-                                  os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"),
-                                  feeds_from_env(), os.environ.get("MONITOR_STATUS_DIR", "status"),
-                                  os.environ.get("DATEX_STATE_FILE", "run/datex.json"), static_from_env())
+    Handler.collector = Collector(
+        landing=os.environ.get("DAT535_LANDING_DIR", "landing"),
+        state_file=os.environ.get("RECEIVER_STATE_FILE", "run/receiver.json"),
+        feeds=feeds_from_env(),
+        status_dir=os.environ.get("MONITOR_STATUS_DIR", "status"),
+        datex_state_file=os.environ.get("DATEX_STATE_FILE", "run/datex.json"),
+        static=static_from_env(),
+    )
     bind = os.environ.get("EXPORTER_BIND", "127.0.0.1")
     port = int(os.environ.get("EXPORTER_PORT", "8752"))
     server = ThreadingHTTPServer((bind, port), Handler)
