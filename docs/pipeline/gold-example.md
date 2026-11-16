@@ -161,7 +161,9 @@ accepts only Gold marker schema 3: days published before `line_stop_delays` and 
 - `data.js` holds hubs with at least 20 timed departures, the condition counts and line labels.
 - `segments.js` holds hub pairs with at least 30 timed runs over all lines and days, loaded when
   the *Where delay grows* view opens. Each direction is drawn on its right-hand side of travel,
-  coloured by mean change per run; the panel ranks pairs by change per run or in total. The map
+  coloured by mean change per run; the panel ranks pairs by change per run or in total. A filter
+  picks the local time of day of the aimed departure (00–06, 06–09, 09–15, 15–18, 18–24), so the
+  file keeps the four sums per band rather than one daily total, 5.4 MB for 7 days. The map
   draws only pairs in view, at most the 4,000 with the largest total change, and those within
   15 s per run only from city zoom: all 45 k pairs of 7 days at once made it lag.
 - `hubs/NN.js` are 32 shards of per-hub hours, line pairs with at least 20 observed
