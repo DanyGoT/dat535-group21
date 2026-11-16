@@ -47,8 +47,14 @@ It used 299 GB occupied.
 A second scenario kept only a week of Bronze from late November. With landing alone growing
 at 10.9 GB/day, it predicted capacity until about the end of December.
 
-These estimates exclude today's Silver footprint. No replacement calendar estimate is measured.
-Grafana's **Disk full in** panel provides a live forecast.
+Both estimates left out Silver, Gold and the decode cache. Measured from 2026-10-26 (299 GB)
+to 2026-11-11 (645 GB), `/data` grew by **21.6 GB/day** with everything counted. On that basis,
+`(0.90 × 984 − 645) / 21.6 ≈ 11 days` puts the monitor's 90 % alert around **2026-11-22**, and
+the 290 GB still free would run out around 2026-11-24.
+
+Grafana's **Disk full in** panel gives a live forecast: free bytes divided by
+`-deriv(dat535_filesystem_free_bytes[24h])`, the volume's own trend, so every writer counts.
+The panel shows no value while free space is not shrinking, for example the day after a cleanup.
 
 ## When it fills: delete by hand, cheapest loss first
 
@@ -116,4 +122,5 @@ During 2026-10-16…26 a long-running process held 21.7 GB in a deleted file, fi
 ## Watching it
 
 Monitor checks `disk` and `root-disk` against `MONITOR_DISK_MAX_PCT`, default 90 %.
-Grafana shows Disk free, Disk full in, RAM and swap.
+Grafana shows Disk free, Disk full in, Stored per layer (landing and each layer in `prod/` and
+`dev/`, the decode cache apart, counted hourly), RAM and swap.
