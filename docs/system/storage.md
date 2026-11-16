@@ -54,7 +54,6 @@ the 290 GB still free would run out around 2026-11-24.
 
 Grafana's **Disk full in** panel gives a live forecast: free bytes divided by
 `-deriv(dat535_filesystem_free_bytes[24h])`, the volume's own trend, so every writer counts.
-Until 2026-11-16 it divided by landing growth alone, which overstated the runway roughly twofold.
 The panel shows no value while free space is not shrinking, for example the day after a cleanup.
 
 ## When it fills: delete by hand, cheapest loss first
