@@ -117,6 +117,9 @@ button, input, select { font: inherit; color: inherit; }
 .note { color: var(--muted); font-size: 13px; }
 .empty { color: var(--ink-2); }
 .hint { color: var(--ink-2); }
+.link { border: 0; background: none; padding: 0; margin-top: 6px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.stop h3 .link { margin: 0; font-weight: 400; font-size: 13px; }
+.stop { border-top: 1px solid var(--rule); padding-top: 16px; }
 .hint strong { color: var(--ink); }
 
 svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
@@ -156,6 +159,7 @@ svg.chart .hit { fill: transparent; }
 .answer .big { font-size: 56px; line-height: 1; font-weight: 700; letter-spacing: -0.02em; color: var(--accent); }
 .answer p { color: var(--ink-2); }
 .answer p strong { color: var(--ink); }
+.answer.thin .big { opacity: 0.45; }
 .split { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 12px; }
 
 .legend { background: var(--surface); color: var(--ink); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--rule); font: 12px/1.4 "Atkinson Hyperlegible Next", system-ui, sans-serif; }

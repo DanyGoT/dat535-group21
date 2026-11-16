@@ -17,7 +17,7 @@ CALL_SCHEMA = """operating_date date, line_id string, journey_id string, call_or
     mode string, has_plan boolean, has_realtime boolean, journey_cancelled boolean, call_cancelled boolean,
     for_boarding boolean, for_alighting boolean, aimed_arrival_at timestamp, planned_arrival_at timestamp,
     actual_arrival_at timestamp, aimed_departure_at timestamp, planned_departure_at timestamp,
-    actual_departure_at timestamp, departure_delay_s double, actual_departure_equals_aimed boolean,
+    actual_departure_at timestamp, arrival_delay_s double, departure_delay_s double, actual_departure_equals_aimed boolean,
     dq_issue array<string>"""
 JOURNEY_SCHEMA = """operating_date date, line_id string, journey_id string,
     has_plan boolean, has_realtime boolean, journey_cancelled boolean, service_alteration string"""
@@ -49,7 +49,7 @@ def call(journey, order=1, delay=None, planned=True, reported=True, line="T:Line
                   mode="bus", has_plan=planned, has_realtime=reported, journey_cancelled=False,
                   call_cancelled=False, for_boarding=True, for_alighting=True, aimed_arrival_at=None,
                   planned_arrival_at=None, actual_arrival_at=None, aimed_departure_at=AT, planned_departure_at=AT,
-                  actual_departure_at=AT + timedelta(seconds=delay) if delay is not None else None,
+                  actual_departure_at=AT + timedelta(seconds=delay) if delay is not None else None, arrival_delay_s=None,
                   departure_delay_s=float(delay) if delay is not None else None,
                   actual_departure_equals_aimed=delay == 0 if delay is not None else None, dq_issue=[])
     result.update(extra)
@@ -62,6 +62,7 @@ def stop(journey, order, line, quay, arrive=None, depart=None, arrive_delay=0, d
         return None if minutes is None or delay is None else at(minutes) + timedelta(seconds=delay)
     return call(journey, order, delay=depart_delay if depart is not None else None, line=line, quay_id=quay,
                 aimed_arrival_at=None if arrive is None else at(arrive), actual_arrival_at=actual(arrive, arrive_delay),
+                arrival_delay_s=None if arrive is None or arrive_delay is None else float(arrive_delay),
                 aimed_departure_at=None if depart is None else at(depart), planned_departure_at=None,
                 actual_departure_at=actual(depart, depart_delay), **extra)
 
@@ -202,6 +203,33 @@ class GoldTest(unittest.TestCase):
         self.assertEqual(sum(b.gap_change_counts), 1)
         self.assertEqual((rows["E"].cancelled_connections, sum(rows["E"].gap_change_counts)), (1, 0))
         self.assertEqual((rows["U"].unknown_connections, sum(rows["U"].gap_change_counts)), (1, 0))
+
+    def test_line_stop_delays_by_line_end_and_hour(self):
+        calls = [
+            # Line A from Origin arrives at the hub's bus terminal 2 min 5 s late, then leaves on time.
+            stop("f1", 1, "A", "Q:O", depart=-20), stop("f1", 2, "A", "Q:H1", arrive=0, depart=1, arrive_delay=125),
+            stop("f1", 3, "A", "Q:D", arrive=10),
+            stop("f2", 1, "A", "Q:O", depart=-20), stop("f2", 2, "A", "Q:H1", arrive=2, arrive_delay=-700),  # clipped
+            stop("f3", 1, "A", "Q:O", depart=-20), stop("f3", 2, "A", "Q:H1", arrive=4, call_cancelled=True),
+            stop("f4", 1, "A", "Q:O", depart=-20), stop("f4", 2, "A", "Q:H1", arrive=6, arrive_delay=None),  # unknown
+            stop("b1", 1, "B", "Q:H2", depart=5, depart_delay=2000), stop("b1", 2, "B", "Q:D", arrive=20),  # clipped
+            stop("e1", 1, "E", "Q:H2", depart=7, call_cancelled=True), stop("e1", 2, "E", "Q:D", arrive=30),
+        ]
+        frames = self.frames(calls)
+        rows = {(r.hub_id, r.line_id, r.direction, r.end_id): r
+                for r in G.build_line_stops(frames["stop_call"], *self.hubs(frames)).collect()}
+        minute = lambda m: m - G.DELAY_LOW
+        a = rows[("P:H", "A", "arrival", "SP:O")]
+        self.assertEqual((a.hour, a.end_name, a.calls, a.cancelled_calls, sum(a.delay_counts)), (9, "Origin", 4, 1, 2))
+        self.assertEqual((a.delay_counts[minute(2)], a.delay_counts[minute(G.DELAY_LOW)]), (1, 1))
+        b = rows[("P:H", "B", "departure", "SP:D")]
+        self.assertEqual((b.end_name, b.calls, b.delay_counts[minute(G.DELAY_HIGH)]), ("Destination", 1, 1))
+        self.assertEqual(rows[("P:H", "A", "departure", "SP:D")].delay_counts[minute(0)], 1)
+        self.assertEqual(rows[("P:H", "E", "departure", "SP:D")].cancelled_calls, 1)
+        departures = [r for r in rows.values() if r.direction == "departure"]
+        stops = G.build_stops(frames["stop_call"], *self.hubs(frames)).collect()
+        self.assertEqual(sum(sum(r.delay_counts) for r in departures), sum(r.scored_departures for r in stops))
+        self.assertEqual(sum(r.cancelled_calls for r in departures), sum(r.cancelled_departures for r in stops))
 
     def test_conditions_and_stops_split_the_same_departures(self):
         calls = [

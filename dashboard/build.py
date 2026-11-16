@@ -13,6 +13,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pyarrow.compute as pc
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
@@ -30,12 +31,15 @@ PAIR = ["hub_id", "from_line_id", "from_origin_id", "to_line_id", "to_destinatio
 GAPS = [f"gap_{i}" for i in range(22)]  # Gold's gap_change_counts: minutes -11 (or less) .. +10 (or more)
 CONNECTIONS = ["connections", "cancelled_connections", "unknown_connections", *GAPS]
 CONDITIONS = ["mode", "hour", "precipitation", "road_surface", "road_situation", "traffic"]
+DELAYS = [f"delay_{i}" for i in range(41)]  # Gold's delay_counts: minutes -10 (or less) .. +30 (or more)
+# Time-of-day bands by first local hour: one line at one stop runs too rarely for single hours.
+BANDS = [["Night", 0], ["Morning peak", 6], ["Daytime", 9], ["Afternoon peak", 15], ["Evening", 18]]
 
 
 def published(root, day):
     marker = json.loads((root / "gold" / "_runs" / f"operating_date={day}" / "latest.json").read_text())
-    if marker.get("schema_version") != 2 or marker.get("status") != "complete" or marker.get("ready") is not True:
-        raise ValueError(f"Gold {day} is not a complete, ready schema-2 run")
+    if marker.get("schema_version") != 3 or marker.get("status") != "complete" or marker.get("ready") is not True:
+        raise ValueError(f"Gold {day} is not a complete, ready schema-3 run")
     return marker
 
 
@@ -60,6 +64,30 @@ def trimmed(counts):
     return [int(nonzero[0]), *map(int, counts[nonzero[0]:nonzero[-1] + 1])] if len(nonzero) else [0]
 
 
+def line_delays(root, markers, ids):
+    """Per hub and direction: every line and trip end with enough timed calls, plus all lines
+    together (line ""), with a minute histogram per time-of-day band."""
+    rows = load(root, markers, "line_stop_delays", ["hub_id", "direction", "line_id", "end_id", "end_name", "hour",
+                                                    "calls", "cancelled_calls", "delay_counts"], ds.field("hub_id").isin(ids))
+    rows[DELAYS] = np.stack(rows.pop("delay_counts").to_numpy()) if len(rows) else np.zeros((0, len(DELAYS)), int)
+    rows["band"] = np.searchsorted([start for _, start in BANDS], rows["hour"], side="right") - 1
+    rows = pd.concat([rows.assign(line_id="", end_id="", end_name=None), rows])
+    key = ["hub_id", "direction", "line_id", "end_id"]
+    totals = rows.groupby(key)[["calls", "cancelled_calls", *DELAYS]].sum().join(rows.groupby(key)["end_name"].last())
+    totals = totals[totals[DELAYS].sum(axis=1) >= MIN_KNOWN]
+    bands = rows.groupby([*key, "band"])[DELAYS].sum()
+    bands = {k: dict(zip(g.index.get_level_values("band"), g.to_numpy()))
+             for k, g in bands[bands.index.droplevel("band").isin(totals.index)].groupby(level=key)}
+    out = {}
+    for (hub, direction, line, end), row in totals.iterrows():
+        counts = bands[(hub, direction, line, end)]
+        out.setdefault(hub, {"arrival": [], "departure": []})[direction].append({
+            "line": line, "end_id": end, "end": row["end_name"], "calls": int(row["calls"]),
+            "cancelled": int(row["cancelled_calls"]),
+            "bands": [trimmed(counts[b]) if b in counts else [0] for b in range(len(BANDS))]})
+    return out, set(totals.index.get_level_values("line_id")) - {""}
+
+
 def hub_shard(root, markers, hubs, hours, shard):
     """Hourly departures and listed line pairs for one shard of hubs, read on its own."""
     ids = hubs.index[hubs["shard"] == shard].to_list()
@@ -82,7 +110,10 @@ def hub_shard(root, markers, hubs, hours, shard):
             "connections": int(row["connections"]), "cancelled": int(row["cancelled_connections"]),
             "unknown": int(row["unknown_connections"]), "gaps": trimmed(row[GAPS].to_numpy(dtype=np.int64)),
             "hours": hourly[key]})
-    return out, set(pairs.index.get_level_values("from_line_id")) | set(pairs.index.get_level_values("to_line_id"))
+    delays, lines = line_delays(root, markers, ids)
+    for hub, content in out.items():
+        content["delays"] = delays.get(hub, {"arrival": [], "departure": []})
+    return out, lines | set(pairs.index.get_level_values("from_line_id")) | set(pairs.index.get_level_values("to_line_id"))
 
 
 def script(path, prefix, value):
@@ -92,7 +123,7 @@ def script(path, prefix, value):
 
 def build(root, days, dist):
     markers = {day: published(root, day) for day in days}
-    for table in ("stop_reliability", "transfer_reliability", "departure_conditions", "line_scorecard"):
+    for table in ("stop_reliability", "transfer_reliability", "line_stop_delays", "departure_conditions", "line_scorecard"):
         check(root, markers, table)
     scored = sum(m["totals"]["scored_departures"] for m in markers.values())
     if dist.exists():
@@ -131,7 +162,9 @@ def build(root, days, dist):
                   "datex_run_id": m["datex_run_id"], "totals": m["totals"]} for d, m in markers.items()],
         "rules": {"late_seconds": first["late_seconds"], "max_transfer_slack_s": first["max_transfer_slack_s"],
                   "weather_max_m": first["weather_max_m"], "min_departures": MIN_DEPARTURES,
-                  "min_known_connections": MIN_KNOWN, "gap_low_min": -11, "shards": SHARDS},
+                  "min_known_connections": MIN_KNOWN, "gap_low_min": -11, "delay_low_min": -10, "delay_bins": len(DELAYS),
+                  "bands": BANDS,
+                  "shards": SHARDS},
         "hub_columns": ["id", "name", "lat", "lon", "shard", *DEPARTURES],
         "hubs": [[hub, r["hub_name"], round(r["hub_latitude"], 5), round(r["hub_longitude"], 5), int(r["shard"]),
                   *[int(r[c]) for c in DEPARTURES]] for hub, r in hubs.iterrows()],
