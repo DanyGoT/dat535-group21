@@ -496,6 +496,11 @@ class ExporterTest(unittest.TestCase):
                 nx.mkdir(parents=True)
                 (nx / "rb_norway-aggregated-netex.zip").write_bytes(b"x" * 17)
             (nx / "rb_norway-aggregated-netex.zip.meta.json").write_text("{}")
+            for path, size in (("prod/bronze/siri-et/date=2026-10-15/part-0.parquet", 19),
+                               ("prod/silver/stop_call/part-0.parquet", 5),
+                               ("prod/silver/_decoded/et/part-0.parquet", 3)):
+                (d / path).parent.mkdir(parents=True, exist_ok=True)
+                (d / path).write_bytes(b"x" * size)
             text = exporter.Collector(str(d / "landing"), str(state), ["et", "sx", "vehicles", "datex-situation"],
                                       str(d / "status"), str(datex_state), ["netex", "nsr"]).collect()
 
@@ -538,6 +543,10 @@ class ExporterTest(unittest.TestCase):
         self.assertEqual(m['dat535_static_days{dataset="netex"}'], 2)
         self.assertEqual(m['dat535_static_last_archive_bytes{dataset="netex"}'], 17)
         self.assertEqual(m['dat535_static_days{dataset="nsr"}'], 0)
+        self.assertEqual(m['dat535_layer_bytes{env="prod",layer="bronze"}'], 19)
+        self.assertEqual(m['dat535_layer_bytes{env="prod",layer="silver"}'], 5)
+        self.assertEqual(m['dat535_layer_bytes{env="prod",layer="decoded"}'], 3)
+        self.assertNotIn('dat535_layer_bytes{env="dev",layer="bronze"}', m)
         self.assertNotIn('dat535_static_last_archive_timestamp_seconds{dataset="nsr"}', m)
 
 

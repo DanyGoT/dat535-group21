@@ -122,4 +122,5 @@ During 2026-10-16…26 a long-running process held 21.7 GB in a deleted file, fi
 ## Watching it
 
 Monitor checks `disk` and `root-disk` against `MONITOR_DISK_MAX_PCT`, default 90 %.
-Grafana shows Disk free, Disk full in, RAM and swap.
+Grafana shows Disk free, Disk full in, Stored per layer (landing and each layer in `prod/` and
+`dev/`, the decode cache apart, counted hourly), RAM and swap.
