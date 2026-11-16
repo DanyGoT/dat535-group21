@@ -367,7 +367,7 @@
       "id": 6,
       "type": "stat",
       "title": "Disk full in",
-      "description": "Free space on the landing volume divided by the growth of stored data over the last 24 h.",
+      "description": "Free space on the landing volume divided by how fast it shrank over the last 24 h, so landing, Bronze, Silver and caches all count. Empty while free space is not shrinking (after a cleanup).",
       "gridPos": {
         "x": 20,
         "y": 0,
@@ -385,7 +385,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "dat535_filesystem_free_bytes{volume=\"landing\"} / scalar(sum(rate(dat535_landing_closed_bytes[24h])))",
+          "expr": "dat535_filesystem_free_bytes{volume=\"landing\"} / (-deriv(dat535_filesystem_free_bytes{volume=\"landing\"}[24h]) > 0)",
           "legendFormat": "__auto",
           "range": true,
           "instant": false
