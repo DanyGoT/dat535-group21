@@ -64,12 +64,14 @@ def bronze_volume(root, day):
 def planned_hours(root, day):
     """Planned journeys of operating days D-1..D+1 and the UTC hours of D their trip overlaps.
 
-    Returns (hours by ET journey id, active journeys per hour by codespace). A journey's trip runs
-    from its first planned departure or arrival to its last. Its codespace is the one ET reported
-    for it, else its id's prefix.
+    Returns (hours by (operating date, ET journey id), active journeys per hour by codespace).
+    Journey ids recur daily, so the date keeps a replay of another day's journey out of today's
+    hours. Journeys without DataFrameRef (VYG, BNR) carry dated ids and match under date b"" on
+    any of the three days. A trip runs from its first planned departure or arrival to its last. Its codespace is
+    the one ET reported for it, else its id's prefix.
     """
     day_start = datetime.combine(day, datetime.min.time())
-    hours_by_id = defaultdict(set)
+    hours_by_key = defaultdict(set)
     active = defaultdict(zeros)
     for offset in (-1, 0, 1):
         operating = day + timedelta(days=offset)
@@ -98,13 +100,16 @@ def planned_hours(root, day):
                 continue
             jid = trip["journey_id"]
             codespace = trip["codespace_max"] or jid.split(":")[0]
-            hours_by_id[jid.encode()] |= hours
+            hours_by_key[(str(operating).encode(), jid.encode())] = hours
+            hours_by_key[(b"", jid.encode())] |= hours
             for h in hours:
                 active[codespace][h] += 1
         for pair in aliases.to_pylist():
-            if pair["alias"] and pair["journey_id"].encode() in hours_by_id:
-                hours_by_id[pair["alias"].encode()] |= hours_by_id[pair["journey_id"].encode()]
-    return hours_by_id, active
+            key = (str(operating).encode(), pair["journey_id"].encode())
+            if pair["alias"] and key in hours_by_key:
+                hours_by_key[(key[0], pair["alias"].encode())] = hours_by_key[key]
+                hours_by_key[(b"", pair["alias"].encode())] |= hours_by_key[key]
+    return hours_by_key, active
 
 
 def et_scan(root, day, plan):
@@ -140,7 +145,7 @@ def et_scan(root, day, plan):
                     s["occurrences"][h] += 1
                     s["calls"][h] += journey.count(b"<EstimatedCall>") + journey.count(b"<RecordedCall>")
                     s["bytes"][h] += len(journey) + len(JOURNEY)
-                    planned = plan.get(jid)
+                    planned = plan.get((field(journey, b"DataFrameRef") or b"", jid))
                     s["unplanned" if planned is None else "in_service" if h in planned
                       else "outside_service"][h] += 1
                     seen[codespace][h].add(jid)

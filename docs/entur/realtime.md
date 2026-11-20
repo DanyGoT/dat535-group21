@@ -25,11 +25,11 @@ codespace coverage, e.g. BNR only ET and SJN only SX.
 ### Why volume peaks in rush hour
 
 Weekday ET peaks at 07:00 and 15:00 Oslo at ~14 GB an hour uncompressed, twice midday.
-Weekends have no peak. The peak is more service: on 2026-11-12 at 07:00, 2.07 times as many
-planned journeys were running as at 12:00. Each was restated about as often (~70 times an hour, ×1.04)
-and was slightly smaller (×0.91). Ruter is the exception, at 1.32 times as many restatements per
-journey in the morning rush. Vehicles rise less, 1.4 times, because each vehicle reports less
-often in rush. See [the measurement](../report/evidence/rush-hour-ingest-2026-11.md).
+Weekends have no peak. The peak is mostly more service: on 2026-11-12 at 07:00, 2.18 times as many
+planned journeys were running as at 11:00, for 2.14 times the bytes. While running, each journey was
+restated about once a minute, 18 % more often than at 11:00, mostly because Ruter updated 1.71 times
+as often. Restatements were 9 % smaller. Vehicles rise less, 1.5 times, because each vehicle reports
+less often in rush. See [the measurement](../report/evidence/rush-hour-ingest-2026-11.md).
 
 ## SIRI ET in one paragraph
 
