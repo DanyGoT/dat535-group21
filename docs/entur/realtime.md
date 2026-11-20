@@ -22,6 +22,15 @@ Documentation: https://developer.entur.no/open-data/realtime.md.
 SIRI VM is unused because GraphQL is richer. GTFS-RT has no national feed and partial
 codespace coverage, e.g. BNR only ET and SJN only SX.
 
+### Why volume peaks in rush hour
+
+Weekday ET peaks at 07:00 and 15:00 Oslo at ~14 GB an hour uncompressed, twice midday.
+Weekends have no peak. The peak is more service: on 2026-11-12 at 07:00, 2.07 times as many
+planned journeys were running as at 12:00. Each was restated about as often (~70 times an hour, ×1.04)
+and was slightly smaller (×0.91). Ruter is the exception, at 1.32 times as many restatements per
+journey in the morning rush. Vehicles rise less, 1.4 times, because each vehicle reports less
+often in rush. See [the measurement](../report/evidence/rush-hour-ingest-2026-11.md).
+
 ## SIRI ET in one paragraph
 
 ET serves the current operating day, but observed pushes also contain other-day records and

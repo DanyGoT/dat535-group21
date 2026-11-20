@@ -11,6 +11,17 @@ Except for the 2026-11-05 to 11-09 Gold runs, these are historical artifacts, no
 the current code revision. The October Silver/Gold runs use schema 1 and predate today's
 implausible-delay exclusion.
 
+## Rush-hour ingest, 2026-11-12 and 15
+
+Run on 2026-11-20 with [`rush_hour.py`](rush_hour.py) against prod Bronze and Silver, plus the
+panel's Prometheus history. Read-only, outside the pipeline.
+
+| File | Shows |
+| ---- | ----- |
+| [`rush-hour-ingest-2026-11.md`](rush-hour-ingest-2026-11.md) | Why the ingest rate peaks: running journeys, restatements per journey, bytes each |
+| [`rush-hour-2026-11-12.json`](rush-hour-2026-11-12.json), [`-15`](rush-hour-2026-11-15.json) | Per hour and codespace: ET messages, journey restatements, calls, bytes, planned journeys; vehicle reports |
+| [`rush-hour-panel-2026-10-16-to-11-19.json`](rush-hour-panel-2026-10-16-to-11-19.json) | Uncompressed bytes landed per hour and feed, from Prometheus |
+
 ## Gold with road data, 2026-11-05, 08 and 09
 
 Run on 2026-11-11 with the current [`gold.py`](../../../pipeline/gold.py) against prod Silver
