@@ -8,10 +8,10 @@ Up: [evidence](README.md) · Related: [real-time feeds](../../entur/realtime.md)
 
 **Answer: mostly more service, with a smaller rise in update frequency.** At the 07:00 Oslo peak on
 Thursday 2026-11-12, ET carried 2.14 times the bytes of 11:00. Planned journeys running rose 2.18
-times. Each running journey was updated 18 % more often during its trip, but fewer updates came
-outside planned trips, so restatements per running journey rose only 8 %. Each restatement was
+times. Restatements during planned trips per running journey rose 18 %, but fewer came outside
+planned trips, so all restatements per running journey rose only 8 %. Each restatement was
 9 % smaller. The 15:00 peak is the same: ×2.04 bytes, ×2.03 journeys. Message size and any single
-codespace are ruled out. The frequency rise is mostly Ruter's: 1.71 times as many updates per
+codespace are ruled out. Most of that 18 % is Ruter's: 1.71 times as many restatements per
 running journey at 07:00.
 
 ## The peak, every weekday since 2026-10-16
@@ -62,9 +62,10 @@ Rush against 11:00, as factors of ET bytes = running journeys × restatements ea
 | 07:00 | ×2.14 | ×2.18 | ×1.08 | ×0.91 | ×1.18 |
 | 15:00 | ×2.04 | ×2.03 | ×1.05 | ×0.96 | ×1.16 |
 
-- Running journeys double, and that is most of the peak. While running, a journey is restated
-  55 times an hour at 11:00 and 65 at 07:00, about once a minute. More of the hour's restatements
-  fall inside trips in rush (86 % against 79 %), so the total per running journey rises less.
+- Running journeys double, and that is most of the peak. Counting only restatements during planned
+  trips, there are 55 per running journey at 11:00 and 65 at 07:00. This is a normalized count,
+  not a cadence: it does not weigh how many minutes of the hour each journey runs. More of the
+  hour's restatements fall inside trips in rush (86 % against 79 %), so the total rises less.
 - Restatements are a little smaller in rush: they hold ~31 calls against ~34 at 11:00.
 - Messages double too, from 210,780 to 411,516, and carry 2.1 journeys each against 1.7.
   Only 1,446 of 4.9 million messages that day held no journey.
@@ -88,7 +89,7 @@ No single codespace makes the peak: the five largest carry 71 % of it, and each 
 running journeys. Ruter's update frequency adds to it: ×1.71 at 07:00 and ×1.49 at 15:00. Without
 Ruter, in-trip restatements per running journey rise only ×1.05 and ×1.07. Ruter
 sends no vehicle positions, so ET is its only real-time channel. TRO and VOT update less often in
-rush (×0.85). Rates differ by operator, from ~40 in-trip restatements an hour (INN) to ~130 (ATB).
+rush (×0.85). Operators differ, from ~40 in-trip restatements per running journey (INN) to ~130 (ATB).
 
 ## Snapshots and resubscriptions
 
@@ -116,7 +117,7 @@ Both are full restatements that could look like a burst of updates. The collecto
   so a replay of another day's journey stays out of today's hours. VYG and BNR send no
   `DataFrameRef` but use dated IDs, which are matched on the ID alone.
 - On the Thursday, 85 % of restatements fell in an hour their journey was running, 14 % in an hour
-  outside its planned trip, and 0.9 % matched no plan, mostly KOL, SKY and BNR. No BNR ID matches a plan.
+  outside its planned trip, and 0.2 % matched no plan, over half of them BNR. No BNR ID matches a plan.
 - Vehicles come from the decoded Silver cache, which keeps reconnect duplicates.
   A vehicle reporting is a codespace and vehicle ID seen in the hour.
 - Limits: two days, one weekday, and the weekday medians above show it is typical. Counting
