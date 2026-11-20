@@ -26,10 +26,10 @@ codespace coverage, e.g. BNR only ET and SJN only SX.
 
 Weekday ET peaks at 07:00 and 15:00 Oslo at ~14 GB an hour uncompressed, twice midday.
 Weekends have no peak. The peak is mostly more service: on 2026-11-12 at 07:00, 2.18 times as many
-planned journeys were running as at 11:00, for 2.14 times the bytes. While running, each journey was
-restated about once a minute, 18 % more often than at 11:00, mostly because Ruter updated 1.71 times
-as often. Restatements were 9 % smaller. Vehicles rise less, 1.5 times, because each vehicle reports
-less often in rush. See [the measurement](../report/evidence/rush-hour-ingest-2026-11.md).
+planned journeys were running as at 11:00, for 2.14 times the bytes. Restatements during planned
+trips per running journey rose 18 %, two thirds of that from Ruter (×1.71). Restatements were 9 %
+smaller. Vehicles rise less, 1.5 times, because each vehicle reports less often in rush.
+See [the measurement](../report/evidence/rush-hour-ingest-2026-11.md).
 
 ## SIRI ET in one paragraph
 

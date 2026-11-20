@@ -95,9 +95,7 @@ def planned_hours(root, day):
                 continue
             first = (trip["start_min"] - day_start) // timedelta(hours=1)
             last = (trip["end_max"] - day_start) // timedelta(hours=1)
-            hours = set(range(max(first, 0), min(last, 23) + 1))
-            if not hours:
-                continue
+            hours = set(range(max(first, 0), min(last, 23) + 1))  # empty: planned, not today
             jid = trip["journey_id"]
             codespace = trip["codespace_max"] or jid.split(":")[0]
             hours_by_key[(str(operating).encode(), jid.encode())] = hours
