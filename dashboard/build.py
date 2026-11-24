@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Package the Gold dashboard: a map of hubs, transfer chances and road conditions.
+"""Package the Gold dashboard: a map of hubs, transfer chances, delay between stops and road conditions.
 
 Reads only published Gold days with pandas/pyarrow (no Spark, no server, no API calls).
 Counts are summed across days; rates come from the sums, never averaged. Writes a static
-site: index.html, app.js, style.css, data.js and per-hub shards loaded on demand.
+site: index.html, app.js, style.css, data.js, per-hub shards and segments.js loaded on demand.
 """
 
 import argparse
@@ -22,6 +22,7 @@ ASSETS = ("index.html", "app.js", "style.css")
 SHARDS = 32
 MIN_DEPARTURES = 20  # a hub needs this many timed departures to appear on the map
 MIN_KNOWN = 20  # a line pair needs this many observed connections to be listed
+MIN_SEGMENTS = 30  # a hub pair needs this many timed runs between them to be drawn
 UNKNOWN_HUB = "__unknown_hub__"
 
 DEPARTURES = [
@@ -34,6 +35,9 @@ PAIR = ["hub_id", "from_line_id", "from_origin_id", "to_line_id", "to_destinatio
 # Gold's gap_change_counts as columns: minutes -11 (or less) .. +10 (or more).
 GAPS = [f"gap_{i}" for i in range(22)]
 CONNECTIONS = ["connections", "cancelled_connections", "unknown_connections", *GAPS]
+SEGMENT = ["from_hub_id", "to_hub_id"]
+SEGMENT_SUMS = ["timed_segments", "delay_change_s", "gained_1_min_plus", "recovered_1_min_plus"]
+SEGMENT_PLACES = ["from_name", "from_latitude", "from_longitude", "to_name", "to_latitude", "to_longitude"]
 CONDITIONS = ["mode", "hour", "precipitation", "road_surface", "road_situation", "traffic"]
 # Gold's delay_counts: minutes -10 (or less) .. +30 (or more).
 DELAYS = [f"delay_{i}" for i in range(41)]
@@ -41,7 +45,7 @@ DELAYS = [f"delay_{i}" for i in range(41)]
 BANDS = [["Night", 0], ["Morning peak", 6], ["Daytime", 9], ["Afternoon peak", 15], ["Evening", 18]]
 TABLES = (
     "stop_reliability", "transfer_reliability", "line_stop_delays",
-    "departure_conditions", "line_scorecard",
+    "segment_delay", "departure_conditions", "line_scorecard",
 )
 
 
@@ -180,6 +184,22 @@ def hub_shard(root, markers, hubs, hours, shard):
     return out, lines
 
 
+def segments(root, markers):
+    """Hub pairs with their runs, delay change and gains summed over lines and days, as rows of
+    [from, to, from lat, from lon, to lat, to lon, timed runs, change s, gained, recovered]."""
+    rows = load(root, markers, "segment_delay", [*SEGMENT, *SEGMENT_SUMS, *SEGMENT_PLACES])
+    if rows["timed_segments"].sum() != sum(m["totals"]["timed_segments"] for m in markers.values()):
+        raise ValueError("segment_delay does not reconcile to the Gold run markers")
+    by_pair = rows.groupby(SEGMENT)
+    pairs = by_pair[SEGMENT_SUMS].sum().join(by_pair[SEGMENT_PLACES].last())
+    placed = np.logical_and.reduce([pairs[f"{end}_{axis}"].between(-limit, limit)
+                                    for end in ("from", "to") for axis, limit in (("latitude", 90), ("longitude", 180))])
+    pairs = pairs[(pairs["timed_segments"] >= MIN_SEGMENTS) & placed]
+    return [[r["from_name"], r["to_name"], *(round(r[c], 5) for c in SEGMENT_PLACES if c.endswith("tude")),
+             int(r["timed_segments"]), round(r["delay_change_s"]), int(r["gained_1_min_plus"]),
+             int(r["recovered_1_min_plus"])] for _, r in pairs.iterrows()]
+
+
 def script(path, prefix, value):
     """Write `prefix + JSON + );`: JSONP-style scripts load from file:// and any static host."""
     data = json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str)
@@ -226,6 +246,10 @@ def build(root, days, dist):
         pairs += sum(len(h["transfers"]) for h in content.values())
         script(dist / "hubs" / f"{shard:02d}.js", f"window.goldShard({shard},", content)
 
+    # Segment delay map.
+    drawn = segments(root, markers)
+    script(dist / "segments.js", "window.goldSegments(", drawn)
+
     # Road conditions and line labels.
     measures = ["scored_departures", "late_departures"]
     conditions = load(root, markers, "departure_conditions", [*CONDITIONS, *measures])
@@ -254,6 +278,8 @@ def build(root, days, dist):
             "weather_max_m": first["weather_max_m"],
             "min_departures": MIN_DEPARTURES,
             "min_known_connections": MIN_KNOWN,
+            "min_segments": MIN_SEGMENTS,
+            "max_segment_change_s": first["max_segment_change_s"],
             "gap_low_min": -11,
             "delay_low_min": -10,
             "delay_bins": len(DELAYS),
@@ -279,7 +305,7 @@ def build(root, days, dist):
         "condition_columns": [*CONDITIONS, *measures],
         "conditions": cube.to_numpy().tolist(),
     })
-    return len(hubs), pairs
+    return len(hubs), pairs, len(drawn)
 
 
 def main(argv=None):
@@ -292,12 +318,11 @@ def main(argv=None):
     )
     parser.add_argument("--dist", type=Path, default=HERE / "dist")
     args = parser.parse_args(argv)
-
-    hubs, pairs = build(args.output_dir, sorted(set(args.date)), args.dist)
+    hubs, pairs, drawn = build(args.output_dir, sorted(set(args.date)), args.dist)
     sizes = sorted((p.stat().st_size, p.name) for p in args.dist.rglob("*.js"))
     total_mb = sum(s for s, _ in sizes) / 1e6
     largest_mb, largest = sizes[-1][0] / 1e6, sizes[-1][1]
-    print(f"{hubs} hubs, {pairs} line pairs; {total_mb:.1f} MB, "
+    print(f"{hubs} hubs, {pairs} line pairs, {drawn} segments; {total_mb:.1f} MB, "
           f"largest {largest} {largest_mb:.1f} MB")
 
 
