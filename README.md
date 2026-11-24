@@ -30,15 +30,16 @@ grading basis is [`PROJECT.md`](PROJECT.md).
 | Collection | Stores every message unchanged in hourly files | always on, first feed since 2026-10-15 | [`collector/`](collector/) |
 | Bronze | Loads each message as one Parquet row, with evidence of where it came from | every night | [`bronze.py`](pipeline/bronze.py), [`bronze_datex.py`](pipeline/bronze_datex.py) |
 | Silver | Builds trusted tables with a stated grain, keys and quality flags | every night | [`silver.py`](pipeline/silver.py), [`silver_datex.py`](pipeline/silver_datex.py) |
-| Gold | Per day: line scorecard, late departures per stop and hour, observed transfer chances, late departures under road conditions | by hand | [`gold.py`](pipeline/gold.py) |
-| Dashboard | Map of stops, transfer explorer and road-conditions view over chosen Gold days | by hand | [`dashboard/`](dashboard/) |
+| Gold | Per day: line scorecard, stops, transfers, line-stop delays, segment delay change, road conditions | every night | [`gold.py`](pipeline/gold.py) |
+| Dashboard | Static site over ready Gold days: stop map, transfers, delay segments and road conditions | by hand (`--all-ready`) | [`dashboard/`](dashboard/) |
 | Monitoring | Status page, push alerts, Prometheus and Grafana | always on | [`monitor.py`](collector/monitor.py) |
 
-Gold has been run by hand for 2026-11-05, 08 and 09, the days with both Entur and road Silver.
-With 2 spare minutes a connection held 77 % of the time nationally. Departures near congested
-roads were late 10 percentage points more often than near free-flowing ones in the same mode and
-hour. The main Gold product we planned, predicting whether a departure will be on time, is not
-built. [`docs/pipeline/gold.md`](docs/pipeline/gold.md) describes it.
+Gold publishes six reconciled, additive tables every night after Entur Silver. Earlier schema-2
+validation runs (2026-11-05, 08 and 09) showed connections holding 77 % of the time nationally
+with 2 spare minutes, and departures near congested road sections running late 10 percentage
+points more often than near free-flowing ones in the same mode and hour. Predictive ML
+(departure-risk modelling) and external coastal weather (Frost) are intentionally out of scope
+for this project; see [`docs/pipeline/gold.md`](docs/pipeline/gold.md).
 
 ![Transfer explorer at Lysaker stasjon](docs/report/evidence/gold-dashboard-2026-11-transfers.png)
 

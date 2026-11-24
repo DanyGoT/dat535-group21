@@ -73,6 +73,7 @@ jobs:
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver_datex.py --date "$(date -u -d yesterday +%F)" --allow-partial
 
       - name: Run Entur Silver (partial dev sample)
+        id: entur_silver
         if: ${{ !cancelled() && steps.entur_bronze.outcome == 'success' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
@@ -82,6 +83,25 @@ jobs:
           # Dev Bronze covers one hour, so this output explicitly has ready=false.
           day=$(date -u -d yesterday +%F)
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py --date "$day" --allow-partial
+
+      - name: Run Gold (partial dev sample)
+        if: ${{ !cancelled() && steps.entur_silver.outcome == 'success' }}
+        env:
+          DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
+          DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
+        run: |
+          source ~/spark-env/bin/activate
+          day=$(date -u -d yesterday +%F)
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/gold.py --date "$day" --allow-partial
+
+      - name: Upload Gold run records
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: dev-gold-runs-${{ github.run_number }}
+          path: ${{ steps.dirs.outputs.output }}/gold/_runs/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload Silver run records
         if: ${{ !cancelled() }}
@@ -101,3 +121,16 @@ jobs:
           path: ${{ steps.dirs.outputs.output }}/bronze/_runs/
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Write summary
+        if: always()
+        env:
+          OUT: ${{ steps.dirs.outputs.output }}
+        run: |
+          records=$(ls \
+            "$OUT"/bronze/_runs/date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.*json \
+            "$OUT"/silver/_runs/operating_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json \
+            "$OUT"/silver/_runs/datex/observation_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json \
+            "$OUT"/gold/_runs/operating_date=*/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json \
+            2>/dev/null || true)
+          python3 pipeline/summary.py summary $records >> "$GITHUB_STEP_SUMMARY"

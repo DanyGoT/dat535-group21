@@ -8,7 +8,13 @@ Up: [overview](../report/overview.md) · Related: [Silver](silver.md), [Gold](go
 
 ## General
 
-- Start with daily batches. Require a named consumer before adding fresher processing.
+- **Continuous collection, daily batch Spark (not Structured Streaming):** The collectors stream
+  continuously (SIRI HTTP push, GraphQL WebSocket, DATEX polling) into immutable hourly files,
+  while Spark runs daily batches. Silver's core reliability semantics require a closed operating
+  day (overnight services, `D+1` replays, and the NeTEx planned denominator for `no_realtime`
+  calls), and on a shared 7.9 GB RAM VM a persistent streaming JVM would permanently consume
+  3–4 GB RAM and hold the single Spark lock. Require a named live consumer and dedicated compute
+  before adding a streaming Spark path alongside batch Silver.
 - Design failure and manual reruns before tuning speed. Keep landing immutable.
 - Profile before tuning. Support changes with row counts, timings, sizes or a Spark profile.
 - Fit the VM's 4 vCPU, 7.9 GB RAM and 38 GB root disk. Follow the
@@ -69,8 +75,19 @@ for source drift.
 
 ## Spark layout
 
-- Partition by the date consumers filter on. Bronze uses UTC `date`. Silver uses
-  `operating_date` or UTC `observation_date`, and Gold uses `operating_date`.
+- **Per-day partitioning on plain Parquet:** Partition by the date consumers filter on — Bronze
+  uses UTC `date`, Silver uses `operating_date` or UTC `observation_date`, and Gold uses
+  `operating_date`. Plain Parquet files are immutable: without a transactional table format
+  (Delta Lake / Iceberg), unpartitioned `append` duplicates days on reruns and unpartitioned
+  `overwrite` would force rewriting the entire multi-week history every night. Per-day directories
+  give idempotent single-day reruns, atomic swap/rollback (in Silver and Gold), and partition
+  pruning without blocking multi-day Gold reads. The trade-off is small files on tiny daily
+  reference tables (`operator`, `line`, `weather_site`, `road_section`); at multi-year scale,
+  Delta Lake / Iceberg with `replaceWhere` and file compaction would address both.
+- **Known operational trade-offs:** Bronze overwrites its target `date=D/` folder in place rather
+  than staging first (safe because landing is immutable and Silver checks Bronze coverage before
+  publishing); `collector/static.py`'s 20-hour guard is shorter than Entur's rolling 24-hour
+  download limit, so manual static downloads from the VM remain prohibited.
 - Parse and project before shuffles. Broadcast small references. Check skew and join coverage,
   especially because RUT and SKY dominate calls.
 - Size files from the input where useful, as DATEX Bronze does. Avoid sorting on a constant

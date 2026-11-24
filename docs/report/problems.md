@@ -10,6 +10,7 @@ Entries:
 
 | Date | Incident |
 | ---- | -------- |
+| 2026-11-20 | [Data volume at 96 %](#2026-11-20--the-data-volume-reached-96--with-two-days-left) |
 | 2026-11-16 | [Dashboard map took one click](#2026-11-16--the-dashboard-map-took-only-one-click) |
 | 2026-11-11 | [Dashboard builder memory](#2026-11-11--the-dashboard-builder-needed-more-memory-than-the-spark-job) |
 | 2026-11-11 | [Travel-time periods off by 10 ms](#2026-11-11--npra-travel-time-periods-start-10-ms-after-the-boundary) |
@@ -44,6 +45,30 @@ Entry template:
 ```
 
 ---
+
+## 2026-11-20 — The data volume reached 96 % with two days left
+
+- **Area:** VM
+- **Symptom:** `/data` held 893 of 984 GB with 42 GB free, about two days at ~20 GB/day.
+- **Evidence:** `du -sh /data/dat535/*`: landing 332 GB, prod 451 GB (Bronze 378, Silver 76),
+  `silver-week-validation` 60 GB, dev 50 GB. Prod SIRI ET Bronze for 2026-10-15…24 (except 10-23)
+  was still snappy at 8.7–24 GB/day, against ~8 GB/day for zstd days.
+- **Cause:** Outputs from finished experiments were never removed: `silver-week-validation/bronze-backups/`
+  (52 GB, the snappy ET partitions for 10-25…27 replaced by zstd rebuilds), a Silver checkpoint
+  left by a killed run on 11-05 (7.4 GB), and dev Bronze from full-day tests on 10-15/16/18 (44 GB).
+  Bronze written before the zstd change was never rebuilt.
+- **Fix:** Deleted by hand those backups and checkpoint, plus every dated dev Bronze and dev Silver
+  folder. Dev CI rebuilds its one-hour sample each run. `/data` dropped to 783 GB used, 151 GB free (84 %).
+  Then rebuilt every prod Bronze day, 2026-10-15…11-19, one
+  `workflow_dispatch` of `dat535-prod.yml` with `bronze_date` at a time: zstd throughout,
+  current Bronze code on all days, and vehicles for 10-17…22, which landing had but Bronze lacked.
+  All 36 runs succeeded between 13:27 and 20:19 UTC, about 11.5 min per day. Prod Bronze shrank
+  from 378 to 285 GB, and `/data` ended at 696 GB used, 238 GB free (75 %).
+- **Trade-off:** Seven hours of Spark lock. Silver days built
+  before the rebuild no longer match their Bronze input until Silver is rerun.
+- **Lesson:** A finished experiment's outputs are part of its cleanup. The workflow's concurrency
+  group keeps one run waiting and cancels any older waiting run, so backfills are dispatched one
+  at a time, each only when the workflow is idle.
 
 ## 2026-11-16 — The dashboard map took only one click
 

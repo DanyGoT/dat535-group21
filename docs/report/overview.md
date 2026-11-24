@@ -1,8 +1,9 @@
 # System overview
 
 A guided tour with code and evidence for the report and presentation.
-Delivered Gold describes past days: a line scorecard, a stop map, observed transfer chances, delay
-gained or recovered between stops and late departures under road conditions, shown in a static dashboard. Departure-risk prediction is planned.
+Gold describes past days: a line scorecard, a stop map, observed and nearby-stop transfer chances,
+delay gained or recovered between stops and late departures under road conditions, shown in a
+static dashboard. Predictive departure-risk ML is intentionally out of scope (future work).
 
 Up: [README](../../README.md) · Related: [evidence](evidence/README.md), [problem log](problems.md)
 
@@ -26,11 +27,9 @@ flowchart LR
     B --> SE[Silver Entur<br/>journeys, stop calls, predictions]
     B --> SD[Silver DATEX<br/>situations, weather, travel times]
     L -. plan and stops .-> SE
-    SE --> G[Gold delivered<br/>scorecard, stops, transfers, segments, conditions]
+    SE --> G[Gold<br/>scorecard, stops, transfers, line-stop, segments, conditions]
     SD --> G
     G --> DB[Static dashboard]
-    SE -.-> P[Gold planned<br/>departure-risk prediction]
-    SD -.-> P
 ```
 
 ### Words you need
@@ -156,8 +155,9 @@ A check on 2026-11-06 matched Bronze rows to landing lines on every checked feed
 The only collection dip it found was 2026-10-21, 15–17 UTC.
 Prod run 78 restored 2026-10-23 Bronze, with 4,808,892 ET, 4,605 SX and 643,233 vehicle rows.
 
-At that check, other vehicle Bronze began 2026-10-26, against landing from 2026-10-17.
-On 2026-11-11, vehicle Bronze date folders spanned 2026-10-23 to 2026-11-09. These are different snapshots of coverage, not contradictory start dates.
+On 2026-11-20, all 36 prod Bronze days from 2026-10-15 to 2026-11-19 were rebuilt with zstd and
+current Bronze code, also backfilling vehicle Bronze from 2026-10-17 onward
+([problem log](problems.md#2026-11-20--the-data-volume-reached-96--with-two-days-left)).
 
 [`bronze_datex.py`](../../pipeline/bronze_datex.py) also counts poll outcomes, distinct snapshots
 and the longest successful-poll gap.
@@ -561,12 +561,12 @@ added 1.1 and incidents 2.1. Proximity is not causation.
 The NPRA travel-time periods start 10 ms after each 5-minute boundary, which at first matched no
 departure. See the [problem log](problems.md#2026-11-11--npra-travel-time-periods-start-10-ms-after-the-boundary).
 
-Departure-risk prediction remains planned.
-The separate [ablation report](https://github.com/DanyGoT/dat535-group21/blob/experiments/silver-ablation/docs/report/silver-ablation.md)
-tests Silver's sources on 2026-11-04. Entur history and estimates carry the signal.
-Adding DATEX and SX to those features changed AUC by at most 0.0005 in that experiment.
+Departure-risk ML prediction is intentionally out of scope (future work). A separate ablation
+experiment on `2026-11-04` (branch `experiments/silver-ablation`) showed that Entur history and
+live estimates carry almost all predictive signal, with DATEX and SX changing AUC by at most
+0.0005.
 
-More: [Gold contract](../pipeline/gold-example.md), [planned products](../pipeline/gold.md#at-a-glance),
+More: [Gold contract](../pipeline/gold-example.md), [Gold scope & future work](../pipeline/gold.md),
 [evidence](evidence/README.md), [Gold code](../../pipeline/gold.py), [dashboard](../../dashboard/README.md).
 
 ## 6. Running it
@@ -575,25 +575,29 @@ Both workflows use the VM's self-hosted runner.
 
 | Trigger | Behaviour |
 | ------- | --------- |
-| Push to any branch except `main`, or manual dev dispatch | Tests, yesterday's 08 UTC Bronze sample, partial Silver |
+| Push to any branch except `main`, or manual dev dispatch | Tests, yesterday's 08 UTC Bronze sample, partial Silver and partial Gold |
 | Push to `main` | Approved deployment, tests and collector installation |
-| Prod schedule or manual dispatch | Bronze and both Silver jobs, without deployment tests or approval |
-| Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver, Entur Silver for two days ago |
+| Prod schedule or manual dispatch | Bronze, both Silver jobs and Gold, without deployment tests or approval |
+| Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver; Entur Silver and Gold for two days ago |
 
 On 2026-11-11, recent runs had started at about 09:20–10:50 UTC despite the cron.
-Gold and the dashboard build have no scheduled step; they run by hand.
+Both workflows upload run-record artifacts and render a concise per-layer Markdown table to the
+Actions step summary via [`pipeline/summary.py`](../../pipeline/summary.py). If DATEX Silver is
+missing for an operating day, Gold still publishes the five Entur tables and records
+`departure_conditions` as skipped in `latest.json`. The dashboard builds on demand from ready
+prod Gold days (`dashboard/build.py --all-ready`).
 Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
 Spark steps and pipeline tests share `flock /data/dat535/.spark.lock`.
 
 For a Bronze-only rerun, dispatch `gh workflow run dat535-prod.yml --ref main -f bronze_date=YYYY-MM-DD`.
-A `silver_date` dispatch also runs preceding Bronze steps.
-It passes the same date to Entur operating-day Silver and DATEX UTC-day Silver.
+A `silver_date` dispatch also runs preceding Bronze steps, both Silver jobs and Gold for that date.
 Without `bronze_date`, the preceding Bronze steps still process yesterday.
 Ensure Entur's three required Bronze days exist before rerunning Silver.
 
 The monitor checks collection and disk every 2 minutes, with pushes on overall health changes.
 It does not cover batch failures. Reruns and disk cleanup remain manual.
-Local Silver needs PyArrow, which [`requirements-dev.txt`](../../requirements-dev.txt) omits.
+Local pipeline tests need Java 8/17 plus [`requirements-dev.txt`](../../requirements-dev.txt)
+(which includes `pyspark==3.5.0`, `pyarrow` and `pandas`).
 
 More: [dev workflow](../../.github/workflows/dat535-dev.yml),
 [prod workflow](../../.github/workflows/dat535-prod.yml),

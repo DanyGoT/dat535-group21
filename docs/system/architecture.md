@@ -21,7 +21,7 @@ flowchart LR
     L --> X[exporter.py :8752] --> P[Prometheus :8754] --> G[Grafana :8753]
     ST -. /grafana/ proxy .-> G
 
-    L --> BE[Bronze Entur] --> SE[Silver Entur] --> GO[Gold<br/>manual] --> DB[Static dashboard]
+    L --> BE[Bronze Entur] --> SE[Silver Entur] --> GO[Gold<br/>nightly] --> DB[Static dashboard]
     L --> BD[Bronze DATEX] --> SD[Silver DATEX] --> GO
     L -. NeTEx and NSR .-> SE
 ```
@@ -116,24 +116,28 @@ Runs checked on 2026-11-11 started at about 09:20–10:50 UTC. Its steps run seq
 3. [Entur Silver](../../pipeline/silver.py) processes the operating day two days ago.
    ET reads three adjacent UTC days and the newest references archived on or before the operating day.
    SX and vehicles retain UTC grains.
+4. [Gold](../../pipeline/gold.py) runs after Entur Silver for the same operating day (two days ago),
+   reading ready Entur Silver and that day's DATEX Silver when present. It publishes six tables
+   (skipping `departure_conditions` and recording it in `latest.json` if DATEX Silver is missing).
 
 DATEX Bronze is attempted even if Entur Bronze fails. Each Silver step depends on its own
-Bronze step. A failure in the other source does not suppress it.
+Bronze step, and Gold depends on Entur Silver. A failure in DATEX does not suppress Entur Silver
+or Entur Gold tables.
 
-On dispatch, `bronze_date` selects both Bronze days. Setting it alone skips Silver.
-`silver_date` selects both Silver dates, UTC for DATEX and Norwegian operating date for Entur.
-Preceding Bronze steps still run. Missing days require manual reruns.
+On dispatch, `bronze_date` selects both Bronze days. Setting it alone skips Silver and Gold.
+`silver_date` selects both Silver dates (UTC for DATEX, Norwegian operating date for Entur) and
+Gold's operating date. Preceding Bronze steps still run. Missing days require manual reruns.
 
 The [dev workflow](../../.github/workflows/dat535-dev.yml) has no PR trigger, so code from a fork
-never reaches the runner. A PR branch in this repo gets its run from the push. Silver uses
-yesterday and `--allow-partial`, leaving the sample not ready.
-Both workflows upload Bronze and Silver run records. [Silver](../pipeline/silver.md#reading-safely) owns
-publication and readiness contracts.
+never reaches the runner. A PR branch in this repo gets its run from the push. Silver and Gold
+use yesterday and `--allow-partial`, leaving the sample not ready.
+Both workflows upload Bronze, Silver and Gold run records and render a concise step summary with
+[`pipeline/summary.py`](../../pipeline/summary.py). [Silver](../pipeline/silver.md#reading-safely)
+and [Gold](../pipeline/gold-example.md#shared-rules) own publication and readiness contracts.
 
-[Gold](../../pipeline/gold.py) runs by hand for an operating day once both its Entur Silver and
-the same UTC day of DATEX Silver are ready. It publishes five tables, and
-[dashboard/build.py](../../dashboard/build.py) packages chosen days as a static site. See
-[what is built](../pipeline/gold-example.md#run-on-the-vm) and [evidence](../report/evidence/README.md).
+[dashboard/build.py](../../dashboard/build.py) packages ready Gold days (`--all-ready` or chosen
+`--date` flags) as a static site. See [Gold contract](../pipeline/gold-example.md#dashboard) and
+[evidence](../report/evidence/README.md).
 
 ## Monitoring
 

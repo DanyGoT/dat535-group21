@@ -17,8 +17,11 @@ On the VM, after `pipeline/gold.py` has published each day:
 
 ```sh
 flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
-  --date 2026-11-05 --date 2026-11-08 --date 2026-11-09
+  --all-ready
 ```
+
+Use `--all-ready` to package every complete, ready schema-3 Gold day, or repeat `--date YYYY-MM-DD`
+for a chosen subset.
 
 It needs pandas and pyarrow from `~/spark-env`, no Spark. It holds the Spark lock anyway, so no
 Gold rerun replaces tables mid-build and no Spark job competes for memory: three days took 170 s

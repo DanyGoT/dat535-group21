@@ -312,6 +312,22 @@ class GoldTest(SparkCase):
             with self.assertRaisesRegex(ValueError, "not published"):
                 G.source_record(root, "entur", DAY, allow_partial=True)
 
+    def test_missing_datex_publishes_entur_tables_and_skips_conditions(self):
+        with tempfile.TemporaryDirectory(prefix="gold-test-nodatex-") as temp:
+            root = Path(temp)
+            self.write_silver(root, self.frames(), self.roads())
+            # Remove the DATEX Silver marker completely to simulate a missing DATEX day.
+            datex_marker = root / "silver" / "_runs" / "datex" / f"observation_date={DAY}" / "latest.json"
+            datex_marker.unlink()
+            record = G.run(root, DAY, spark=self.spark)
+            self.assertTrue(record["ready"])
+            self.assertEqual(record["status"], "complete")
+            self.assertEqual(record["datex_status"], "missing")
+            self.assertIsNone(record["datex_run_id"])
+            self.assertEqual(record["skipped_tables"], ["departure_conditions"])
+            self.assertEqual(set(record["tables"]), set(G.KEYS) - {"departure_conditions"})
+            self.assertEqual(record["condition_levels"], {})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
