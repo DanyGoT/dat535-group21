@@ -23,6 +23,7 @@ SHARDS = 32
 MIN_DEPARTURES = 20  # a hub needs this many timed departures to appear on the map
 MIN_KNOWN = 20  # a line pair needs this many observed connections to be listed
 MIN_SEGMENTS = 30  # a hub pair needs this many timed runs between them to be drawn
+SEGMENT_TIMES = (0, 6, 9, 15, 18)  # local start hours of the time-of-day filter; together they cover the day
 UNKNOWN_HUB = "__unknown_hub__"
 
 DEPARTURES = [
@@ -186,8 +187,9 @@ def hub_shard(root, markers, hubs, hours, shard):
 
 def segments(root, markers):
     """Hub pairs with their runs, delay change and gains summed over lines and days, as rows of
-    [from, to, from lat, from lon, to lat, to lon, timed runs, change s, gained, recovered]."""
-    rows = load(root, markers, "segment_delay", [*SEGMENT, *SEGMENT_SUMS, *SEGMENT_PLACES])
+    [from, to, from lat, from lon, to lat, to lon, then the four SEGMENT_SUMS for each band of
+    SEGMENT_TIMES]. The bands cover the day, so the page sums them for all day."""
+    rows = load(root, markers, "segment_delay", [*SEGMENT, "hour", *SEGMENT_SUMS, *SEGMENT_PLACES])
     if rows["timed_segments"].sum() != sum(m["totals"]["timed_segments"] for m in markers.values()):
         raise ValueError("segment_delay does not reconcile to the Gold run markers")
     by_pair = rows.groupby(SEGMENT)
@@ -195,9 +197,12 @@ def segments(root, markers):
     placed = np.logical_and.reduce([pairs[f"{end}_{axis}"].between(-limit, limit)
                                     for end in ("from", "to") for axis, limit in (("latitude", 90), ("longitude", 180))])
     pairs = pairs[(pairs["timed_segments"] >= MIN_SEGMENTS) & placed]
-    return [[r["from_name"], r["to_name"], *(round(r[c], 5) for c in SEGMENT_PLACES if c.endswith("tude")),
-             int(r["timed_segments"]), round(r["delay_change_s"]), int(r["gained_1_min_plus"]),
-             int(r["recovered_1_min_plus"])] for _, r in pairs.iterrows()]
+    bands = rows.assign(band=np.searchsorted(SEGMENT_TIMES, rows["hour"], side="right") - 1).pivot_table(
+        index=SEGMENT, columns="band", values=SEGMENT_SUMS, aggfunc="sum", fill_value=0)
+    bands = bands.reindex(columns=[(c, b) for b in range(len(SEGMENT_TIMES)) for c in SEGMENT_SUMS], fill_value=0)
+    sums = bands.loc[pairs.index].to_numpy().round().astype(np.int64).tolist()
+    return [[r["from_name"], r["to_name"], *(round(r[c], 5) for c in SEGMENT_PLACES if c.endswith("tude")), *band_sums]
+            for (_, r), band_sums in zip(pairs.iterrows(), sums)]
 
 
 def script(path, prefix, value):
@@ -279,6 +284,7 @@ def build(root, days, dist):
             "min_departures": MIN_DEPARTURES,
             "min_known_connections": MIN_KNOWN,
             "min_segments": MIN_SEGMENTS,
+            "segment_times": SEGMENT_TIMES,
             "max_segment_change_s": first["max_segment_change_s"],
             "gap_low_min": -11,
             "delay_low_min": -10,

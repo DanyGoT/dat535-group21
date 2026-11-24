@@ -998,7 +998,10 @@ const SEG_BANDS = [[-60, "--better-2", "recovers 1+ min"], [-15, "--better-1", "
 const signed = (x, text) => `${x > 0 ? "+" : x < 0 ? "−" : "±"}${text}`;
 const perRun = (s) => signed(s.mean, `${Math.abs(s.mean / 60).toFixed(1)} min`);
 const total = (s) => signed(s.change, `${nf.format(Math.round(Math.abs(s.change) / 3600))} h`);
-let segMap = null, segs = [];
+let segMap = null, segs = [], ranked = []; // ranked: pairs with enough runs in the chosen time of day
+const hh = (h) => String(h).padStart(2, "0");
+const timeLabels = G.rules.segment_times.map((h, i, all) => `${hh(h)}–${hh(all[i + 1] ?? 24)}`);
+$("#segtime").append(...timeLabels.map((label, i) => el("option", { value: i }, label)));
 
 function showSegments() {
   if (segMap) { segMap.invalidateSize(); return; }
@@ -1016,31 +1019,46 @@ function rightOfTravel(s) {
 }
 
 function segmentText(s) {
-  return el("div", {}, el("strong", {}, `${s.from} → ${s.to}`), el("br"),
+  const time = Number($("#segtime").value);
+  return el("div", {}, el("strong", {}, `${s.from} → ${s.to}`), time < 0 ? "" : ` (${timeLabels[time]})`, el("br"),
     `${perRun(s)} per run over ${nf.format(s.runs)} runs (${total(s)} in all)`, el("br"),
     `Gained 1+ min on ${pct(s.gained / s.runs)}, recovered 1+ min on ${pct(s.recovered / s.runs)}`);
 }
 
 function drawSegments(rows) {
-  segs = rows.map(([from, to, fy, fx, ty, tx, runs, change, gained, recovered]) => ({ from: from || "?", to: to || "?",
-    a: L.latLng(fy, fx), b: L.latLng(ty, tx), runs, change, gained, recovered, mean: change / runs }));
+  segs = rows.map(([from, to, fy, fx, ty, tx, ...sums]) => ({ from: from || "?", to: to || "?",
+    a: L.latLng(fy, fx), b: L.latLng(ty, tx), sums }));
   const renderer = L.canvas({ padding: 0.4 });
   for (const s of segs) {
     s.bounds = L.latLngBounds(s.a, s.b);
-    s.line = L.polyline([s.a, s.b], { renderer, color: css(SEG_BANDS.find(([edge]) => s.mean < edge)[1]),
-      weight: Math.max(1.5, Math.min(6, Math.sqrt(s.runs) / 8)), opacity: 0.9 })
+    s.line = L.polyline([s.a, s.b], { renderer, opacity: 0.9 })
       .bindTooltip(() => segmentText(s), { sticky: true }).on("click", () => focusSegment(s));
   }
   segMap.on("moveend", drawVisible);
-  drawVisible();
+  useTime(Number($("#segtime").value));
   const legend = L.control({ position: "bottomleft" });
   legend.onAdd = () => el("div", { class: "legend" }, el("b", {}, "Delay per run to the next stop"),
     SEG_BANDS.map(([, token, label]) => el("div", {}, el("i", { style: `background:${css(token)}` }), label)),
     el("div", {}, `Width: number of runs, at least ${G.rules.min_segments}`),
     el("div", {}, `Largest ${nf.format(MAX_LINES)} totals in view`), el("div", {}, "Grey lines from city zoom"));
   legend.addTo(segMap);
+}
+
+// sums holds [runs, change s, gained, recovered] per time band; -1 is all day, their sum.
+function useTime(band) {
+  for (const s of segs) {
+    [s.runs, s.change, s.gained, s.recovered] = [0, 1, 2, 3].map((i) => band >= 0 ? s.sums[4 * band + i]
+      : s.sums.reduce((total, v, j) => (j % 4 === i ? total + v : total), 0));
+    s.mean = s.runs ? s.change / s.runs : 0;
+    s.line.setStyle({ color: css(SEG_BANDS.find(([edge]) => s.mean < edge)[1]),
+      weight: Math.max(1.5, Math.min(6, Math.sqrt(s.runs) / 8)) });
+  }
+  ranked = segs.filter((s) => s.runs >= G.rules.min_segments);
+  if (pinned && pinned.runs < G.rules.min_segments) pinned = null;
+  drawVisible();
   renderSegmentLists();
 }
+$("#segtime").addEventListener("change", (e) => { if (segs.length) useTime(Number(e.target.value)); });
 
 // 45 k lines at once make hovering and panning lag. Only lines in view are drawn, grey ones only
 // from city zoom, and at most MAX_LINES of them, largest total change first.
@@ -1049,7 +1067,7 @@ const drawn = new Set();
 let pinned = null; // the pair chosen from a list stays drawn
 function drawVisible() {
   const zoom = segMap.getZoom(), view = segMap.getBounds().pad(0.2);
-  const want = segs.filter((s) => view.intersects(s.bounds) && (zoom >= CITY_ZOOM || Math.abs(s.mean) >= 15))
+  const want = ranked.filter((s) => view.intersects(s.bounds) && (zoom >= CITY_ZOOM || Math.abs(s.mean) >= 15))
     .sort((x, y) => Math.abs(y.change) - Math.abs(x.change)).slice(0, MAX_LINES);
   if (pinned && !want.includes(pinned)) want.push(pinned);
   const keep = new Set(want);
@@ -1070,7 +1088,7 @@ function focusSegment(s) {
 
 function renderSegmentLists() {
   const byTotal = $("#rank").value === "total", key = byTotal ? (s) => s.change : (s) => s.mean;
-  const sorted = [...segs].sort((x, y) => key(y) - key(x));
+  const sorted = [...ranked].sort((x, y) => key(y) - key(x));
   const list = (items) => el("ol", { class: "pairs segs" }, items.map((s) => el("li", {},
     el("button", { type: "button", onclick: () => focusSegment(s), title: `${nf.format(s.runs)} runs` },
       el("span", { class: "name" }, `${s.from} → ${s.to}`),
@@ -1079,7 +1097,8 @@ function renderSegmentLists() {
     el("div", { class: "section" }, el("h3", {}, "Gains the most delay"), list(sorted.filter((s) => s.mean > 0).slice(0, 15))),
     el("div", { class: "section" }, el("h3", {}, "Recovers the most delay"),
       list(sorted.filter((s) => s.mean < 0).slice(-15).reverse())),
-    el("p", { class: "section note" }, `${nf.format(segs.length)} stop pairs with at least ${G.rules.min_segments} timed runs. ` +
+    el("p", { class: "section note" }, `${nf.format(ranked.length)} stop pairs with at least ${G.rules.min_segments} timed runs ` +
+      "in this time of day, which is the local hour of the aimed departure. " +
       `Each run's change is capped at ±${G.rules.max_segment_change_s / 60} min. Operators that copy aimed into actual ` +
       "times show no change. Where the timetable has slack, recovery is planned, not a sign of fast running."));
 }
