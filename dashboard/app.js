@@ -1025,24 +1025,47 @@ function drawSegments(rows) {
   segs = rows.map(([from, to, fy, fx, ty, tx, runs, change, gained, recovered]) => ({ from: from || "?", to: to || "?",
     a: L.latLng(fy, fx), b: L.latLng(ty, tx), runs, change, gained, recovered, mean: change / runs }));
   const renderer = L.canvas({ padding: 0.4 });
-  // Strongest last, so they are drawn on top of the neutral ones.
-  for (const s of [...segs].sort((x, y) => Math.abs(x.mean) - Math.abs(y.mean))) {
-    s.line = L.polyline(rightOfTravel(s), { renderer, color: css(SEG_BANDS.find(([edge]) => s.mean < edge)[1]),
+  for (const s of segs) {
+    s.bounds = L.latLngBounds(s.a, s.b);
+    s.line = L.polyline([s.a, s.b], { renderer, color: css(SEG_BANDS.find(([edge]) => s.mean < edge)[1]),
       weight: Math.max(1.5, Math.min(6, Math.sqrt(s.runs) / 8)), opacity: 0.9 })
-      .bindTooltip(() => segmentText(s), { sticky: true }).on("click", () => focusSegment(s)).addTo(segMap);
+      .bindTooltip(() => segmentText(s), { sticky: true }).on("click", () => focusSegment(s));
   }
-  segMap.on("zoomend", () => segs.forEach((s) => s.line.setLatLngs(rightOfTravel(s))));
+  segMap.on("moveend", drawVisible);
+  drawVisible();
   const legend = L.control({ position: "bottomleft" });
   legend.onAdd = () => el("div", { class: "legend" }, el("b", {}, "Delay per run to the next stop"),
     SEG_BANDS.map(([, token, label]) => el("div", {}, el("i", { style: `background:${css(token)}` }), label)),
-    el("div", {}, `Width: number of runs, at least ${G.rules.min_segments}`));
+    el("div", {}, `Width: number of runs, at least ${G.rules.min_segments}`),
+    el("div", {}, `Largest ${nf.format(MAX_LINES)} totals in view`), el("div", {}, "Grey lines from city zoom"));
   legend.addTo(segMap);
   renderSegmentLists();
 }
 
+// 45 k lines at once make hovering and panning lag. Only lines in view are drawn, grey ones only
+// from city zoom, and at most MAX_LINES of them, largest total change first.
+const MAX_LINES = 4000, CITY_ZOOM = 11;
+const drawn = new Set();
+let pinned = null; // the pair chosen from a list stays drawn
+function drawVisible() {
+  const zoom = segMap.getZoom(), view = segMap.getBounds().pad(0.2);
+  const want = segs.filter((s) => view.intersects(s.bounds) && (zoom >= CITY_ZOOM || Math.abs(s.mean) >= 15))
+    .sort((x, y) => Math.abs(y.change) - Math.abs(x.change)).slice(0, MAX_LINES);
+  if (pinned && !want.includes(pinned)) want.push(pinned);
+  const keep = new Set(want);
+  for (const s of drawn) if (!keep.has(s)) { s.line.remove(); drawn.delete(s); }
+  // Strongest last, so they are drawn on top of the weaker ones.
+  for (const s of want.sort((x, y) => Math.abs(x.mean) - Math.abs(y.mean))) {
+    if (s.zoom !== zoom) { s.line.setLatLngs(rightOfTravel(s)); s.zoom = zoom; }
+    if (!drawn.has(s)) { s.line.addTo(segMap); drawn.add(s); }
+  }
+}
+
 function focusSegment(s) {
-  segMap.fitBounds(L.latLngBounds(s.a, s.b), { maxZoom: 15, padding: [60, 60] });
-  s.line.bringToFront().openTooltip(L.latLngBounds(s.a, s.b).getCenter());
+  pinned = s;
+  segMap.fitBounds(s.bounds, { maxZoom: 15, padding: [60, 60] });
+  drawVisible(); // also when the view does not change and no moveend follows
+  s.line.bringToFront().openTooltip(s.bounds.getCenter());
 }
 
 function renderSegmentLists() {
