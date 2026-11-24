@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Daily Gold over published Silver: line scorecard, stop map, transfer chances, line delays, road conditions.
+"""Daily Gold over published Silver: line scorecard, stop map, transfer chances, line delays,
+delay between stops and road conditions.
 
 Reads one Norwegian operating day of Entur Silver and the same UTC day of DATEX Silver.
 Every count is additive: consumers sum days, never average rates. Partial Silver needs
@@ -46,6 +47,7 @@ KEYS = {
         "to_line_id", "to_destination_id", "hour",
     ],
     "line_stop_delays": ["operating_date", "hub_id", "line_id", "direction", "end_id", "hour"],
+    "segment_delay": ["operating_date", "line_id", "from_hub_id", "to_hub_id", "hour"],
     "departure_conditions": [
         "operating_date", "mode", "hour", "precipitation", "road_surface",
         "road_situation", "traffic",
@@ -72,7 +74,8 @@ MAX_SLACK_S = 15 * 60
 GAP_LOW, GAP_HIGH = -11, 10
 # Arrival and departure delay per line at a hub in whole minutes, floor(delay / 60), clipped.
 DELAY_LOW, DELAY_HIGH = -10, 30
-
+# A segment's delay change is clipped to +-15 min, so one stranded vehicle cannot carry a mean.
+MAX_CHANGE_S = 15 * 60
 WEATHER_MAX_M = 10_000
 
 # DATEX record types for something going wrong on the road (not planned roadworks).
@@ -482,6 +485,41 @@ def build_transfers(calls, quay_hub, hub_labels):
 # --- Road conditions ---
 
 
+def build_segments(calls, quay_hub, hub_labels):
+    """Delay gained between consecutive calls of a journey: the arrival delay at the next call minus
+    the departure delay here, so dwell time stays out. Negative is delay recovered. One row per line,
+    hub pair and local hour of the aimed departure; pairs within one hub or with an unknown hub,
+    which the map cannot draw, are left out."""
+    F = functions()
+    from pyspark.sql import Window
+
+    def delay(kind, flags):
+        trusted = F.col("has_realtime") & ~cancelled_call() & ~F.arrays_overlap("dq_issue", F.array(*map(F.lit, flags)))
+        return F.when(trusted, F.col(f"actual_{kind}_at").cast("double") - F.col(f"aimed_{kind}_at").cast("double"))
+
+    following = Window.partitionBy("journey_id").orderBy("call_order")
+    rows = calls.join(F.broadcast(quay_hub), "quay_id", "left").select(
+        "operating_date", "journey_id", "call_order", "hub_id",
+        F.coalesce("line_id", F.lit(UNKNOWN_LINE)).alias("line_id"),
+        F.coalesce("aimed_departure_at", "planned_departure_at").alias("_at"),
+        delay("departure", ["implausible_departure_delay", "departure_before_arrival"]).alias("_departure"),
+        delay("arrival", ["implausible_arrival_delay"]).alias("_arrival")) \
+        .withColumn("to_hub_id", F.lead("hub_id").over(following)) \
+        .withColumn("_next_arrival", F.lead("_arrival").over(following)) \
+        .filter(F.col("_at").isNotNull() & (F.col("hub_id") != F.col("to_hub_id"))) \
+        .withColumnRenamed("hub_id", "from_hub_id").withColumn("hour", local_hour("_at"))
+    known = F.col("_departure").isNotNull() & F.col("_next_arrival").isNotNull()
+    change = F.least(F.greatest(F.col("_next_arrival") - F.col("_departure"), F.lit(-MAX_CHANGE_S)), F.lit(MAX_CHANGE_S))
+    rows = rows.withColumn("_change", F.when(known, change))
+    result = rows.groupBy(*KEYS["segment_delay"]).agg(
+        F.count("*").alias("segments"), count_if(known, "timed_segments"),
+        F.coalesce(F.sum("_change"), F.lit(0.0)).alias("delay_change_s"),
+        count_if(F.col("_change") >= 60, "gained_1_min_plus"), count_if(F.col("_change") <= -60, "recovered_1_min_plus"))
+    return result \
+        .join(F.broadcast(hub_labels.toDF("from_hub_id", "from_name", "from_latitude", "from_longitude")), "from_hub_id", "left") \
+        .join(F.broadcast(hub_labels.toDF("to_hub_id", "to_name", "to_latitude", "to_longitude")), "to_hub_id", "left")
+
+
 def build_conditions(calls, roads, day):
     """Each timed departure with the road conditions at its quay and aimed time.
 
@@ -633,20 +671,27 @@ conditions AS (
     SELECT coalesce(sum(scored_departures), 0) AS scored,
            coalesce(sum(late_departures), 0) AS late
     FROM {departure_conditions}
-), line_stop AS (
+),
+line_stop AS (
     SELECT coalesce(sum(aggregate(delay_counts, 0L, (n, c) -> n + c)), 0) AS scored,
            coalesce(sum(cancelled_calls), 0) AS cancelled
     FROM {line_stop_delays} WHERE direction = 'departure'
+),
+segment AS (
+    SELECT coalesce(sum(segments), 0) AS segments,
+           coalesce(sum(timed_segments), 0) AS timed_segments
+    FROM {segment_delay}
 )
 SELECT line.*,
        transfer.*,
+       segment.*,
        stop.scored = line.scored_departures AND stop.late = line.late_departures
            AS stop_reliability_reconciles,
        conditions.scored = line.scored_departures AND conditions.late = line.late_departures
            AS departure_conditions_reconciles,
        line_stop.scored = line.scored_departures AND line_stop.cancelled = stop.cancelled
            AS line_stop_delays_reconciles
-FROM line, transfer, stop, conditions, line_stop
+FROM line, transfer, segment, stop, conditions, line_stop
 """
 
 REPORT_COLUMNS = (
@@ -790,6 +835,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
         datex_status=sources["datex"]["status"],
         late_seconds=LATE_S,
         max_transfer_slack_s=MAX_SLACK_S,
+        max_segment_change_s=MAX_CHANGE_S,
         weather_max_m=WEATHER_MAX_M,
         tables={},
     )
@@ -804,7 +850,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
                 "spark.local.dir": str(scratch),
             })
 
-        # 1. Build the four tables.
+        # 1. Build the six tables.
         silver = read_silver(spark, output, "entur", day, sources["entur"])
         roads = read_silver(spark, output, "datex", day, sources["datex"])
         calls = silver["stop_call"]
@@ -816,6 +862,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
             "stop_reliability": build_stops(calls, quay_hub, hub_labels),
             "transfer_reliability": build_transfers(calls, quay_hub, hub_labels),
             "line_stop_delays": build_line_stops(calls, quay_hub, hub_labels),
+            "segment_delay": build_segments(calls, quay_hub, hub_labels),
             "departure_conditions": build_conditions(calls, roads, day),
         }
 

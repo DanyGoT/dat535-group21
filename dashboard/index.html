@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Transit reliability</title>
-<meta name="description" content="Departures, transfer chances and road conditions from the DAT535 Gold layer.">
+<meta name="description" content="Departures, transfer chances, delay between stops and road conditions from the DAT535 Gold layer.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap">
@@ -19,6 +19,7 @@
   </div>
   <nav class="views" aria-label="Views">
     <button type="button" data-view="network" aria-pressed="true">Stops and transfers</button>
+    <button type="button" data-view="segments" aria-pressed="false">Where delay grows</button>
     <button type="button" data-view="roads" aria-pressed="false">Road conditions</button>
   </nav>
 </header>
@@ -32,6 +33,22 @@
       <ul id="matches" class="matches" role="listbox" hidden></ul>
     </div>
     <div id="hub"></div>
+  </aside>
+</main>
+
+<main id="segments" class="network" hidden>
+  <div id="segmap" role="region" aria-label="Map of runs between stops coloured by delay gained or recovered"></div>
+  <aside class="panel" aria-live="polite">
+    <h2>Where is delay gained, and where is it recovered?</h2>
+    <p class="facts">Each run between two consecutive stops: the delay on arrival at the next stop minus the delay on
+      leaving this one. Time spent at stops is left out. Each direction is drawn on its right-hand side of travel.</p>
+    <div class="controls">
+      <label for="rank">Rank by <select id="rank">
+        <option value="mean">Change per run</option>
+        <option value="total">Total change, all runs</option>
+      </select></label>
+    </div>
+    <div id="seglists"><p class="note">Loading segments…</p></div>
   </aside>
 </main>
 

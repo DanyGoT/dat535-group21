@@ -2,8 +2,9 @@
 
 A static page over published Gold days: a map of hubs coloured by late departures, a transfer
 explorer ("with N spare minutes, how often did this connection hold?"), an estimated transfer
-between two nearby stops by line and time of day, and a comparison of late departures under road
-conditions. Definitions are in the [Gold contract](../docs/pipeline/gold-example.md).
+between two nearby stops by line and time of day, a map of where delay is gained or recovered
+between stops, and a comparison of late departures under road conditions. Definitions are in the
+[Gold contract](../docs/pipeline/gold-example.md).
 
 | File | Role |
 | ---- | ---- |

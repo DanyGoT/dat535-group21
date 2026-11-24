@@ -71,12 +71,12 @@ button, input, select { font: inherit; color: inherit; }
   flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 0;
   border-top: 1px solid var(--rule); min-height: 620px;
 }
-#map { min-height: 620px; height: 100%; background: var(--bg); }
+#map, #segmap { min-height: 620px; height: 100%; background: var(--bg); }
 .panel { background: var(--surface); border-left: 1px solid var(--rule); padding: 18px 20px 28px; overflow-y: auto; max-height: calc(100vh - 90px); }
 @media (max-width: 860px) {
   .top { padding: 14px 16px 10px; }
   .network { grid-template-columns: 1fr; }
-  #map { min-height: 0; height: 56vh; }
+  #map, #segmap { min-height: 0; height: 56vh; }
   .panel { border-left: 0; border-top: 1px solid var(--rule); max-height: none; padding: 16px; }
 }
 
@@ -135,6 +135,9 @@ svg.chart .hit { fill: transparent; }
 .pairs .meter { height: 8px; border-radius: 4px; background: var(--rule); overflow: hidden; }
 .pairs .meter span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 .pairs .pct { text-align: right; font-weight: 600; }
+.pairs.segs button { grid-template-columns: minmax(0, 1fr) auto; }
+.pairs.segs .pct.gain { color: var(--worse-2); }
+.pairs.segs .pct.loss { color: var(--better-2); }
 
 .answer { display: flex; align-items: baseline; gap: 12px; margin: 10px 0 2px; }
 .answer .big { font-size: 56px; line-height: 1; font-weight: 700; letter-spacing: -0.02em; color: var(--accent); }

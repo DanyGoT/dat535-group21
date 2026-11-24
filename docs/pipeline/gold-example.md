@@ -1,8 +1,9 @@
 # Gold: what is built
 
 One manual job, [`gold.py`](../../pipeline/gold.py), turns one operating day of published Entur
-and DATEX Silver into five tables. A static [dashboard](../../dashboard/README.md) sums them over
-several days into a stop map, a transfer explorer and a road-conditions comparison.
+and DATEX Silver into six tables. A static [dashboard](../../dashboard/README.md) sums them over
+several days into a stop map, a transfer explorer, a map of delay between stops and a road-conditions
+comparison.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
 Related: [Silver](silver.md#tables), [product plan](gold.md),
@@ -16,6 +17,7 @@ Related: [Silver](silver.md#tables), [product plan](gold.md),
 | `stop_reliability` | Hub × local hour | Where and when do departures leave late? | Map for #3 delay hotspots |
 | `transfer_reliability` | Hub × arriving line and origin × departing line and destination × local hour | Will my connection hold? | #8 transfer reliability |
 | `line_stop_delays` | Hub × line × arrival or departure × trip end × local hour | How late does this line arrive or leave here? | Input to #8 across nearby stops |
+| `segment_delay` | Line × hub × next hub × local hour | Where is delay gained, and where recovered? | #3 delay hotspots |
 | `departure_conditions` | Mode × local hour × four road-condition levels | Do late departures go with weather, roadworks or congestion? | First slice of #4 and #5 |
 
 Every count is additive. Consumers sum days and compute rates from the sums. No table stores an
@@ -106,6 +108,28 @@ railway station a short walk apart without a shared NSR parent.
   `delay_counts[i]` counts timed calls whose delay floored to whole minutes is `i − 10`, clipped
   to −10..+30. Calls neither timed nor cancelled are unknown.
 
+## `segment_delay`
+
+A segment is a run between two consecutive calls of a journey, mapped to their hubs. Its
+**delay change** is the arrival delay at the next call minus the departure delay at this one, so
+time spent at stops is left out. Positive is delay gained, negative is delay recovered.
+
+| Column | Definition |
+| ------ | ---------- |
+| `segments` | Runs between the two hubs, with or without real-time |
+| `timed_segments` | Runs with a usable departure delay here and arrival delay at the next call: reported, neither call cancelled, no `implausible_*_delay` or `departure_before_arrival` flag |
+| `delay_change_s` | Sum of the timed runs' changes in seconds, each clipped to ±15 min |
+| `gained_1_min_plus`, `recovered_1_min_plus` | Timed runs that gained, or recovered, a minute or more |
+
+Mean change per run is `delay_change_s / timed_segments`, summed over days first. Hour is the
+local hour of the aimed departure. Runs within one hub, such as a bus terminal to its railway
+station, and runs to or from a quay not in NSR are left out: the map cannot draw them. Hub names
+and positions for both ends come from the day's `stop_place` snapshot.
+
+**Limits.** Running time includes waiting at signals and traffic lights between stops; it does
+not separate road from vehicle. Where the timetable adds slack before a timing point, recovery is
+planned. Operators that copy aimed into actual times show no change. Not yet run on real Silver.
+
 ## `departure_conditions`
 
 Each timed departure gets four levels at its quay and aimed time, then rows are counted per mode,
@@ -130,10 +154,14 @@ departures are `no_section`. Proximity is not causation.
 ## Dashboard
 
 [`dashboard/build.py`](../../dashboard/build.py) reads only Gold Parquet and run markers, checks
-each partition's row count and run ID and reconciles departures to the markers. It writes
+each partition's row count and run ID and reconciles departures and timed runs to the markers. It
+accepts only Gold marker schema 3: days published before `line_stop_delays` and `segment_delay` existed must be rerun. It writes
 `dashboard/dist/`, a static site that opens from disk or any static host:
 
 - `data.js` holds hubs with at least 20 timed departures, the condition counts and line labels.
+- `segments.js` holds hub pairs with at least 30 timed runs over all lines and days, loaded when
+  the *Where delay grows* view opens. Each direction is drawn on its right-hand side of travel,
+  coloured by mean change per run; the panel ranks pairs by change per run or in total.
 - `hubs/NN.js` are 32 shards of per-hub hours, line pairs with at least 20 observed
   connections, and line delays with at least 20 timed calls, loaded when a hub is opened. Line
   delays are summed into five local time-of-day bands (00–06, 06–09, 09–15, 15–18, 18–24),
@@ -183,20 +211,20 @@ DATEX under `silver/_runs/datex/observation_date=D/`. Neither run contacts Entur
 
 | Path under the output root | Contents |
 | -------------------------- | -------- |
-| `gold/<table>/operating_date=D/*.parquet` | The five tables |
+| `gold/<table>/operating_date=D/*.parquet` | The six tables |
 | `gold/line_scorecard/operating_date=D/_preview/` | `report.md` (top 25 lines) and `scorecard.csv` |
 | `gold/_runs/operating_date=D/<run_id>.json` | Lineage, totals, table sizes, condition coverage, runtime |
 | `gold/_runs/operating_date=D/latest.json` | Publication and readiness marker |
 
-The shared [publisher](../../pipeline/silver.py) replaces the selected day of all five tables and
+The shared [publisher](../../pipeline/silver.py) replaces the selected day of all six tables and
 rolls back ordinary failures. [Offline tests](../../pipeline/tests/test_gold.py) cover grains,
-denominators, cancellations, quality exclusions, transfer pairing, line delays, condition levels including
+denominators, cancellations, quality exclusions, transfer pairing, line delays, segment delay change, condition levels including
 NPRA's offset periods, partial input, reruns and mismatched lineage.
 
 ## Validated
 
-These are schema-2 runs from before `line_stop_delays`; the dashboard builder needs schema-3 runs
-with it, so the three days must be rerun.
+These are schema-2 runs from before `line_stop_delays` and `segment_delay`; the dashboard builder needs schema-3 runs
+with them, so the three days must be rerun.
 
 Run on 2026-11-11 against prod Silver, writing to a separate output root. All three days had
 both sources `complete, ready=true`. They are the only days where both exist: DATEX Silver is
