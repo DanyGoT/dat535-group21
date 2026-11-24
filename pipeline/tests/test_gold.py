@@ -328,6 +328,17 @@ class GoldTest(SparkCase):
             self.assertEqual(set(record["tables"]), set(G.KEYS) - {"departure_conditions"})
             self.assertEqual(record["condition_levels"], {})
 
+            # A partial DATEX run lacking reference/link tables (e.g. a 1-hour dev sample) also skips conditions.
+            self.write_silver(root, self.frames(), self.roads(), status="partial", ready=False)
+            partial_marker = json.loads(datex_marker.read_text())
+            partial_marker["tables"].pop("weather_site")
+            G.atomic_json(datex_marker, partial_marker)
+            partial = G.run(root, DAY, spark=self.spark, allow_partial=True)
+            self.assertFalse(partial["ready"])
+            self.assertEqual(partial["datex_status"], "partial")
+            self.assertEqual(partial["skipped_tables"], ["departure_conditions"])
+            self.assertEqual(set(partial["tables"]), set(G.KEYS) - {"departure_conditions"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
