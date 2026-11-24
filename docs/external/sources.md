@@ -21,9 +21,13 @@ Road weather stations are a median 5.5 km from buses, but 14 km from ferries and
 These are rounded summaries of the [2026-10-26 08 UTC sample](../datex/content.md#does-it-line-up-with-transit).
 Situations were within 2 km of half the buses in that sample.
 
-DATEX has been collected since 2026-10-28 and has Bronze and Silver. It adds road surface
-temperature/condition beyond Frost. Whether it explains delay remains untested.
-Gold products 4 and 5 may find weak effects. Frost waits for the ferry/wind product.
+DATEX has been collected since 2026-10-28 and has Bronze, Silver and Gold (`departure_conditions`).
+It adds road surface temperature/condition beyond Frost. Matched on mode and hour over
+2026-11-05, 08 and 09, departures near congested road sections were late 10.0 percentage points
+more often than near free-flowing ones, with smaller increases under incidents (+2.1 pp),
+roadworks (+2.0 pp) and heavy precipitation (+1.1 pp); in a separate prediction ablation, DATEX
+added ≤ 0.0005 AUC on top of Entur's own estimates. Frost remains out of scope (future work for
+coastal ferry/wind analysis).
 
 ## Endpoints
 

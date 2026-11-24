@@ -1,12 +1,13 @@
-# Gold: what is built
+# Gold: contract and tables
 
-One manual job, [`gold.py`](../../pipeline/gold.py), turns one operating day of published Entur
-and DATEX Silver into six tables. A static [dashboard](../../dashboard/README.md) sums them over
-several days into a stop map, a transfer explorer, a map of delay between stops and a road-conditions
-comparison.
+[`gold.py`](../../pipeline/gold.py) runs nightly in [prod CI](../../.github/workflows/dat535-prod.yml)
+(and with `--allow-partial` in [dev CI](../../.github/workflows/dat535-dev.yml)), turning one
+operating day of published Entur Silver and the same UTC day of DATEX Silver into six additive
+tables. The [dashboard](../../dashboard/README.md) sums all ready Gold days into a stop map, a
+transfer explorer, a map of delay between stops and a road-conditions comparison.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
-Related: [Silver](silver.md#tables), [product plan](gold.md),
+Related: [Silver](silver.md#tables), [Gold scope & future work](gold.md),
 [evidence](../report/evidence/README.md#gold-with-road-data-2026-11-05-08-and-09)
 
 ## At a glance
@@ -26,10 +27,13 @@ percentiles, which stay per day.
 
 ## Shared rules
 
-- **Inputs.** Entur Silver for operating day D (marker schema 2) and DATEX Silver for UTC
-  observation day D (marker schema 1). Both markers must be `complete, ready=true`, or the run
-  needs `--allow-partial` and is published `partial, ready=false`. Every table read must have
-  exactly the marker's row count, and every row the marker's `_silver_run_id`.
+- **Inputs & missing-DATEX policy.** Entur Silver for operating day D (marker schema 2) is
+  required; DATEX Silver for UTC observation day D (marker schema 1) is used when published.
+  Present markers must be `complete, ready=true`, or the run needs `--allow-partial` and is
+  published `partial, ready=false`. If DATEX Silver does not exist for day D, Gold still publishes
+  the five Entur tables `ready=true`, skips `departure_conditions`, and records
+  `datex_status: "missing"` and `skipped_tables: ["departure_conditions"]` in `latest.json`.
+  Every table read must have exactly its marker's row count and `_silver_run_id`.
 - **Timed departure.** One definition for every table: reported, not cancelled, boarding not
   forbidden, actual and aimed departure present, delay not NaN, and no `departure_before_arrival`
   or `implausible_departure_delay` flag. Late means `departure_delay_s >= 180`.
@@ -186,8 +190,12 @@ Cancellations are reported beside the estimate, not inside it, as in the transfe
 
 ```sh
 flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --output-dir /data/dat535/prod \
-  --date 2026-11-05 --date 2026-11-08 --date 2026-11-09
+  --all-ready
 ```
+
+Pass `--all-ready` to include every complete, ready schema-3 Gold day, or repeat `--date YYYY-MM-DD`
+for specific days. Days where `departure_conditions` was skipped are included in the stop,
+transfer and segment views and omitted from the road-conditions cube.
 
 It holds the Spark lock for the whole build: a Gold rerun replaces its tables one by one, so a
 build running beside it could mix two runs that the run-ID check before reading cannot see.

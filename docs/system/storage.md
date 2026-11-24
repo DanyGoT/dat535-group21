@@ -1,7 +1,8 @@
 # Storage and memory on the VM
 
-This guide covers capacity, cleanup and Spark settings. Disk readings are from 2026-11-11
-09:22 UTC, and other sizes from 2026-10-24/26 unless dated.
+This guide covers capacity, cleanup and Spark settings. The latest measured disk state after
+cleanup is from 2026-11-20 ([problem log](../report/problems.md#2026-11-20--the-data-volume-reached-96--with-two-days-left));
+the baseline table below uses 2026-10-24/26 and 2026-11-11 measurements unless dated.
 
 Up: [architecture](architecture.md) · Related: [runbook](../../collector/README.md),
 [evidence](../report/evidence/README.md)
@@ -12,10 +13,13 @@ Up: [architecture](architecture.md) · Related: [runbook](../../collector/README
 | -------- | ---------------- |
 | CPU | 4 vCPU |
 | RAM | 7.9 GB + 4 GB swap. Services ~1.5 GB, Spark heap up to 4 GB plus ~1 GB overhead |
-| `/` | 38 GB, 16 GB used, 41 %. Holds `/tmp`, monitoring tools, runner and venv |
-| `/data` | 984 GB, 645 GB used, 290 GB free, 70 %. Network-mounted |
+| `/` | 38 GB, 16 GB used, 41 % (2026-11-11). Holds `/tmp`, monitoring tools, runner and venv |
+| `/data` | 984 GB, 696 GB used, 238 GB free, 75 % after the 2026-11-20 cleanup and zstd rebuild. Network-mounted |
 
-On 2026-11-11, landing occupied 231 GB, prod 308 GB and dev 48 GB.
+On 2026-11-20 before cleanup, `/data` reached 893 GB (96 %): landing 332 GB, prod 451 GB
+(Bronze 378, Silver 76), `silver-week-validation` 60 GB and dev 50 GB. Deleting stale experiment/dev
+outputs and rebuilding all 36 prod Bronze days (2026-10-15…11-19) with zstd shrank prod Bronze to
+285 GB and restored 238 GB free.
 
 ## What a day costs
 
@@ -47,10 +51,10 @@ It used 299 GB occupied.
 A second scenario kept only a week of Bronze from late November. With landing alone growing
 at 10.9 GB/day, it predicted capacity until about the end of December.
 
-Both estimates left out Silver, Gold and the decode cache. Measured from 2026-10-26 (299 GB)
-to 2026-11-11 (645 GB), `/data` grew by **21.6 GB/day** with everything counted. On that basis,
-`(0.90 × 984 − 645) / 21.6 ≈ 11 days` puts the monitor's 90 % alert around **2026-11-22**, and
-the 290 GB still free would run out around 2026-11-24.
+Both earlier estimates left out Silver, Gold and the decode cache. Measured from 2026-10-26
+(299 GB) to 2026-11-11 (645 GB), `/data` grew by **21.6 GB/day** with everything counted, and hit
+96 % on 2026-11-20 before the cleanup and zstd Bronze rebuild restored 238 GB free
+([problem log](../report/problems.md#2026-11-20--the-data-volume-reached-96--with-two-days-left)).
 
 Grafana's **Disk full in** panel gives a live forecast: free bytes divided by
 `-deriv(dat535_filesystem_free_bytes[24h])`, the volume's own trend, so every writer counts.
@@ -64,9 +68,9 @@ Paths are relative to `/data/dat535/`.
 1. Remove `{dev,prod}/silver/_decoded/<feed>/source_date=YYYY-MM-DD/` folders older than three
    days. This frees ~1.9 GB/day, or 19 GB for ten days on 2026-11-06. Reruns decode again in
    ~37 min/UTC day.
-2. Remove `dev/` outputs older than a week. October's 2026-10-15/16 tests occupied 36 GB.
-3. Rebuild pre-zstd prod Bronze with `workflow_dispatch`, one date at a time. This saves
-   ~14 GB/day without data loss. Days 2026-10-15…22 offered ~95 GB.
+2. Remove `dev/` outputs older than a week (and any finished experiment directories).
+3. ~~Rebuild pre-zstd prod Bronze~~ — **completed 2026-11-20** across all 36 days (2026-10-15…11-19),
+   shrinking prod Bronze from 378 GB to 285 GB.
 4. Remove prod Bronze older than Silver needs, keeping the last week. This frees ~9.7 GB/day
    and can be rebuilt from landing.
 5. Remove the oldest ET landing days, freeing ~8.5 GB/day. Raw messages are lost, although

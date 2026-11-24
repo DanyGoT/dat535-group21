@@ -1,32 +1,46 @@
-# Gold: product plan
+# Gold: scope and future work
 
-This page defines proposed Gold products and their consumers. The manual
-[Gold job](gold-example.md) delivers #2, a hub map and a segment map for #3, an observed version of #8 and a
-first slice of #4 and #5. Departure risk and the other products remain future work.
+The project's primary engineering focus is the reusable [Silver layer](silver.md). The
+scheduled [Gold job](gold-example.md) (`pipeline/gold.py`) delivers six additive analytical tables
+every night—punctuality scorecard (#2), stop and segment delay hotspots (#3), observed and
+nearby-stop transfer reliability (#8), and road/weather departure conditions (#4/#5)—consumed by
+the [dashboard](../../dashboard/README.md).
+
+Departure-risk ML (#1), external BigQuery cross-checks, coastal Frost weather, and the remaining
+candidate products (#6, #7, #9) below are **intentionally out of scope** for this project and
+documented as future work.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
 Related: [Silver](silver.md#tables), [methodology](methodology.md#gold-serve-a-use-not-a-layer),
-[Gold example](gold-example.md)
+[Gold contract](gold-example.md)
 
-## At a glance
+## Delivered vs. future work
 
-| # | Gold product | Consumer | Question | Needs beyond ET |
-| - | ------------ | -------- | -------- | --------------- |
-| 1 | **Departure risk** (primary) | Traveller | Will my departure be on time? | NeTEx/NSR, DATEX conditions |
-| 2 | Punctuality scorecard | Authority, public dashboard | Which lines run on time or cancel? | NeTEx denominator |
-| 3 | Delay hotspots | Transit planners | Where and when does a line lose time? | NSR coordinates |
-| 4 | Road incident impact | NPRA, municipalities | How much extra delay accompanies an incident? | DATEX situations, transit locations |
-| 5 | Weather sensitivity | Operators, winter planners | Which lines struggle with ice, snow or wind? | DATEX weather, Frost for ferries |
-| 6 | Countdown accuracy | Entur, information displays | How wrong was the predicted departure? | Historical ET versions |
-| 7 | Disruption communication | Customer information | Was a cancellation announced early enough? | SX |
-| 8 | Transfer reliability | Journey planner | Will a connection hold? | NSR stop places, NeTEx |
-| 9 | Crowding | Traveller | Will there be a seat? | Vehicle or ET occupancy |
+| # | Gold product | Status | Consumer | Question |
+| - | ------------ | ------ | -------- | -------- |
+| 2 | Punctuality scorecard | **Delivered** (`line_scorecard`) | Authority, dashboard | Which lines run on time or cancel? |
+| 3 | Delay hotspots | **Delivered** (`stop_reliability`, `segment_delay`) | Transit planners | Where and when is delay gained or recovered? |
+| 8 | Transfer reliability | **Delivered** (`transfer_reliability`, `line_stop_delays`) | Journey planner / traveller | Will a connection hold (same hub or nearby stop)? |
+| 4 / 5 | Road & weather conditions | **Delivered** (`departure_conditions`) | Operators, NPRA | Do late departures accompany congestion, incidents or weather? |
+| 1 | Departure-risk ML model | **Out of scope (future work)** | Traveller | Will my specific departure be on time? |
+| 6 | Countdown accuracy | **Out of scope (future work)** | Entur, display teams | How wrong was the predicted departure? |
+| 7 | Disruption communication | **Out of scope (future work)** | Customer information | Was a cancellation announced early enough? |
+| 9 | Crowding | **Out of scope (future work)** | Traveller | Will there be a seat? |
 
-Priorities are #1, #2 for validation, and #5 or #4 for enrichment. BigQuery comparison
-remains planned. The other products need further matching and business rules.
-[Observed feed coverage](../entur/realtime.md#what-the-messages-contain) shapes these choices.
+**Why predictive ML (#1) and external additions were cut:**
+- Limited weeks of collected history and a single 7.9 GB RAM VM make training/serving a daily ML
+  model secondary to building a trustworthy, reproducible Silver + Gold pipeline.
+- A manual ablation experiment on `2026-11-04` (`experiments/silver-ablation`) showed that Entur's
+  own historical profiles and live estimates carry almost all predictive signal; adding DATEX road
+  features and SX alerts changed AUC by at most `0.0005`.
+- MET Norway Frost (coastal ferry weather) and BigQuery cross-checks remain well-defined future
+  extensions rather than unfinished dependencies.
 
-## 1. Departure risk (primary)
+---
+
+## Future work proposals (kept for design reference)
+
+## 1. Departure risk (future work)
 
 **Consumer.** A traveller looks up a departure for late/cancellation risks, a usual delay
 range and relevant road conditions.
@@ -202,10 +216,10 @@ only on the end-of-life travel-time feed. Add forecasts only if #1 needs them an
 webcams. Costs are in [DATEX sources](../datex/sources.md#cost-per-day) and
 [storage](../system/storage.md#what-a-day-costs).
 
-## Order of work
+## Status summary
 
-1. Daily reference archives and Entur/DATEX Silver are implemented. BigQuery checks remain planned.
-2. Done: Gold reads schema-2 Silver and DATEX, and publishes #2, the #3 maps, #8 and a condition
-   comparison for #4/#5 ([what is built](gold-example.md)).
-3. Build the #1 profile, then the model and its planned-time baselines.
-4. Turn the condition comparison into per-line #4/#5 products, with Frost for ferries.
+1. Daily reference archives, Entur/DATEX Bronze and Silver, and the six-table scheduled Gold job
+   are implemented and automated in CI/CD ([Gold contract](gold-example.md)).
+2. Future work (intentionally outside this submission): predictive departure-risk ML (#1),
+   per-line weather/incident causal models with MET Frost for ferries, BigQuery external
+   cross-checks, and products #6/#7/#9.

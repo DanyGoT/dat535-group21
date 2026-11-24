@@ -67,9 +67,29 @@ def published(root, day):
     return marker
 
 
+def ready_days(root):
+    """All operating days under gold/_runs/ with a complete, ready schema-3 marker."""
+    days = []
+    for folder in sorted((root / "gold" / "_runs").glob("operating_date=*")):
+        marker_path = folder / "latest.json"
+        if not marker_path.exists():
+            continue
+        day = folder.name.removeprefix("operating_date=")
+        try:
+            published(root, day)
+            days.append(day)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    if not days:
+        raise ValueError(f"No complete, ready schema-3 Gold days found under {root}")
+    return days
+
+
 def check(root, markers, table):
     """Each day's partition must hold exactly the rows of the run its marker names."""
     for day, marker in markers.items():
+        if table == "departure_conditions" and table not in marker["tables"]:
+            continue
         folder = root / "gold" / table / f"operating_date={day}"
         runs = pq.read_table(folder, columns=["_gold_run_id"])["_gold_run_id"]
         other_runs = set(pc.unique(runs).to_pylist()) - {marker["run_id"]}
@@ -255,12 +275,17 @@ def build(root, days, dist):
     drawn = segments(root, markers)
     script(dist / "segments.js", "window.goldSegments(", drawn)
 
-    # Road conditions and line labels.
+    # Road conditions and line labels (skip days where DATEX Silver was absent).
     measures = ["scored_departures", "late_departures"]
-    conditions = load(root, markers, "departure_conditions", [*CONDITIONS, *measures])
-    if conditions["scored_departures"].sum() != scored:
-        raise ValueError("departure_conditions does not reconcile to the Gold run markers")
-    cube = conditions.groupby(CONDITIONS, as_index=False)[measures].sum()
+    cond_markers = {d: m for d, m in markers.items() if "departure_conditions" in m["tables"]}
+    if cond_markers:
+        conditions = load(root, cond_markers, "departure_conditions", [*CONDITIONS, *measures])
+        cond_scored = sum(m["totals"]["scored_departures"] for m in cond_markers.values())
+        if conditions["scored_departures"].sum() != cond_scored:
+            raise ValueError("departure_conditions does not reconcile to the Gold run markers")
+        cube_rows = conditions.groupby(CONDITIONS, as_index=False)[measures].sum().to_numpy().tolist()
+    else:
+        cube_rows = []
     line_columns = ["line_id", "public_code", "line_name", "mode", "operator_name"]
     lines = load(root, markers, "line_scorecard", line_columns)
     lines = lines[lines["line_id"].isin(used)].groupby("line_id").last()
@@ -309,7 +334,7 @@ def build(root, days, dist):
             for i, r in lines.iterrows()
         },
         "condition_columns": [*CONDITIONS, *measures],
-        "conditions": cube.to_numpy().tolist(),
+        "conditions": cube_rows,
     })
     return len(hubs), pairs, len(drawn)
 
@@ -320,11 +345,21 @@ def main(argv=None):
         "--output-dir", type=Path, required=True, help="pipeline output root containing gold/"
     )
     parser.add_argument(
-        "--date", action="append", required=True, help="operating day; repeat for several"
+        "--date", action="append", help="operating day; repeat for several"
+    )
+    parser.add_argument(
+        "--all-ready",
+        action="store_true",
+        help="include every complete, ready schema-3 Gold day under --output-dir",
     )
     parser.add_argument("--dist", type=Path, default=HERE / "dist")
     args = parser.parse_args(argv)
-    hubs, pairs, drawn = build(args.output_dir, sorted(set(args.date)), args.dist)
+    if args.all_ready and args.date:
+        parser.error("use either --date or --all-ready, not both")
+    if not args.all_ready and not args.date:
+        parser.error("pass at least one --date or --all-ready")
+    days = ready_days(args.output_dir) if args.all_ready else sorted(set(args.date))
+    hubs, pairs, drawn = build(args.output_dir, days, args.dist)
     sizes = sorted((p.stat().st_size, p.name) for p in args.dist.rglob("*.js"))
     total_mb = sum(s for s, _ in sizes) / 1e6
     largest_mb, largest = sizes[-1][0] / 1e6, sizes[-1][1]

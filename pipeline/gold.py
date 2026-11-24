@@ -90,10 +90,12 @@ INCIDENTS = (
 # --- Reading Silver ---
 
 
-def source_record(output, source, day, allow_partial=False):
+def source_record(output, source, day, allow_partial=False, optional=False):
     """The Silver marker for one source and day. Refused unless that day is published."""
     runs, partition, schema, _ = SOURCES[source]
     path = Path(output) / "silver" / runs / f"{partition}={day}" / "latest.json"
+    if optional and not path.exists():
+        return None
     record = json.loads(path.read_text())
     if record.get("schema_version") != schema or record.get(partition) != str(day):
         raise ValueError(f"{source} Silver marker has an unsupported schema or wrong date")
@@ -781,7 +783,7 @@ def report_markdown(record, rows):
     return "\n".join(text)
 
 
-def check_totals(totals, entur):
+def check_totals(totals, entur, has_conditions=True):
     """Refuse publication unless Gold reconciles to Silver and its tables to each other."""
     silver_tables = entur["tables"]
     if (
@@ -789,7 +791,12 @@ def check_totals(totals, entur):
         or totals["input_calls"] != silver_tables["stop_call"]["rows"]
     ):
         raise ValueError("Gold totals do not reconcile to Silver; refusing publication")
-    for table in ("stop_reliability", "departure_conditions", "line_stop_delays"):
+    checked = ["stop_reliability", "line_stop_delays"]
+    if has_conditions:
+        checked.append("departure_conditions")
+    else:
+        totals.pop("departure_conditions_reconciles", None)
+    for table in checked:
         if not totals.pop(f"{table}_reconciles"):
             raise ValueError(
                 f"{table} does not reconcile to the line scorecard; refusing publication"
@@ -814,14 +821,17 @@ def run(output_dir, day, spark=None, allow_partial=False):
     """Gold for one day: build every table in staging, check, then publish. Returns the record."""
     F = functions()
     output = Path(output_dir)
-    sources = {name: source_record(output, name, day, allow_partial) for name in SOURCES}
+    entur = source_record(output, "entur", day, allow_partial)
+    datex = source_record(output, "datex", day, allow_partial, optional=True)
     root = output / "gold"
     rid = run_id()
     stage = root / "_staging" / (rid + "-" + uuid.uuid4().hex[:8])
     history = root / "_runs" / f"operating_date={day}" / f"{rid}.json"
     owned_spark = spark is None
     started = time.monotonic()
-    ready = all(s["status"] == "complete" and s["ready"] is True for s in sources.values())
+    present = [s for s in (entur, datex) if s is not None]
+    ready = all(s["status"] == "complete" and s["ready"] is True for s in present)
+    skipped = [] if datex is not None else ["departure_conditions"]
     record: dict = dict(
         run_id=rid,
         operating_date=str(day),
@@ -829,10 +839,11 @@ def run(output_dir, day, spark=None, allow_partial=False):
         status="running",
         ready=False,
         started_at=iso(utcnow()),
-        silver_run_id=sources["entur"]["run_id"],
-        silver_status=sources["entur"]["status"],
-        datex_run_id=sources["datex"]["run_id"],
-        datex_status=sources["datex"]["status"],
+        silver_run_id=entur["run_id"],
+        silver_status=entur["status"],
+        datex_run_id=datex["run_id"] if datex is not None else None,
+        datex_status=datex["status"] if datex is not None else "missing",
+        skipped_tables=skipped,
         late_seconds=LATE_S,
         max_transfer_slack_s=MAX_SLACK_S,
         max_segment_change_s=MAX_CHANGE_S,
@@ -850,9 +861,8 @@ def run(output_dir, day, spark=None, allow_partial=False):
                 "spark.local.dir": str(scratch),
             })
 
-        # 1. Build the six tables.
-        silver = read_silver(spark, output, "entur", day, sources["entur"])
-        roads = read_silver(spark, output, "datex", day, sources["datex"])
+        # 1. Build the Entur tables, plus road conditions when DATEX Silver exists for the day.
+        silver = read_silver(spark, output, "entur", day, entur)
         calls = silver["stop_call"]
         quay_hub, hub_labels = build_hubs(silver["quay"], silver["stop_place"])
         products = {
@@ -863,8 +873,10 @@ def run(output_dir, day, spark=None, allow_partial=False):
             "transfer_reliability": build_transfers(calls, quay_hub, hub_labels),
             "line_stop_delays": build_line_stops(calls, quay_hub, hub_labels),
             "segment_delay": build_segments(calls, quay_hub, hub_labels),
-            "departure_conditions": build_conditions(calls, roads, day),
         }
+        if datex is not None:
+            roads = read_silver(spark, output, "datex", day, datex)
+            products["departure_conditions"] = build_conditions(calls, roads, day)
 
         # 2. Write each to staging and check its key.
         written = {}
@@ -873,7 +885,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
             (
                 frame.withColumn("_gold_run_id", F.lit(rid))
                 .withColumn("_source_silver_run_id", F.lit(record["silver_run_id"]))
-                .withColumn("_source_datex_run_id", F.lit(record["datex_run_id"]))
+                .withColumn("_source_datex_run_id", F.lit(record["datex_run_id"]).cast("string"))
                 .write.parquet(str(partition))
             )
             written[table] = spark.read.parquet(str(partition))
@@ -885,18 +897,23 @@ def run(output_dir, day, spark=None, allow_partial=False):
             )
 
         # 3. Reconcile.
-        totals = spark.sql(TOTALS_SQL, **written).first().asDict()
-        check_totals(totals, sources["entur"])
+        sql_tables = dict(written)
+        if "departure_conditions" not in sql_tables:
+            sql_tables["departure_conditions"] = spark.createDataFrame(
+                [], "scored_departures long, late_departures long"
+            )
+        totals = spark.sql(TOTALS_SQL, **sql_tables).first().asDict()
+        check_totals(totals, entur, has_conditions="departure_conditions" in written)
 
         # Only small aggregates reach the driver, never stop-call facts.
         rows = [r.asDict() for r in written["line_scorecard"].orderBy("line_id").collect()]
         # How much of the day each road condition level could describe.
-        levels = record["condition_levels"] = {
-            dim: {} for dim in KEYS["departure_conditions"][3:]
-        }
-        for row in written["departure_conditions"].collect():
-            for dim, counts in levels.items():
-                counts[row[dim]] = counts.get(row[dim], 0) + row["scored_departures"]
+        levels = record["condition_levels"] = {}
+        if "departure_conditions" in written:
+            levels.update({dim: {} for dim in KEYS["departure_conditions"][3:]})
+            for row in written["departure_conditions"].collect():
+                for dim, counts in levels.items():
+                    counts[row[dim]] = counts.get(row[dim], 0) + row["scored_departures"]
 
         # 4. Publish.
         record.update(
@@ -924,8 +941,12 @@ def run(output_dir, day, spark=None, allow_partial=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     default_output = Path(os.environ.get("DAT535_OUTPUT_DIR", "output"))
+    default_day = (utcnow() - timedelta(days=2)).date()
     parser.add_argument(
-        "--date", type=Date.fromisoformat, required=True, help="Norwegian operating day"
+        "--date",
+        type=Date.fromisoformat,
+        default=default_day,
+        help="Norwegian operating day, YYYY-MM-DD (default: two days ago)",
     )
     parser.add_argument("--output-dir", type=Path, default=default_output)
     parser.add_argument(

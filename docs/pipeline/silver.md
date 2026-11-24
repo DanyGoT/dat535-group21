@@ -92,12 +92,27 @@ can leave staging files and a `publishing` marker. Rerun the date under the same
 
 - Entur writes schema **2**. `entity_index` changed from int to long. Rebuild schema-1 days
   before reading across versions.
-- DATEX writes schema **1**, in its marker and on its rows. Days published in October and
-  November 2026 carry `_silver_schema_version=2` on their rows instead: the shared `stage_table`
-  stamped Entur's version on every table until it was fixed.
+- DATEX writes schema **1**, in both its marker and its rows
+  ([`silver_datex.py`](../../pipeline/silver_datex.py)). Historical partitions published before
+  that fix carry `_silver_schema_version=2` on their rows while their marker says `1`.
 - [`gold.py`](../../pipeline/gold.py) checks the marker versions, Entur 2 and DATEX 1, and ties
-  every row to the marker by `_silver_run_id`, so the row stamp does not matter to it.
+  every row to the marker by `_silver_run_id`, so historical row stamps do not affect it.
   See [what Gold builds](gold-example.md#shared-rules).
+
+### Why Silver keeps tables no delivered Gold reads yet
+
+Silver is designed as a reusable layer for multiple downstream consumers, not only the current
+Gold job:
+
+- `call_prediction` is Silver's history table: it captures what was known at fixed cutoffs
+  (1/5/10/20/30 min before planned and actual time) without future leakage (`asof_intervals`).
+  It supports countdown-accuracy checks and any future departure-risk model (the ablation
+  experiment used it as the planned-cutoff baseline).
+- `vehicle_position` records live vehicle telemetry (location, occupancy, speed, delay) outside
+  ET's stop-call grain, enabling future crowding and vehicle-path analyses where operators publish
+  positions (excluding Ruter).
+- `sx_situation` preserves passenger-facing disruption revisions and validity spans so future
+  analyses can compare disruptions and cancellation notice lead times against observed outcomes.
 
 ## Shared semantics
 
@@ -207,10 +222,43 @@ A same-day archive alone does not prove it was available at an earlier cutoff.
 - Staging checks non-null unique keys, partition membership, counts and issues. Failed strict
   reruns preserve published tables.
 
+### Field classification (`stop_call` and `journey`)
+
+| Class | Fields | Source & rationale |
+| ----- | ------ | ------------------ |
+| **Essential (identity & grain)** | `operating_date`, `journey_id`, `call_order` (`stop_call`) | Primary key within partition; missing values quarantine the version. |
+| **Essential (plan/RT coverage)** | `has_plan`, `has_realtime`, `realtime_status`, `journey_has_realtime` | Distinguishes `matched`, `no_realtime` (planned denominator) and `realtime_only`. |
+| **Essential (core attributes)** | `line_id`, `operator_id`, `mode`, `quay_id`, `planned_*_at`, `aimed_*_at`, `for_boarding`, `for_alighting` | Required for punctuality, hub/line joins and boarding filters; real-time wins over plan on coalesce. |
+| **Optional** | `expected_*_at`, `direction_id`, `direction_type`, `vehicle_id`, `occupancy`, `arrival_status`, `departure_status`, `extra_journey`, `extra_call`, `service_alteration`, `earliest_departure_at`, `latest_arrival_at`, `is_flexible`, `monitored`, `codespace` | Present only for some operators, feeds or flexible services; null is valid. |
+| **Derived** | `arrival_delay_s`, `departure_delay_s`, `actual_*_equals_aimed`, `quay_changed`, `date_source`, `dq_issue`, `reported_quay_id`, `plan_quay_id`, `_silver_run_id`, `_silver_schema_version` | Computed in Silver from typed source fields without mutating source timestamps. |
+| **Unreliable (verify before use)** | `actual_arrival_at`, `actual_departure_at`, `operating_date` when `operating_date_derived` is set, vehicle `speed` | Some operators copy aimed times into actuals (`actual_*_equals_aimed`); batch-stamped actuals trigger `implausible_*_delay`; `first_call` date fallback can misdate overnight services; vehicle `speed` unit is **UNVERIFIED**. |
+
+### Cleaning, `dq_issue` and quarantine rule catalogue
+
+Every rule emitted by [`silver.py`](../../pipeline/silver.py),
+[`silver_parse.py`](../../pipeline/silver_parse.py),
+[`silver_reference.py`](../../pipeline/silver_reference.py),
+[`silver_datex.py`](../../pipeline/silver_datex.py) and
+[`silver_datex_parse.py`](../../pipeline/silver_datex_parse.py):
+
+| Scope | Rule / reason | Condition | Action |
+| ----- | ------------- | --------- | ------ |
+| **Contract errors (Entur & DATEX)** | `bronze_corrupt`, `bronze_incomplete`, `bronze_wrong_endpoint`, `malformed_payload`, `unknown_message_shape`, `source_delivery_error`, `graphql_error`, `graphql_partial_error`, `invalid_vehicle_shape` | Source broke its envelope, JSON/XML, GraphQL or message contract | Quarantine row + **block strict publication** (`ready=false` under `--allow-partial`). |
+| **DATEX missed delivery** | `source_delivery_failed` | Valid DATEX XML reporting `returnStatus="fail"` ("Delivery break") | Quarantine row only (does **not** block day; next snapshot repeats data). |
+| **Unusable identity (Entur)** | `missing_operating_date`, `missing_journey_id`, `missing_call_order`, `missing_situation_id`, `missing_participant_id`, `missing_vehicle_id`, `missing_codespace`, `missing_last_updated_at` | Required table key column is null after alias/date resolution | Quarantine row (non-blocking; counted in run record). |
+| **Unusable identity (DATEX)** | `missing_record_id`, `missing_version`, `missing_version_at`, `missing_site_id`, `missing_measurement_at`, `missing_section_id`, `missing_period_start_at`, `missing_id` | Required DATEX table key column is null | Quarantine row in `datex_quarantine` (non-blocking). |
+| **Type & clock parsing** | `invalid_<field>` (timestamps, dates, numbers, booleans, geometry, recurring periods), `ambiguous_<planned_time>`, `nonexistent_<planned_time>` | Malformed literal, UTC overflow, out-of-range int, or DST-ambiguous/skipped local clock | Set field to `null` + keep row with `dq_issue` flag. |
+| **Reference conformity** | `unknown_quay`, `unknown_line`, `missing_quay`, `missing_reported_quay`, `missing_quay_mapping`, `ambiguous_quay_mapping`, `conflicting_operating_date`, `conflicting_journey_id`, `conflicting_service_alteration`, `operating_date_derived` | ID absent from NSR/NeTEx snapshot, alias/alteration mismatch, or derived operating date | Keep row with `dq_issue` flag (plan/RT values preserved separately). |
+| **Call & journey domain checks** | `implausible_arrival_delay`, `implausible_departure_delay` (`< -30 min` or `> 6 h`), `departure_before_arrival`, `nonpositive_call_order`, `missing_aimed_time`, `missing_recorded_at` | Physically implausible timing, order or missing producer timestamp | Keep row with `dq_issue` flag; Gold excludes flagged departures from punctuality. |
+| **Vehicles, SX & NSR checks** | `missing_coordinates`, `invalid_coordinates`, `invalid_bearing`, `negative_speed`, `invalid_progress`, `invalid_validity_period` | Out-of-range WGS84/bearing/progress, negative speed, or `end_at < start_at` | Keep row with `dq_issue` flag. |
+| **DATEX situations & travel time** | `missing_start`, `end_before_start`, `version_before_created`, `missing_location`, `coordinates_outside_norway`, `nonpositive_travel_time`, `nonpositive_free_flow`, `measurement_without_status` | Invalid validity/location bounds or inconsistent travel-time/status reading | Keep row with `dq_issue` flag. |
+| **DATEX weather sensors** | `stale_measurement` (`age > 1 h`), `suspect_air_temperature`, `suspect_road_temperature`, `suspect_humidity`, `suspect_dew_point`, `suspect_precipitation`, `suspect_wind`, `suspect_friction`, `no_current_measurement`, `unknown_weather_quantity_<name>` | Frozen station, physically implausible sensor reading, or new XML quantity | Keep row with `dq_issue` flag (`weather_site.usable` and `stuck_quantities` guide Gold filtering). |
+
 Run records sit beside each marker as `<run_id>.json`. They include input coverage, Bronze run
 IDs, decoded/table counts, issues, bytes and elapsed time. Entur also records reference
 dates/SHA-256, version reduction, coverage and actual-equals-aimed counts per operator.
-Contracts are exercised in [Entur tests](../../pipeline/tests/test_silver.py) and
+[`pipeline/summary.py`](../../pipeline/summary.py) turns those run records into per-run tables
+and multi-day quality reports. Contracts are exercised in [Entur tests](../../pipeline/tests/test_silver.py) and
 [DATEX tests](../../pipeline/tests/test_silver_datex.py).
 
 ## Running it on the VM
