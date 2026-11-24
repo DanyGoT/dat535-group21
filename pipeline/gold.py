@@ -831,7 +831,9 @@ def run(output_dir, day, spark=None, allow_partial=False):
     started = time.monotonic()
     present = [s for s in (entur, datex) if s is not None]
     ready = all(s["status"] == "complete" and s["ready"] is True for s in present)
-    skipped = [] if datex is not None else ["departure_conditions"]
+    datex_tables = set(SOURCES["datex"][3])
+    has_datex = datex is not None and datex_tables <= set(datex.get("tables", {}))
+    skipped = [] if has_datex else ["departure_conditions"]
     record: dict = dict(
         run_id=rid,
         operating_date=str(day),
@@ -841,7 +843,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
         started_at=iso(utcnow()),
         silver_run_id=entur["run_id"],
         silver_status=entur["status"],
-        datex_run_id=datex["run_id"] if datex is not None else None,
+        datex_run_id=datex["run_id"] if has_datex else None,
         datex_status=datex["status"] if datex is not None else "missing",
         skipped_tables=skipped,
         late_seconds=LATE_S,
@@ -861,7 +863,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
                 "spark.local.dir": str(scratch),
             })
 
-        # 1. Build the Entur tables, plus road conditions when DATEX Silver exists for the day.
+        # 1. Build the Entur tables, plus road conditions when DATEX Silver has all required tables.
         silver = read_silver(spark, output, "entur", day, entur)
         calls = silver["stop_call"]
         quay_hub, hub_labels = build_hubs(silver["quay"], silver["stop_place"])
@@ -874,7 +876,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
             "line_stop_delays": build_line_stops(calls, quay_hub, hub_labels),
             "segment_delay": build_segments(calls, quay_hub, hub_labels),
         }
-        if datex is not None:
+        if has_datex:
             roads = read_silver(spark, output, "datex", day, datex)
             products["departure_conditions"] = build_conditions(calls, roads, day)
 
