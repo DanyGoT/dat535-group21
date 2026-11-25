@@ -1,0 +1,31 @@
+{
+ "run_id": "gh-44895514041-1",
+ "env": "prod",
+ "date": "2026-11-20",
+ "landing": "/data/dat535/landing",
+ "started_at": "2026-11-21T10:41:24.557Z",
+ "feeds": {
+  "et": {
+   "files": 24,
+   "missing_hours": [],
+   "open_hours": [],
+   "rows": 4933595,
+   "bad_rows": {}
+  },
+  "sx": {
+   "files": 24,
+   "missing_hours": [],
+   "open_hours": [],
+   "rows": 3178,
+   "bad_rows": {}
+  },
+  "vehicles": {
+   "files": 24,
+   "missing_hours": [],
+   "open_hours": [],
+   "rows": 2110127,
+   "bad_rows": {}
+  }
+ },
+ "finished_at": "2026-11-21T10:54:02.350Z"
+}

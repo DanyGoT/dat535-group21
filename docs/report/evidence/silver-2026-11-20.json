@@ -1,0 +1,1435 @@
+{
+  "run_id": "gh-45014021086-1",
+  "env": "prod",
+  "schema_version": 2,
+  "operating_date": "2026-11-20",
+  "started_at": "2026-11-22T10:57:07.650Z",
+  "status": "complete",
+  "ready": true,
+  "inputs": {
+    "et": {
+      "2026-11-19": {
+        "missing_hours": [],
+        "rows": 4882358,
+        "bronze_status": {
+          "ok": 4882358
+        },
+        "bronze_run_ids": [
+          "gh-44808075133-1"
+        ],
+        "parquet_bytes": 8413646851
+      },
+      "2026-11-20": {
+        "missing_hours": [],
+        "rows": 4933595,
+        "bronze_status": {
+          "ok": 4933595
+        },
+        "bronze_run_ids": [
+          "gh-44895514041-1"
+        ],
+        "parquet_bytes": 8612372738
+      },
+      "2026-11-21": {
+        "missing_hours": [],
+        "rows": 2997909,
+        "bronze_status": {
+          "ok": 2997909
+        },
+        "bronze_run_ids": [
+          "gh-45014021086-1"
+        ],
+        "parquet_bytes": 4720009360
+      },
+      "decoded": {
+        "call": 355735770,
+        "control": 4349,
+        "journey": 1778204
+      },
+      "retained_versions": {
+        "call": 141542829,
+        "journey": 707483
+      }
+    },
+    "sx": {
+      "2026-11-20": {
+        "missing_hours": [],
+        "rows": 3178,
+        "bronze_status": {
+          "ok": 3178
+        },
+        "bronze_run_ids": [
+          "gh-44895514041-1"
+        ],
+        "parquet_bytes": 482542
+      },
+      "decoded": {
+        "control": 1440,
+        "sx": 3034
+      },
+      "retained_versions": {
+        "sx": 3034
+      }
+    },
+    "vehicles": {
+      "2026-11-20": {
+        "missing_hours": [],
+        "rows": 2110127,
+        "bronze_status": {
+          "ok": 2110127
+        },
+        "bronze_run_ids": [
+          "gh-44895514041-1"
+        ],
+        "parquet_bytes": 3309267950
+      },
+      "decoded": {
+        "vehicle": 41423383
+      },
+      "retained_versions": {
+        "vehicle": 41423383
+      }
+    }
+  },
+  "tables": {
+    "quay": {
+      "rows": 101913,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 2128600,
+      "partition": "operating_date=2026-11-20"
+    },
+    "stop_place": {
+      "rows": 58060,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1327606,
+      "partition": "operating_date=2026-11-20"
+    },
+    "line": {
+      "rows": 4751,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 97436,
+      "partition": "operating_date=2026-11-20"
+    },
+    "operator": {
+      "rows": 271,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 6579,
+      "partition": "operating_date=2026-11-20"
+    },
+    "dated_journey": {
+      "rows": 22695,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 797294,
+      "partition": "operating_date=2026-11-20"
+    },
+    "journey": {
+      "rows": 78505,
+      "flagged_rows": 441,
+      "issues": {
+        "unknown_line": 140,
+        "operating_date_derived": 301
+      },
+      "parquet_bytes": 9032410,
+      "partition": "operating_date=2026-11-20"
+    },
+    "stop_call": {
+      "rows": 1879676,
+      "flagged_rows": 11442,
+      "issues": {
+        "missing_quay_mapping": 2095,
+        "implausible_departure_delay": 36,
+        "missing_quay": 2095,
+        "unknown_line": 2187,
+        "operating_date_derived": 2250,
+        "departure_before_arrival": 214,
+        "unknown_quay": 4631,
+        "implausible_arrival_delay": 59
+      },
+      "parquet_bytes": 161945249,
+      "partition": "operating_date=2026-11-20"
+    },
+    "call_prediction": {
+      "rows": 32877770,
+      "flagged_rows": 20995,
+      "issues": {
+        "operating_date_derived": 20995
+      },
+      "parquet_bytes": 949125956,
+      "partition": "operating_date=2026-11-20"
+    },
+    "vehicle_position": {
+      "rows": 41126054,
+      "flagged_rows": 3402459,
+      "issues": {
+        "missing_operating_date": 92339,
+        "unknown_line": 192180,
+        "invalid_bearing": 3030103,
+        "unknown_quay": 139577,
+        "invalid_progress": 47106,
+        "missing_journey_id": 6
+      },
+      "parquet_bytes": 4323715814,
+      "partition": "observation_date=2026-11-20"
+    },
+    "sx_situation": {
+      "rows": 2696,
+      "flagged_rows": 2,
+      "issues": {
+        "invalid_validity_start": 2
+      },
+      "parquet_bytes": 343494,
+      "partition": "observation_date=2026-11-20"
+    },
+    "quarantine": {
+      "rows": 0,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1580,
+      "partition": "operating_date=2026-11-20"
+    }
+  },
+  "lead_minutes": [
+    1,
+    5,
+    10,
+    20,
+    30
+  ],
+  "references": {
+    "netex": {
+      "snapshot_date": "2026-11-20",
+      "file": "/data/dat535/landing/netex/date=2026-11-20/rb_norway-aggregated-netex.zip",
+      "bytes": 317101654,
+      "sha256": "266aa18f95b19d498b096913b67dc6656425c2f4271e4952859df5ff54b59d6a",
+      "available_at": "2026-11-20T04:15:23.764Z"
+    },
+    "nsr": {
+      "snapshot_date": "2026-11-20",
+      "file": "/data/dat535/landing/nsr/date=2026-11-20/Current_latest.zip",
+      "bytes": 37890314,
+      "sha256": "c40f92e43f065f27a4487663c9c82815912f59b88ed5708953d5efa2d2ebfa01",
+      "available_at": "2026-11-20T04:15:25.188Z"
+    }
+  },
+  "call_coverage": {
+    "realtime_only": 10836,
+    "no_realtime": 58721,
+    "matched": 1810119
+  },
+  "call_reconciliation": {
+    "input_versions": 141542829,
+    "planned_calls": 1868840,
+    "reported_calls": 1820955,
+    "duplicate_versions_removed": 139721874
+  },
+  "actual_equals_aimed_by_operator": [
+    {
+      "operator_id": "AVI:Operator:DY",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:811",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:312",
+      "actual_departures": 1357,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:257",
+      "actual_departures": 2154,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:519",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:W-H",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "VKT:Operator:76",
+      "actual_departures": 30,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:99",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:c22edc6e-7f61-5fa5-b48a-c7c117ab5cf7",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AVI:Operator:WF",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:41",
+      "actual_departures": 10464,
+      "actual_equals_aimed": 25
+    },
+    {
+      "operator_id": "INN:Operator:56",
+      "actual_departures": 1443,
+      "actual_equals_aimed": 4
+    },
+    {
+      "operator_id": "KOL:Operator:314",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:316",
+      "actual_departures": 113,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATU:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AVI:Operator:LT",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:290",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:304",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:170",
+      "actual_departures": 52198,
+      "actual_equals_aimed": 32
+    },
+    {
+      "operator_id": "INN:Operator:553",
+      "actual_departures": 11440,
+      "actual_equals_aimed": 21
+    },
+    {
+      "operator_id": "INN:Operator:52",
+      "actual_departures": 827,
+      "actual_equals_aimed": 2
+    },
+    {
+      "operator_id": "KOL:Operator:309",
+      "actual_departures": 96597,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:69",
+      "actual_departures": 19,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:70",
+      "actual_departures": 94,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "SJV:Operator:505",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "VKT:Operator:75",
+      "actual_departures": 69899,
+      "actual_equals_aimed": 974
+    },
+    {
+      "operator_id": "BRA:Operator:71",
+      "actual_departures": 78,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:53",
+      "actual_departures": 1179,
+      "actual_equals_aimed": 5
+    },
+    {
+      "operator_id": "FIN:Operator:325",
+      "actual_departures": 32,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TTS:Operator:1",
+      "actual_departures": 108,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "BRA:Operator:30",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "HOG:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:237",
+      "actual_departures": 12223,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:231",
+      "actual_departures": 19345,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FLT:Operator:507",
+      "actual_departures": 1265,
+      "actual_equals_aimed": 3
+    },
+    {
+      "operator_id": "NOR:Operator:283",
+      "actual_departures": 4696,
+      "actual_equals_aimed": 14
+    },
+    {
+      "operator_id": "NOR:Operator:180",
+      "actual_departures": 15773,
+      "actual_equals_aimed": 20
+    },
+    {
+      "operator_id": "SKY:Operator:LUSTRA",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:288",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:331",
+      "actual_departures": 14,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "GOA:Operator:GOA",
+      "actual_departures": 2063,
+      "actual_equals_aimed": 22
+    },
+    {
+      "operator_id": "MOR:Operator:251",
+      "actual_departures": 308,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "MOR:Operator:259",
+      "actual_departures": 247,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "NWY:Operator:1e0e0ab5-8a55-5c6f-a117-669fd4b153b1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:6704d603-0c27-5ddc-836b-f4858cb51dbc",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:152",
+      "actual_departures": 17074,
+      "actual_equals_aimed": 210
+    },
+    {
+      "operator_id": "RUT:Operator:120",
+      "actual_departures": 68019,
+      "actual_equals_aimed": 141
+    },
+    {
+      "operator_id": "SNT:Operator:9b6c7831-525d-51cd-a0a4-a0dc6e5b5da0",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "VYG:Operator:FLB",
+      "actual_departures": 12,
+      "actual_equals_aimed": 2
+    },
+    {
+      "operator_id": "OST:Operator:923",
+      "actual_departures": 8581,
+      "actual_equals_aimed": 6
+    },
+    {
+      "operator_id": "SKY:Operator:TID_30",
+      "actual_departures": 2609,
+      "actual_equals_aimed": 4
+    },
+    {
+      "operator_id": "TRO:Operator:941",
+      "actual_departures": 94,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "SKY:Operator:SeljaS",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:392",
+      "actual_departures": 32,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:403",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:900",
+      "actual_departures": 94,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FJL:Operator:FJL",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:147",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:210",
+      "actual_departures": 5181,
+      "actual_equals_aimed": 1584
+    },
+    {
+      "operator_id": "TRO:Operator:970",
+      "actual_departures": 7587,
+      "actual_equals_aimed": 18
+    },
+    {
+      "operator_id": "AKT:Operator:923",
+      "actual_departures": 86165,
+      "actual_equals_aimed": 131
+    },
+    {
+      "operator_id": "AKT:Operator:301",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:404",
+      "actual_departures": 38,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "BSR:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:329",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:44",
+      "actual_departures": 30062,
+      "actual_equals_aimed": 32
+    },
+    {
+      "operator_id": "KOL:Operator:310",
+      "actual_departures": 17109,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:301",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:4",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:40",
+      "actual_departures": 66,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOG:Operator:cDTs9scrGFo",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:F1P",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:RODNE",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:180",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:130",
+      "actual_departures": 3480,
+      "actual_equals_aimed": 4
+    },
+    {
+      "operator_id": "AKT:Operator:308",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "BRA:Operator:61",
+      "actual_departures": 66877,
+      "actual_equals_aimed": 103
+    },
+    {
+      "operator_id": "MOR:Operator:236",
+      "actual_departures": 8151,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:254",
+      "actual_departures": 977,
+      "actual_equals_aimed": 17
+    },
+    {
+      "operator_id": "MOR:Operator:239",
+      "actual_departures": 4783,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "SKY:Operator:Fjord1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TRO:Operator:199",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "VYG:Operator:TAG",
+      "actual_departures": 8,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TRO:Operator:195",
+      "actual_departures": 13,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": null,
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:270",
+      "actual_departures": 56,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:255",
+      "actual_departures": 50,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:331",
+      "actual_departures": 54,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:305",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:606d87ac-554e-5758-9623-7566f730bbd7",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:296",
+      "actual_departures": 16,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:G_T",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:303",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:315",
+      "actual_departures": 22468,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:303",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:302",
+      "actual_departures": 7048,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:238",
+      "actual_departures": 8585,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:8d96ac4c-bc11-5051-9367-178c9168c12d",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:Boreal",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:VidarH",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:TID_40",
+      "actual_departures": 29668,
+      "actual_equals_aimed": 90
+    },
+    {
+      "operator_id": "VYB:Operator:Vybus4you",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "BRA:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:307",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:310",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:60",
+      "actual_departures": 1824,
+      "actual_equals_aimed": 2
+    },
+    {
+      "operator_id": "KOL:Operator:306",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:290",
+      "actual_departures": 20,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "NWY:Operator:fdede6a0-ed0a-54a1-b1f3-2883e70526bf",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TRO:Operator:961",
+      "actual_departures": 14949,
+      "actual_equals_aimed": 30
+    },
+    {
+      "operator_id": "TRO:Operator:965",
+      "actual_departures": 12635,
+      "actual_equals_aimed": 11
+    },
+    {
+      "operator_id": "MOR:Operator:252",
+      "actual_departures": 58,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:188",
+      "actual_departures": 1418,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "NWY:Operator:0ab3016e-7b77-5995-810f-139351384125",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:953",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:TID_39",
+      "actual_departures": 32493,
+      "actual_equals_aimed": 103
+    },
+    {
+      "operator_id": "TEL:Operator:90",
+      "actual_departures": 102,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:312",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:21",
+      "actual_departures": 250,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "TRO:Operator:953",
+      "actual_departures": 31,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:298",
+      "actual_departures": 15,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:391",
+      "actual_departures": 13589,
+      "actual_equals_aimed": 28
+    },
+    {
+      "operator_id": "AKT:Operator:302",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:306",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:98",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:297",
+      "actual_departures": 1342,
+      "actual_equals_aimed": 2
+    },
+    {
+      "operator_id": "RUT:Operator:130",
+      "actual_departures": 107920,
+      "actual_equals_aimed": 145
+    },
+    {
+      "operator_id": "SKY:Operator:TID_93",
+      "actual_departures": 6606,
+      "actual_equals_aimed": 22
+    },
+    {
+      "operator_id": "TRO:Operator:942",
+      "actual_departures": 97,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TRO:Operator:901",
+      "actual_departures": 96,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "VYG:Operator:VYT",
+      "actual_departures": 1411,
+      "actual_equals_aimed": 5
+    },
+    {
+      "operator_id": "AKT:Operator:313",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:163",
+      "actual_departures": 1725,
+      "actual_equals_aimed": 4
+    },
+    {
+      "operator_id": "FIN:Operator:360",
+      "actual_departures": 4701,
+      "actual_equals_aimed": 6
+    },
+    {
+      "operator_id": "KOL:Operator:580",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:240",
+      "actual_departures": 148,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:182",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TEL:Operator:82",
+      "actual_departures": 13830,
+      "actual_equals_aimed": 16
+    },
+    {
+      "operator_id": "TRO:Operator:915",
+      "actual_departures": 110,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "ATB:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:177",
+      "actual_departures": 27,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:350",
+      "actual_departures": 5312,
+      "actual_equals_aimed": 4
+    },
+    {
+      "operator_id": "KOL:Operator:527",
+      "actual_departures": 112,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:52",
+      "actual_departures": 42,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SJN:Operator:SJN",
+      "actual_departures": 1443,
+      "actual_equals_aimed": 57
+    },
+    {
+      "operator_id": "FIN:Operator:402",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:327",
+      "actual_departures": 2798,
+      "actual_equals_aimed": 7
+    },
+    {
+      "operator_id": "FIN:Operator:328",
+      "actual_departures": 58,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:999",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:47",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:596",
+      "actual_departures": 140,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:185",
+      "actual_departures": 6071,
+      "actual_equals_aimed": 4
+    },
+    {
+      "operator_id": "NOR:Operator:181",
+      "actual_departures": 3013,
+      "actual_equals_aimed": 13
+    },
+    {
+      "operator_id": "NWY:Operator:bdd81ee2-ef92-5408-b80a-d5615cb1085f",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:FJORD1",
+      "actual_departures": 873,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TRO:Operator:960",
+      "actual_departures": 47173,
+      "actual_equals_aimed": 36
+    },
+    {
+      "operator_id": "NOR:Operator:187",
+      "actual_departures": 11,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:65",
+      "actual_departures": 2786,
+      "actual_equals_aimed": 5
+    },
+    {
+      "operator_id": "NBU:Operator:002",
+      "actual_departures": 4311,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SAM:Operator:9013012005300000",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:TORGH",
+      "actual_departures": 107,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:291",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AKT:Operator:309",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:269",
+      "actual_departures": 133,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:258",
+      "actual_departures": 6909,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NYC:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:G_S",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:4",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "UNI:Operator:OSLExp",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "UNI:Operator:TorpEx",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "KOL:Operator:317",
+      "actual_departures": 26,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:551",
+      "actual_departures": 3230,
+      "actual_equals_aimed": 3
+    },
+    {
+      "operator_id": "INN:Operator:59",
+      "actual_departures": 1574,
+      "actual_equals_aimed": 3
+    },
+    {
+      "operator_id": "NOR:Operator:294",
+      "actual_departures": 48,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:286",
+      "actual_departures": 39,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:72785844-4d37-5bf6-bd00-3b51ab66bbb0",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:1fdb3558-2e71-5d3b-bd7f-bb82cb891ee6",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:254",
+      "actual_departures": 42204,
+      "actual_equals_aimed": 62
+    },
+    {
+      "operator_id": "SKY:Operator:3",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:NORLED",
+      "actual_departures": 592,
+      "actual_equals_aimed": 2
+    },
+    {
+      "operator_id": "SKY:Operator:MEB",
+      "actual_departures": 1278,
+      "actual_equals_aimed": 7
+    },
+    {
+      "operator_id": "VYX:Operator:VyBuss",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:284",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:552",
+      "actual_departures": 8523,
+      "actual_equals_aimed": 7
+    },
+    {
+      "operator_id": "NOR:Operator:183",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:282",
+      "actual_departures": 15,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:TID_44",
+      "actual_departures": 48837,
+      "actual_equals_aimed": 138
+    },
+    {
+      "operator_id": "NOR:Operator:281",
+      "actual_departures": 22,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:292",
+      "actual_departures": 3,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:97",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:d46a89a4-1075-5d22-aed5-41f89debc1f3",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:524",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "TEL:Operator:81",
+      "actual_departures": 29573,
+      "actual_equals_aimed": 29
+    },
+    {
+      "operator_id": "NWY:Operator:723df76e-a4ed-5c3d-afee-c6d9a6754dec",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:156",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:160",
+      "actual_departures": 90809,
+      "actual_equals_aimed": 138
+    },
+    {
+      "operator_id": "SKY:Operator:KEO_45",
+      "actual_departures": 45422,
+      "actual_equals_aimed": 174
+    },
+    {
+      "operator_id": "SKY:Operator:TID_38",
+      "actual_departures": 10533,
+      "actual_equals_aimed": 37
+    },
+    {
+      "operator_id": "UNI:Operator:VerExp",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:9d993863-c7bd-55fb-8f1c-80f8f0b9d412",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SNT:Operator:0ae50bcf-7b90-5205-89de-0eb4c1dbaa9b",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FIN:Operator:326",
+      "actual_departures": 26,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:8",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:37",
+      "actual_departures": 92,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:220",
+      "actual_departures": 31728,
+      "actual_equals_aimed": 36
+    },
+    {
+      "operator_id": "RUT:Operator:414",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:FIR_10",
+      "actual_departures": 5069,
+      "actual_equals_aimed": 8
+    },
+    {
+      "operator_id": "SKY:Operator:N_BUSN",
+      "actual_departures": 14665,
+      "actual_equals_aimed": 40
+    },
+    {
+      "operator_id": "TEL:Operator:89",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AVI:Operator:SK",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "FLI:Operator:FlixBus",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:VY237",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:287",
+      "actual_departures": 43,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:291",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:FIR_11",
+      "actual_departures": 14728,
+      "actual_equals_aimed": 20
+    },
+    {
+      "operator_id": "SKY:Operator:TID_31",
+      "actual_departures": 22695,
+      "actual_equals_aimed": 56
+    },
+    {
+      "operator_id": "TRO:Operator:194",
+      "actual_departures": 63,
+      "actual_equals_aimed": 1
+    },
+    {
+      "operator_id": "ATB:Operator:267",
+      "actual_departures": 40267,
+      "actual_equals_aimed": 43
+    },
+    {
+      "operator_id": "ATB:Operator:178",
+      "actual_departures": 39,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:190",
+      "actual_departures": 122,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:234",
+      "actual_departures": 11356,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NWY:Operator:dfac2cb5-97db-5967-ad5d-0dafbd388861",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:155",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "VYG:Operator:VY",
+      "actual_departures": 12156,
+      "actual_equals_aimed": 26
+    },
+    {
+      "operator_id": "AKT:Operator:402",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "ATB:Operator:171",
+      "actual_departures": 44486,
+      "actual_equals_aimed": 41
+    },
+    {
+      "operator_id": "ATB:Operator:264",
+      "actual_departures": 86,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "AVI:Operator:DX",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "INN:Operator:57",
+      "actual_departures": 18232,
+      "actual_equals_aimed": 32
+    },
+    {
+      "operator_id": "KOL:Operator:307",
+      "actual_departures": 180,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:38",
+      "actual_departures": 110,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "OST:Operator:153",
+      "actual_departures": 4,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "RUT:Operator:140",
+      "actual_departures": 142344,
+      "actual_equals_aimed": 141
+    },
+    {
+      "operator_id": "RUT:Operator:350",
+      "actual_departures": 100,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:OF",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "NOR:Operator:289",
+      "actual_departures": 26,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "MOR:Operator:No240",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:1",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    },
+    {
+      "operator_id": "SKY:Operator:2",
+      "actual_departures": 0,
+      "actual_equals_aimed": 0
+    }
+  ],
+  "contract_errors": {},
+  "finished_at": "2026-11-22T11:59:43.968Z",
+  "elapsed_s": 3756.321
+}

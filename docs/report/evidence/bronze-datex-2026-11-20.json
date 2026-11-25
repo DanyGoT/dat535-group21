@@ -1,0 +1,143 @@
+{
+ "run_id": "gh-44895514041-1",
+ "source": "datex",
+ "env": "prod",
+ "date": "2026-11-20",
+ "landing": "/data/dat535/landing",
+ "started_at": "2026-11-21T10:54:03.259Z",
+ "feeds": {
+  "situation": {
+   "files": 24,
+   "missing_hours": [],
+   "open_hours": [],
+   "rows": 286,
+   "bad_rows": {},
+   "polls": {
+    "ok": 286,
+    "not_modified": 0,
+    "fetch_error": 0
+   },
+   "snapshots": 286,
+   "first_ok_at": "2026-11-20T00:03:58.056Z",
+   "last_ok_at": "2026-11-20T23:59:24.842Z",
+   "max_gap_s": 307.0,
+   "parquet_files": 5,
+   "parquet_bytes": 437660713
+  },
+  "traveltime": {
+   "files": 24,
+   "missing_hours": [],
+   "open_hours": [],
+   "rows": 575,
+   "bad_rows": {},
+   "polls": {
+    "ok": 575,
+    "not_modified": 0,
+    "fetch_error": 0
+   },
+   "snapshots": 288,
+   "first_ok_at": "2026-11-20T00:01:18.937Z",
+   "last_ok_at": "2026-11-20T23:58:32.522Z",
+   "max_gap_s": 151.5,
+   "parquet_files": 1,
+   "parquet_bytes": 1162345
+  },
+  "weather": {
+   "files": 24,
+   "missing_hours": [],
+   "open_hours": [],
+   "rows": 288,
+   "bad_rows": {},
+   "polls": {
+    "ok": 288,
+    "not_modified": 0,
+    "fetch_error": 0
+   },
+   "snapshots": 145,
+   "first_ok_at": "2026-11-20T00:01:31.105Z",
+   "last_ok_at": "2026-11-20T23:58:35.963Z",
+   "max_gap_s": 300.7,
+   "parquet_files": 1,
+   "parquet_bytes": 12209567
+  },
+  "traveltime-locations": {
+   "files": 4,
+   "missing_hours": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23"
+   ],
+   "open_hours": [],
+   "rows": 4,
+   "bad_rows": {},
+   "polls": {
+    "ok": 4,
+    "not_modified": 0,
+    "fetch_error": 0
+   },
+   "snapshots": 4,
+   "first_ok_at": "2026-11-20T00:13:57.069Z",
+   "last_ok_at": "2026-11-20T18:13:58.206Z",
+   "max_gap_s": 21600.4,
+   "parquet_files": 1,
+   "parquet_bytes": 348198
+  },
+  "weather-sites": {
+   "files": 4,
+   "missing_hours": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23"
+   ],
+   "open_hours": [],
+   "rows": 4,
+   "bad_rows": {},
+   "polls": {
+    "ok": 4,
+    "not_modified": 0,
+    "fetch_error": 0
+   },
+   "snapshots": 3,
+   "first_ok_at": "2026-11-20T00:14:09.109Z",
+   "last_ok_at": "2026-11-20T18:14:11.235Z",
+   "max_gap_s": 21600.9,
+   "parquet_files": 1,
+   "parquet_bytes": 141547
+  }
+ },
+ "finished_at": "2026-11-21T10:55:29.643Z"
+}

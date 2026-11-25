@@ -252,9 +252,9 @@ def render_quality_report(records, top_operators=15):
             "## Entur Silver funnel",
             "",
             "| Operating day | Schema | Status | Bronze ET msgs (3d) | Decoded call ver | "
-            "Retained call ver | Final `stop_call` | Superseded / dup removed | Elapsed |",
+            "Retained call ver | Final `stop_call` | Superseded / dup removed | Quarantined | Elapsed |",
             "| ------------- | -----: | ------ | ------------------: | ---------------: | "
-            "----------------: | ----------------: | -----------------------: | ------: |",
+            "----------------: | ----------------: | -----------------------: | ----------: | ------: |",
         ]
         for r in entur:
             decoded_calls = r.get("inputs", {}).get("et", {}).get("decoded", {}).get("call")
@@ -262,11 +262,12 @@ def render_quality_report(records, top_operators=15):
             retained = rec.get("input_versions")
             stop_calls = r.get("tables", {}).get("stop_call", {}).get("rows")
             removed = rec.get("duplicate_versions_removed")
+            q_rows = r.get("tables", {}).get("quarantine", {}).get("rows", 0)
             lines.append(
                 f"| {record_date(r)} | {r.get('schema_version', '?')} | "
                 f"{status_label(r, 'silver_entur')} | {fmt_int(et_bronze_messages(r))} | "
                 f"{fmt_int(decoded_calls)} | {fmt_int(retained)} | {fmt_int(stop_calls)} | "
-                f"{fmt_int(removed)} | {fmt_duration(elapsed_seconds(r))} |"
+                f"{fmt_int(removed)} | {fmt_int(q_rows)} | {fmt_duration(elapsed_seconds(r))} |"
             )
 
         lines += [

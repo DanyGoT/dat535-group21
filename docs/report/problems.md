@@ -12,6 +12,7 @@ Entries:
 | ---- | -------- |
 | 2026-11-20 | [Data volume at 96 %](#2026-11-20--the-data-volume-reached-96--with-two-days-left) |
 | 2026-11-16 | [Dashboard map took one click](#2026-11-16--the-dashboard-map-took-only-one-click) |
+| 2026-11-12 | [DATEX weather added `depositionDepth`](#2026-11-12--statens-vegvesen-added-depositiondepth-to-datex-weather) |
 | 2026-11-11 | [Dashboard builder memory](#2026-11-11--the-dashboard-builder-needed-more-memory-than-the-spark-job) |
 | 2026-11-11 | [Travel-time periods off by 10 ms](#2026-11-11--npra-travel-time-periods-start-10-ms-after-the-boundary) |
 | 2026-11-09 | [Empty DATEX delivery](#2026-11-09--failing-loudly-on-an-empty-snapshot-would-have-blocked-a-day-for-good) |
@@ -81,6 +82,24 @@ Entry template:
   canvas renderer only hands clicks to its own layers, and the ring is not interactive.
 - **Fix:** [dashboard/app.js](../../dashboard/app.js) draws the rings on the markers' renderer.
 - **Lesson:** With canvas rendering in Leaflet, every layer that shares a pane needs the same renderer.
+
+## 2026-11-12 — Statens vegvesen added `depositionDepth` to DATEX weather
+
+- **Area:** Silver (DATEX)
+- **Symptom:** Flagged rows in `road_weather` jumped from ~800–1,050/day (Nov 5–11) to 34,937 on
+  2026-11-12 and ~55,000/day from 2026-11-13 onward.
+- **Evidence:** The multi-day [Silver quality report](evidence/silver-quality-2026-11.md) and
+  [`silver-datex-2026-11-20.json`](evidence/silver-datex-2026-11-20.json) show 634,073 rows
+  carrying `unknown_weather_quantity_depositionDepth` across Nov 12–23 (54,821 on Nov 20 alone).
+- **Cause:** Upstream schema evolution: NPRA began publishing `depositionDepth` elements in
+  `GetMeasuredWeatherData` around the first November snowfall.
+- **Behaviour:** [`silver_datex_parse.py`](../../pipeline/silver_datex_parse.py) explicitly flags
+  unrecognised weather quantities (`unknown_weather_quantity_<name>`) instead of crashing or
+  silently dropping them. All 19 DATEX Silver days still published `complete, ready=true` and
+  Gold's road conditions kept working without interruption.
+- **Lesson:** Surfacing unknown source fields as non-blocking `dq_issue` flags (and summarizing
+  them across days) turns silent upstream schema drift into an immediately visible metric. Mapping
+  `depositionDepth` into its own typed column is a one-line change once its unit is verified.
 
 ## 2026-11-11 — The dashboard builder needed more memory than the Spark job
 

@@ -1,0 +1,168 @@
+{
+  "run_id": "gh-44895514041-1",
+  "source": "datex",
+  "env": "prod",
+  "schema_version": 1,
+  "observation_date": "2026-11-20",
+  "started_at": "2026-11-21T10:55:30.789Z",
+  "status": "complete",
+  "ready": true,
+  "inputs": {
+    "situation": {
+      "missing_hours": [],
+      "rows": 286,
+      "bronze_status": {
+        "ok": 286
+      },
+      "bronze_run_ids": [
+        "gh-44895514041-1"
+      ],
+      "decoded": {
+        "record": 12125,
+        "sighting": 616992
+      }
+    },
+    "traveltime": {
+      "missing_hours": [],
+      "rows": 575,
+      "bronze_status": {
+        "ok": 575
+      },
+      "bronze_run_ids": [
+        "gh-44895514041-1"
+      ],
+      "decoded": {
+        "value": 58176
+      }
+    },
+    "weather": {
+      "missing_hours": [],
+      "rows": 288,
+      "bronze_status": {
+        "ok": 288
+      },
+      "bronze_run_ids": [
+        "gh-44895514041-1"
+      ],
+      "decoded": {
+        "value": 69020
+      }
+    },
+    "traveltime-locations": {
+      "missing_hours": [],
+      "rows": 4,
+      "bronze_status": {
+        "ok": 4
+      },
+      "bronze_run_ids": [
+        "gh-44895514041-1"
+      ],
+      "decoded": {
+        "section": 808
+      }
+    },
+    "weather-sites": {
+      "missing_hours": [],
+      "rows": 4,
+      "bronze_status": {
+        "ok": 4
+      },
+      "bronze_run_ids": [
+        "gh-44895514041-1"
+      ],
+      "decoded": {
+        "site": 1428
+      }
+    }
+  },
+  "tables": {
+    "road_situation": {
+      "rows": 2931,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 3628266,
+      "partition": "observation_date=2026-11-20"
+    },
+    "road_situation_interval": {
+      "rows": 2346,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 79851,
+      "partition": "observation_date=2026-11-20"
+    },
+    "road_weather": {
+      "rows": 65935,
+      "flagged_rows": 55402,
+      "issues": {
+        "unknown_weather_quantity_depositionDepth": 54821,
+        "suspect_humidity": 376,
+        "stale_measurement": 22,
+        "suspect_dew_point": 240,
+        "suspect_precipitation": 577,
+        "suspect_air_temperature": 103,
+        "suspect_wind": 6
+      },
+      "parquet_bytes": 970951,
+      "partition": "observation_date=2026-11-20"
+    },
+    "weather_site": {
+      "rows": 476,
+      "flagged_rows": 17,
+      "issues": {
+        "no_current_measurement": 17
+      },
+      "parquet_bytes": 23516,
+      "partition": "observation_date=2026-11-20"
+    },
+    "road_travel_time": {
+      "rows": 58176,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 808033,
+      "partition": "observation_date=2026-11-20"
+    },
+    "road_section": {
+      "rows": 202,
+      "flagged_rows": 55,
+      "issues": {
+        "never_measured": 55
+      },
+      "parquet_bytes": 397158,
+      "partition": "observation_date=2026-11-20"
+    },
+    "datex_quarantine": {
+      "rows": 0,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 1291,
+      "partition": "observation_date=2026-11-20"
+    },
+    "quay_road_situation": {
+      "rows": 30235,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 295888,
+      "partition": "observation_date=2026-11-20"
+    },
+    "quay_weather_site": {
+      "rows": 101915,
+      "flagged_rows": 4544,
+      "issues": {
+        "nearest_site_beyond_30km": 4544
+      },
+      "parquet_bytes": 732602,
+      "partition": "observation_date=2026-11-20"
+    },
+    "quay_road_section": {
+      "rows": 12879,
+      "flagged_rows": 0,
+      "issues": {},
+      "parquet_bytes": 78682,
+      "partition": "observation_date=2026-11-20"
+    }
+  },
+  "quay_snapshot_date": "2026-11-18",
+  "contract_errors": {},
+  "finished_at": "2026-11-21T10:57:35.851Z",
+  "elapsed_s": 125.061
+}

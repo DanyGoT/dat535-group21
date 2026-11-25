@@ -288,8 +288,15 @@ Local execution additionally needs Java 8/17, archived NeTEx/NSR and Bronze inpu
 ## Evidence and measurements
 
 The [evidence index](../report/evidence/README.md) links runs and experiments.
-The complete-day 2026-10-29 record was produced on 2026-11-05 with schema 1, before the current
-delay flags and decoder. It does not validate today's exact logic.
+The [20-day Silver quality report](../report/evidence/silver-quality-2026-11.md) (generated from
+prod Actions artifacts) and matched `2026-11-20` records
+([`silver-2026-11-20.json`](../report/evidence/silver-2026-11-20.json),
+[`silver-datex-2026-11-20.json`](../report/evidence/silver-datex-2026-11-20.json)) validate the
+current schema-2 Entur and schema-1 DATEX logic: quarantine dropped from 4.04 M (`2026-10-26`,
+schema 1) to 0–3 rows/day across 19 schema-2 days, weekday reporting coverage stayed at
+96.9–97.6 %, and Silver's schema-drift flag caught NPRA's new `depositionDepth` weather element
+starting on `2026-11-12`. The archived `2026-10-29` schema-1 record remains as historical
+baseline evidence.
 
 The [decoder comparison](../report/problems.md#2026-11-06--dropping-repeated-et-states-changed-650-predictions)
 used 2026-10-29. No calls, journeys or predictions were missing. Vehicles and SX were identical.
