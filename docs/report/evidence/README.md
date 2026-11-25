@@ -7,9 +7,21 @@ Up: [system overview](../overview.md) · Related: [problem log](../problems.md),
 [Silver](../../pipeline/silver.md#evidence-and-measurements),
 [Gold](../../pipeline/gold-example.md#validated)
 
-Except for the 2026-11-05 to 11-09 Gold runs, these are historical artifacts, not validation of
-the current code revision. The October Silver/Gold runs use schema 1 and predate today's
-implausible-delay exclusion.
+The November 2026 scheduled prod records and Silver quality report reflect the current schema-2
+Entur Silver and schema-1 DATEX Silver code. Earlier October records are kept as historical
+before/after evidence (schema 1, prior to operating-date derivation and implausible-delay flags).
+
+## Scheduled prod runs and Silver quality, 2026-11
+
+Extracted from scheduled GitHub Actions prod artifacts (`prod-bronze-runs-143`,
+`prod-silver-runs-143`, workflow run `45402302399`).
+
+| File | Shows |
+| ---- | ----- |
+| [`silver-quality-2026-11.md`](silver-quality-2026-11.md) | 20-day Entur Silver funnel, plan coverage, quarantine drop (4.04M → 0–3/day), `dq_issue` totals, top `actual == aimed` operators, and 19-day DATEX quality (including `depositionDepth` schema drift) |
+| [`bronze-2026-11-20.json`](bronze-2026-11-20.json), [`bronze-datex-2026-11-20.json`](bronze-datex-2026-11-20.json) | Complete weekday Bronze runs (`gh-44895514041-1`): 4.93M ET, 3.2k SX, 2.11M vehicles, 0 bad rows, all 5 DATEX feeds |
+| [`silver-2026-11-20.json`](silver-2026-11-20.json) | Complete schema-2 Entur Silver (`gh-45014021086-1`): 1.88M stop calls, 96.86 % reporting share, 0 quarantined, 1h 2m |
+| [`silver-datex-2026-11-20.json`](silver-datex-2026-11-20.json) | Complete schema-1 DATEX Silver (`gh-44895514041-1`): 2,931 situations, 65,935 weather rows, 58,176 travel-time periods, 0 quarantined, 2m 05s |
 
 ## Rush-hour ingest, 2026-11-12 and 15
 

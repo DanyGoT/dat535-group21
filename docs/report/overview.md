@@ -348,6 +348,7 @@ One ferry journey had all 8 calls stamped 9 h early, caught by `implausible_depa
 
 More: [Silver contracts](../pipeline/silver.md#reading-safely),
 [identifiers](../entur/identifiers.md#keys),
+[20-day Silver quality report](evidence/silver-quality-2026-11.md),
 [evidence](evidence/README.md), [Silver code](../../pipeline/silver.py).
 
 ## 4. Silver for DATEX: the road, joined by place and time

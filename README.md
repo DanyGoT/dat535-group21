@@ -73,7 +73,7 @@ in one file, with the code that matters. Every section there links to the detail
 | [`dashboard/`](dashboard/) | The static Gold dashboard and the script that packages it |
 | [`.github/workflows/`](.github/workflows/) | `dat535-dev.yml` tests and runs a one-hour sample. `dat535-prod.yml` deploys and runs the nightly pipeline |
 | [`docs/`](docs/) | Everything in the table above |
-| [`notebooks/`](notebooks/) | Exploration |
+| [`notebooks/`](notebooks/) | [`peek.ipynb`](notebooks/peek.ipynb): read-only landing explorer (kept with outputs cleared) |
 | [`entur-ai-docs/`](entur-ai-docs/) | Entur's generated BigQuery catalog, kept as reference |
 | [`labs/`](labs/) | Course lab material |
 
