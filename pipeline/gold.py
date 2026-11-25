@@ -817,6 +817,71 @@ def write_preview(stage, day, scorecard, rows, record):
 # --- The run ---
 
 
+def gold_spark(output):
+    scratch = Path(output).parent / "spark-scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    return create_spark("DAT535-Gold", settings={
+        "spark.master": "local[3]",
+        "spark.driver.memory": "3g",
+        "spark.sql.shuffle.partitions": "16",
+        "spark.local.dir": str(scratch),
+    })
+
+
+def missing_days(output_dir):
+    """Ready schema-2 Entur Silver days that lack an up-to-date schema-3 Gold publication."""
+    output = Path(output_dir)
+    datex_tables = set(SOURCES["datex"][3])
+    days = []
+    for folder in sorted((output / "silver" / "_runs").glob("operating_date=*")):
+        day_str = folder.name.removeprefix("operating_date=")
+        try:
+            day = Date.fromisoformat(day_str)
+            entur = source_record(output, "entur", day)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        datex = None
+        try:
+            cand = source_record(output, "datex", day, optional=True)
+            if cand is not None and datex_tables <= set(cand.get("tables", {})):
+                datex = cand
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+
+        gold_path = output / "gold" / "_runs" / f"operating_date={day}" / "latest.json"
+        if gold_path.exists():
+            try:
+                g = json.loads(gold_path.read_text())
+                up_to_date = (
+                    g.get("schema_version") == 3
+                    and g.get("status") == "complete"
+                    and g.get("ready") is True
+                    and g.get("silver_run_id") == entur["run_id"]
+                    and g.get("datex_run_id") == (datex["run_id"] if datex is not None else None)
+                )
+                if up_to_date:
+                    continue
+            except (OSError, json.JSONDecodeError):
+                pass
+        days.append(day)
+    return days
+
+
+def run_missing(output_dir, spark=None):
+    """Run Gold for every ready Silver day missing current schema-3 Gold, sharing one Spark session."""
+    days = missing_days(output_dir)
+    if not days:
+        return []
+    owned_spark = spark is None
+    if spark is None:
+        spark = gold_spark(output_dir)
+    try:
+        return [run(output_dir, day, spark=spark) for day in days]
+    finally:
+        if owned_spark:
+            spark.stop()
+
+
 def run(output_dir, day, spark=None, allow_partial=False):
     """Gold for one day: build every table in staging, check, then publish. Returns the record."""
     F = functions()
@@ -854,14 +919,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
     )
     try:
         if spark is None:
-            scratch = output.parent / "spark-scratch"
-            scratch.mkdir(parents=True, exist_ok=True)
-            spark = create_spark("DAT535-Gold", settings={
-                "spark.master": "local[3]",
-                "spark.driver.memory": "3g",
-                "spark.sql.shuffle.partitions": "16",
-                "spark.local.dir": str(scratch),
-            })
+            spark = gold_spark(output)
 
         # 1. Build the Entur tables, plus road conditions when DATEX Silver has all required tables.
         silver = read_silver(spark, output, "entur", day, entur)
@@ -950,6 +1008,11 @@ def main(argv=None):
         default=default_day,
         help="Norwegian operating day, YYYY-MM-DD (default: two days ago)",
     )
+    parser.add_argument(
+        "--all-missing",
+        action="store_true",
+        help="run Gold for every ready schema-2 Silver day missing up-to-date schema-3 Gold",
+    )
     parser.add_argument("--output-dir", type=Path, default=default_output)
     parser.add_argument(
         "--allow-partial",
@@ -958,7 +1021,10 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     try:
-        result = run(args.output_dir, args.date, allow_partial=args.allow_partial)
+        if args.all_missing:
+            result = run_missing(args.output_dir)
+        else:
+            result = run(args.output_dir, args.date, allow_partial=args.allow_partial)
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1

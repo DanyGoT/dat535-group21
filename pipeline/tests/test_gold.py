@@ -339,6 +339,21 @@ class GoldTest(SparkCase):
             self.assertEqual(partial["skipped_tables"], ["departure_conditions"])
             self.assertEqual(set(partial["tables"]), set(G.KEYS) - {"departure_conditions"})
 
+    def test_run_missing_backfills_ready_days_and_skips_up_to_date(self):
+        with tempfile.TemporaryDirectory(prefix="gold-test-missing-") as temp:
+            root = Path(temp)
+            self.write_silver(root, self.frames(), self.roads(), rid="silver-v1")
+            self.assertEqual(G.missing_days(root), [DAY])
+            records = G.run_missing(root, spark=self.spark)
+            self.assertEqual(len(records), 1)
+            self.assertTrue(records[0]["ready"])
+            # Already up to date -> second pass does nothing.
+            self.assertEqual(G.missing_days(root), [])
+            self.assertEqual(G.run_missing(root, spark=self.spark), [])
+            # Replacing Silver with a new run_id marks the day stale again.
+            self.write_silver(root, self.frames(), self.roads(), rid="silver-v2")
+            self.assertEqual(G.missing_days(root), [DAY])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
