@@ -609,7 +609,7 @@ GitHub starts the scheduled run hours late: at 09:20–10:50 UTC around 2026-11-
 10:40–13:20 UTC from 2026-11-19 to 26.
 Both workflows upload run-record artifacts and render a concise per-layer Markdown table to the
 Actions step summary via [`pipeline/summary.py`](../../pipeline/summary.py). If DATEX Silver is
-missing for an operating day, Gold still publishes the five Entur tables and records
+missing for an operating day, Gold still publishes the six Entur tables and records
 `departure_conditions` as skipped in `latest.json`. The dashboard builds on demand from ready
 prod Gold days (`dashboard/build.py --all-ready`).
 Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
