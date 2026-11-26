@@ -185,10 +185,11 @@ can look up "10 minutes before it leaves" in advance.
 [`dashboard/build.py`](../../dashboard/build.py) reads only Gold Parquet and run markers, checks
 each partition's row count and run ID and reconciles departures and timed runs to the markers. It
 accepts only Gold marker schema 4: days published before `countdown_accuracy` existed must be
-rerun. It does not read `countdown_accuracy`. It writes
-`dashboard/dist/`, a static site that opens from disk or any static host:
+rerun. It writes `dashboard/dist/`, a static site that opens from disk or any static host:
 
-- `data.js` holds hubs with at least 20 timed departures, the condition counts and line labels.
+- `data.js` holds hubs with at least 20 timed departures, the condition counts, line labels and
+  the countdown counts per mode, reference and lead time: left 1+ min after, within a minute of,
+  and 1+ min before the time shown.
 - `segments.js` holds hub pairs with at least 30 timed runs over all lines and days, loaded when
   the *Where delay grows* view opens. Each direction is drawn on its right-hand side of travel,
   coloured by mean change per run; the panel ranks pairs by change per run or in total. A filter
@@ -206,6 +207,10 @@ The road view compares each level with its reference within the same mode and ho
 strata by the level's departures and skipping strata where the reference has fewer than 30.
 Rush hour therefore cannot pass for congestion. Region and line are not controlled.
 
+The countdown view takes each line's mode from `line_scorecard` and shows, per lead time, the
+share of departures that left within a minute of the time shown, and the shares that left a
+minute or more earlier or later.
+
 Shift-click (or "Compare with a nearby stop") puts two hubs side by side. The reader picks the
 arriving line at one, the leaving line at the other, and a time-of-day band. Gold pairs calls
 only within one hub, so the page *estimates* that transfer from `line_stop_delays`: the arriving
@@ -219,7 +224,7 @@ flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --ou
   --all-ready
 ```
 
-Pass `--all-ready` to include every complete, ready schema-3 Gold day, or repeat `--date YYYY-MM-DD`
+Pass `--all-ready` to include every complete, ready schema-4 Gold day, or repeat `--date YYYY-MM-DD`
 for specific days. Days where `departure_conditions` was skipped are included in the stop,
 transfer and segment views and omitted from the road-conditions cube.
 

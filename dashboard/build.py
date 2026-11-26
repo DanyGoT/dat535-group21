@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Package the Gold dashboard: a map of hubs, transfer chances, delay between stops and road conditions.
+"""Package the Gold dashboard: a map of hubs, transfer chances, delay between stops, road conditions
+and countdown accuracy.
 
 Reads only published Gold days with pandas/pyarrow (no Spark, no server, no API calls).
 Counts are summed across days; rates come from the sums, never averaged. Writes a static
@@ -42,11 +43,12 @@ SEGMENT_PLACES = ["from_name", "from_latitude", "from_longitude", "to_name", "to
 CONDITIONS = ["mode", "hour", "precipitation", "road_surface", "road_situation", "traffic"]
 # Gold's delay_counts: minutes -10 (or less) .. +30 (or more).
 DELAYS = [f"delay_{i}" for i in range(41)]
+COUNTDOWN = ["later", "within", "earlier"]
 # Time-of-day bands by first local hour: one line at one stop runs too rarely for single hours.
 BANDS = [["Night", 0], ["Morning peak", 6], ["Daytime", 9], ["Afternoon peak", 15], ["Evening", 18]]
 TABLES = (
     "stop_reliability", "transfer_reliability", "line_stop_delays",
-    "segment_delay", "departure_conditions", "line_scorecard",
+    "segment_delay", "departure_conditions", "countdown_accuracy", "line_scorecard",
 )
 
 
@@ -225,6 +227,20 @@ def segments(root, markers):
             for (_, r), band_sums in zip(pairs.iterrows(), sums)]
 
 
+def countdown(root, markers):
+    """Predictions per mode, reference and lead time: left 1+ min after, within a minute of, and
+    1+ min before the time shown. Gold's error_counts bin floor((shown - actual) / 60), -10..+10."""
+    rows = load(root, markers, "countdown_accuracy", ["line_id", "reference", "lead_minutes", "error_counts"])
+    modes = load(root, markers, "line_scorecard", ["line_id", "mode"]).groupby("line_id")["mode"].last()
+    counts = np.stack(rows.pop("error_counts").to_numpy())
+    rows["mode"] = rows["line_id"].map(modes).fillna("unknown")
+    rows["later"] = counts[:, :9].sum(axis=1)
+    rows["within"] = counts[:, 9:11].sum(axis=1)
+    rows["earlier"] = counts[:, 11:].sum(axis=1)
+    key = ["mode", "reference", "lead_minutes"]
+    return rows.groupby(key, as_index=False)[COUNTDOWN].sum().to_numpy().tolist()
+
+
 def script(path, prefix, value):
     """Write `prefix + JSON + );`: JSONP-style scripts load from file:// and any static host."""
     data = json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str)
@@ -335,6 +351,8 @@ def build(root, days, dist):
         },
         "condition_columns": [*CONDITIONS, *measures],
         "conditions": cube_rows,
+        "countdown_columns": ["mode", "reference", "lead_minutes", *COUNTDOWN],
+        "countdown": countdown(root, markers),
     })
     return len(hubs), pairs, len(drawn)
 
