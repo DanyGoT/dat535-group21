@@ -39,6 +39,15 @@ Run on 2026-11-26 with [`transfer_pairs.py`](transfer_pairs.py) against a copy o
 | ---- | ----- |
 | [`transfer-pairs-2026-11-23.json`](transfer-pairs-2026-11-23.json) | 1.96M arrivals and 1.98M departures: a join on hub alone compares 663M pairs, Gold's 15-minute bucket join 19.9M (33x fewer), of which 11.9M lie within 15 min; Gold keeps 4.47M observed connections |
 
+## The final state of a call, 2026-11-24
+
+Run on 2026-11-26 with [`latest_benchmark.py`](latest_benchmark.py) against a copy of one decoded
+prod ET day, on a laptop with Silver's Spark settings (local[4], 4 GB driver, 32 partitions).
+
+| File | Shows |
+| ---- | ----- |
+| [`latest-benchmark-2026-11-24.json`](latest-benchmark-2026-11-24.json) | Silver's `max_by` against a `row_number` window, three runs each: both keep the same 2.58M of 140M call versions, both plans reduce to 11.6M rows before the shuffle, medians 332 s and 325 s, and both spill about 9 GB to disk while sorting |
+
 ## Rush-hour ingest, 2026-11-12 and 15
 
 Run on 2026-11-20 with [`rush_hour.py`](rush_hour.py) against prod Bronze and Silver, plus the
