@@ -66,6 +66,7 @@ button, input, select { font: inherit; color: inherit; }
   border: 0; background: none; border-radius: 999px; padding: 6px 14px; cursor: pointer; color: var(--ink-2);
 }
 .views button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+@media (max-width: 560px) { .views { display: grid; grid-template-columns: 1fr 1fr; border-radius: 16px; } }
 
 .network {
   flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 0;
