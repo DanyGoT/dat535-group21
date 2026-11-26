@@ -581,7 +581,8 @@ Both workflows use the VM's self-hosted runner.
 | Prod schedule or manual dispatch | Bronze, both Silver jobs and Gold, without deployment tests or approval |
 | Daily cron `0 3 * * *` | Yesterday's Bronze and DATEX Silver; Entur Silver and Gold for two days ago |
 
-On 2026-11-11, recent runs had started at about 09:20–10:50 UTC despite the cron.
+GitHub starts the scheduled run hours late: at 09:20–10:50 UTC around 2026-11-11 and at
+10:40–13:20 UTC from 2026-11-19 to 26.
 Both workflows upload run-record artifacts and render a concise per-layer Markdown table to the
 Actions step summary via [`pipeline/summary.py`](../../pipeline/summary.py). If DATEX Silver is
 missing for an operating day, Gold still publishes the five Entur tables and records
@@ -590,10 +591,17 @@ prod Gold days (`dashboard/build.py --all-ready`).
 Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
 Spark steps and pipeline tests share `flock /data/dat535/.spark.lock`.
 
-For a Bronze-only rerun, dispatch `gh workflow run dat535-prod.yml --ref main -f bronze_date=YYYY-MM-DD`.
-A `silver_date` dispatch also runs preceding Bronze steps, both Silver jobs and Gold for that date.
-Without `bronze_date`, the preceding Bronze steps still process yesterday.
-Ensure Entur's three required Bronze days exist before rerunning Silver.
+A rerun builds only the layers it names. `-f bronze_date=YYYY-MM-DD` reruns Bronze, and
+`-f silver_date=YYYY-MM-DD` reruns both Silver jobs and Gold on the Bronze already there:
+
+```yaml
+# .github/workflows/dat535-prod.yml, job env
+RUN_BRONZE: ${{ github.event_name == 'schedule' || inputs.bronze_date != '' || inputs.silver_date == '' }}
+RUN_SILVER: ${{ github.event_name == 'schedule' || inputs.silver_date != '' || inputs.bronze_date == '' }}
+```
+
+Rewriting Bronze gives it a new run ID, and every Silver day built from it then points at a
+superseded run. Ensure Entur's three required Bronze days exist before rerunning Silver.
 
 The monitor checks collection and disk every 2 minutes, with pushes on overall health changes.
 It does not cover batch failures. Reruns and disk cleanup remain manual.
