@@ -218,12 +218,12 @@ flock -n /data/dat535/.spark.lock \
   pipeline/gold.py --date 2026-11-09 --output-dir /data/dat535/prod
 ```
 
-To backfill Gold for every ready schema-2 Silver day that lacks an up-to-date schema-3 Gold run,
-pass `--all-missing` (or dispatch `gh workflow run dat535-prod.yml --ref main -f gold_backfill=true`,
-which skips Bronze and Silver and reuses one Spark session across all missing days).
+Reruns are manual, one `--date` at a time, like every layer. A `silver_date` dispatch of the prod
+workflow also reruns Gold for that day, after its Silver.
 
-Both Silver markers for the date must exist: Entur under `silver/_runs/operating_date=D/` and
-DATEX under `silver/_runs/datex/observation_date=D/`. Neither run contacts Entur or NPRA.
+The Entur Silver marker for the date must exist under `silver/_runs/operating_date=D/`. The DATEX
+marker under `silver/_runs/datex/observation_date=D/` is optional: without it Gold skips
+`departure_conditions`. Gold never contacts Entur or NPRA.
 
 | Path under the output root | Contents |
 | -------------------------- | -------- |

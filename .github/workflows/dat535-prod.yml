@@ -16,11 +16,6 @@ on:
         description: Norwegian operating day to (re)run Entur Silver for (empty = two days ago; skipped for Bronze-only reruns)
         required: false
         default: ''
-      gold_backfill:
-        description: Run Gold for every ready schema-2 Silver day missing up-to-date schema-3 Gold (skips Bronze and Silver)
-        required: false
-        type: boolean
-        default: false
 
 env:
   DAT535_ENV: prod
@@ -78,7 +73,7 @@ jobs:
 
       - name: Run Bronze
         id: entur_bronze
-        if: ${{ !cancelled() && steps.dirs.outcome == 'success' && github.event.inputs.gold_backfill != 'true' }}
+        if: ${{ !cancelled() && steps.dirs.outcome == 'success' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
@@ -92,7 +87,7 @@ jobs:
       - name: Run Bronze DATEX
         # Its own step, run even if SIRI Bronze failed: one source must not hide the other.
         id: datex_bronze
-        if: ${{ !cancelled() && steps.dirs.outcome == 'success' && github.event.inputs.gold_backfill != 'true' }}
+        if: ${{ !cancelled() && steps.dirs.outcome == 'success' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
@@ -105,7 +100,7 @@ jobs:
 
       - name: Run DATEX Silver
         # A UTC observation day: yesterday, or silver_date on a manual run. Independent of Entur.
-        if: ${{ !cancelled() && github.event.inputs.gold_backfill != 'true' && steps.datex_bronze.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == '') }}
+        if: ${{ !cancelled() && steps.datex_bronze.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == '') }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
@@ -119,7 +114,7 @@ jobs:
         # for Silver's default operating day (two days ago). A manual Bronze-only
         # backfill must not unexpectedly rebuild a different Silver day.
         id: entur_silver
-        if: ${{ !cancelled() && github.event.inputs.gold_backfill != 'true' && steps.entur_bronze.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == '') }}
+        if: ${{ !cancelled() && steps.entur_bronze.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == '') }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
@@ -129,21 +124,16 @@ jobs:
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py ${SILVER_DATE:+--date "$SILVER_DATE"}
 
       - name: Run Gold
-        # Same operating day as Entur Silver (default: two days ago), or --all-missing on a
-        # gold_backfill dispatch. Missing DATEX Silver skips departure_conditions cleanly.
-        if: ${{ !cancelled() && (github.event.inputs.gold_backfill == 'true' || (steps.entur_silver.outcome == 'success' && (github.event_name == 'schedule' || github.event.inputs.silver_date != '' || github.event.inputs.bronze_date == ''))) }}
+        # Same operating day as Entur Silver (default: two days ago). Missing DATEX Silver skips
+        # departure_conditions cleanly.
+        if: ${{ !cancelled() && steps.entur_silver.outcome == 'success' }}
         env:
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           SILVER_DATE: ${{ github.event.inputs.silver_date }}
-          GOLD_BACKFILL: ${{ github.event.inputs.gold_backfill }}
         run: |
           source ~/spark-env/bin/activate
-          if [ "$GOLD_BACKFILL" = "true" ]; then
-            flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/gold.py --all-missing
-          else
-            flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/gold.py ${SILVER_DATE:+--date "$SILVER_DATE"}
-          fi
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/gold.py ${SILVER_DATE:+--date "$SILVER_DATE"}
 
       - name: Upload Gold run records
         if: ${{ !cancelled() }}
