@@ -299,6 +299,9 @@ Local execution additionally needs Java 8/17, archived NeTEx/NSR and Bronze inpu
 ## Evidence and measurements
 
 The [evidence index](../report/evidence/README.md) links runs and experiments.
+A [profile of one full day](../report/evidence/silver-profile-2026-10-27.md) shows where a run
+goes: decoding the new UTC day takes half of it, and `call_prediction` takes a quarter and
+spills 70 GB, from four shuffles of all 140 M call versions in `asof_intervals`.
 The [20-day Silver quality report](../report/evidence/silver-quality-2026-11.md) (generated from
 prod Actions artifacts) and matched `2026-11-20` records
 ([`silver-2026-11-20.json`](../report/evidence/silver-2026-11-20.json),

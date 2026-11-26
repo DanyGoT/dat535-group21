@@ -651,7 +651,7 @@ More: [dev workflow](../../.github/workflows/dat535-dev.yml),
 | Preserve landing and Bronze payloads | Downstream bugs can be fixed by rerunning | Disk capacity |
 | Stop-call grain | Reusable journey-position facts | Separate prediction history |
 | Flag field failures | Quality remains measurable | Consumers must interpret flags |
-| Python XML parsing in Spark tasks | Standard-library parser shared across decoders | Historical estimate of 37 min/UTC day |
+| Python XML parsing in Spark tasks | Standard-library parser shared across decoders | 32 min per UTC day, half of a Silver run ([profile](evidence/silver-profile-2026-10-27.md)) |
 | One Spark job at a time | Fit 7.9 GB RAM | Long runs block other jobs |
 | As-of predictions | Countdown accuracy uses only what was known at each lead time | A second table per call, reference and lead time |
 

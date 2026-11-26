@@ -48,6 +48,15 @@ prod ET day, on a laptop with Silver's Spark settings (local[4], 4 GB driver, 32
 | ---- | ----- |
 | [`latest-benchmark-2026-11-24.json`](latest-benchmark-2026-11-24.json) | Silver's `max_by` against a `row_number` window, three runs each: both keep the same 2.58M of 140M call versions, both plans reduce to 11.6M rows before the shuffle, medians 332 s and 325 s, and both spill about 9 GB to disk while sorting |
 
+## Where a Silver day goes, 2026-10-27
+
+Profiled on 2026-11-26 with [`silver_profile.py`](silver_profile.py), from the Spark status API
+of the rebuild's run for that day.
+
+| File | Shows |
+| ---- | ----- |
+| [`silver-profile-2026-10-27.md`](silver-profile-2026-10-27.md), [record](silver-profile-2026-10-27.json) | 68 min: decoding one UTC day 47 %, `call_prediction` 26 % with 70 GB spilled from four shuffles of 140M versions, references broadcast, no skew, 32 partitions too few only for `call_prediction` |
+
 ## What Silver's ET window misses, 2026-11-24
 
 Run on 2026-11-26 with [`late_data.py`](late_data.py) against the same decoded day.

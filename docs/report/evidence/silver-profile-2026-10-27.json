@@ -1,0 +1,1103 @@
+{
+ "run": "prod Entur Silver for operating day 2026-10-27, rebuild step started 2026-11-26T16:05:45Z (app local-1795709341959, Spark 3.5.0, local[4], 4 GB driver, 32 shuffle partitions)",
+ "captured_by": "docs/report/evidence/silver_profile.py, snapshots every 30 s; last at 2026-11-26T17:17:08Z, the run ended 17:17:42Z",
+ "app_seconds": 4087,
+ "executions": [
+  {
+   "id": 0,
+   "does": "collect at silver.py:524",
+   "status": "COMPLETED",
+   "seconds": 3,
+   "task_seconds": 8,
+   "shuffle_write_bytes": 8643,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 11.2,
+    "stage": 1,
+    "tasks": 64,
+    "median_task_s": 0.1,
+    "max_task_s": 0.8
+   }
+  },
+  {
+   "id": 1,
+   "does": "collect at silver.py:524",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 3,
+   "shuffle_write_bytes": 9169,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.9,
+    "stage": 5,
+    "tasks": 68,
+    "median_task_s": 0.1,
+    "max_task_s": 0.1
+   }
+  },
+  {
+   "id": 2,
+   "does": "collect at silver.py:524",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 3,
+   "shuffle_write_bytes": 9039,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.6,
+    "stage": 9,
+    "tasks": 67,
+    "median_task_s": 0.0,
+    "max_task_s": 0.1
+   }
+  },
+  {
+   "id": 3,
+   "does": "collect at silver.py:524",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 712,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 4,
+   "does": "collect at silver.py:524",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 1436,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.3,
+    "stage": 17,
+    "tasks": 10,
+    "median_task_s": 0.0,
+    "max_task_s": 0.1
+   }
+  },
+  {
+   "id": 5,
+   "does": "_work/plan",
+   "status": "COMPLETED",
+   "seconds": 147,
+   "task_seconds": 499,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 2.7,
+    "stage": 20,
+    "tasks": 16,
+    "median_task_s": 25.2,
+    "max_task_s": 67.8
+   }
+  },
+  {
+   "id": 6,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 184,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 7,
+   "does": "_work/nsr",
+   "status": "COMPLETED",
+   "seconds": 11,
+   "task_seconds": 11,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 8,
+   "does": "quay/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 2,
+   "task_seconds": 6,
+   "shuffle_write_bytes": 8210797,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 9,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 10,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 712921,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 11,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 256,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 12,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 13,
+   "does": "stop_place/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 6074495,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 14,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 15,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 422858,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 16,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 192,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 17,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 18,
+   "does": "line/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 801790,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 19,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 20,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 75083,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 21,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 64,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 22,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 23,
+   "does": "operator/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 40142,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 24,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 25,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 6887,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 26,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 64,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 27,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 28,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 29,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 2136864,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 30,
+   "does": "dated_journey/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 1429891,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 31,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 32,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 706973,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 33,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 64,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 34,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 35,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 36,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 1655267,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 37,
+   "does": "count at NativeMethodAccessorImpl.java:0",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 2,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 38,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 3,
+   "shuffle_write_bytes": 33369701,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 39,
+   "does": "_work/sx-2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 2,
+   "task_seconds": 6,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 40,
+   "does": "collect at silver.py:935",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 577,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 41,
+   "does": "_work/sx-scoped",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 42,
+   "does": "collect at silver.py:944",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 289,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 43,
+   "does": "_work/vehicles-2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 90,
+   "task_seconds": 320,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.5,
+    "stage": 165,
+    "tasks": 10,
+    "median_task_s": 32.8,
+    "max_task_s": 49.0
+   }
+  },
+  {
+   "id": 44,
+   "does": "collect at silver.py:935",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 366,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 45,
+   "does": "_work/vehicles-scoped",
+   "status": "COMPLETED",
+   "seconds": 43,
+   "task_seconds": 132,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {
+    "BroadcastHashJoin": 1
+   },
+   "most_uneven_stage": null
+  },
+  {
+   "id": 46,
+   "does": "collect at silver.py:944",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 366,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 47,
+   "does": "_work/et-2026-10-28",
+   "status": "COMPLETED",
+   "seconds": 1930,
+   "task_seconds": 7553,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.3,
+    "stage": 176,
+    "tasks": 67,
+    "median_task_s": 114.6,
+    "max_task_s": 153.4
+   }
+  },
+  {
+   "id": 48,
+   "does": "collect at silver.py:935",
+   "status": "COMPLETED",
+   "seconds": 7,
+   "task_seconds": 25,
+   "shuffle_write_bytes": 10806,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.3,
+    "stage": 178,
+    "tasks": 50,
+    "median_task_s": 0.5,
+    "max_task_s": 0.6
+   }
+  },
+  {
+   "id": 49,
+   "does": "_work/et-scoped",
+   "status": "COMPLETED",
+   "seconds": 403,
+   "task_seconds": 1552,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {
+    "BroadcastHashJoin": 1
+   },
+   "most_uneven_stage": {
+    "max_over_median": 2.6,
+    "stage": 182,
+    "tasks": 50,
+    "median_task_s": 25.6,
+    "max_task_s": 66.5
+   }
+  },
+  {
+   "id": 50,
+   "does": "collect at silver.py:944",
+   "status": "COMPLETED",
+   "seconds": 2,
+   "task_seconds": 9,
+   "shuffle_write_bytes": 2756,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.5,
+    "stage": 184,
+    "tasks": 19,
+    "median_task_s": 0.5,
+    "max_task_s": 0.7
+   }
+  },
+  {
+   "id": 51,
+   "does": "journey/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 12,
+   "task_seconds": 44,
+   "shuffle_write_bytes": 76792604,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {
+    "SortMergeJoin": 1,
+    "BroadcastHashJoin": 1
+   },
+   "most_uneven_stage": {
+    "max_over_median": 1.6,
+    "stage": 187,
+    "tasks": 19,
+    "median_task_s": 1.9,
+    "max_task_s": 2.9
+   }
+  },
+  {
+   "id": 52,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 53,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 1630607,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 54,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 276,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 55,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 672,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 56,
+   "does": "stop_call/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 171,
+   "task_seconds": 655,
+   "shuffle_write_bytes": 1832168228,
+   "memory_spilled_bytes": 69977767936,
+   "disk_spilled_bytes": 8883567049,
+   "joins": {
+    "BroadcastHashJoin": 4,
+    "SortMergeJoin": 1
+   },
+   "most_uneven_stage": {
+    "max_over_median": 2.0,
+    "stage": 217,
+    "tasks": 32,
+    "median_task_s": 2.6,
+    "max_task_s": 5.2
+   }
+  },
+  {
+   "id": 57,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 3,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 58,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 4,
+   "shuffle_write_bytes": 32788626,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 59,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 284,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 60,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 2784,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 61,
+   "does": "collect at silver.py:802",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 704,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 62,
+   "does": "collect at silver.py:819",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 2,
+   "shuffle_write_bytes": 30430,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 63,
+   "does": "call_prediction/operating_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 1062,
+   "task_seconds": 4220,
+   "shuffle_write_bytes": 68581331612,
+   "memory_spilled_bytes": 331433902080,
+   "disk_spilled_bytes": 70414101271,
+   "joins": {
+    "SortMergeJoin": 4
+   },
+   "most_uneven_stage": {
+    "max_over_median": 2.7,
+    "stage": 269,
+    "tasks": 64,
+    "median_task_s": 3.5,
+    "max_task_s": 9.6
+   }
+  },
+  {
+   "id": 64,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 13,
+   "task_seconds": 48,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.1,
+    "stage": 271,
+    "tasks": 10,
+    "median_task_s": 5.5,
+    "max_task_s": 6.1
+   }
+  },
+  {
+   "id": 65,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 27,
+   "task_seconds": 95,
+   "shuffle_write_bytes": 635795303,
+   "memory_spilled_bytes": 10401873920,
+   "disk_spilled_bytes": 754561493,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.3,
+    "stage": 274,
+    "tasks": 10,
+    "median_task_s": 6.7,
+    "max_task_s": 8.4
+   }
+  },
+  {
+   "id": 66,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 2,
+   "shuffle_write_bytes": 710,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 2.2,
+    "stage": 280,
+    "tasks": 10,
+    "median_task_s": 0.1,
+    "max_task_s": 0.3
+   }
+  },
+  {
+   "id": 67,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 1,
+   "task_seconds": 2,
+   "shuffle_write_bytes": 889,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.6,
+    "stage": 283,
+    "tasks": 10,
+    "median_task_s": 0.2,
+    "max_task_s": 0.3
+   }
+  },
+  {
+   "id": 68,
+   "does": "vehicle_position/observation_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 85,
+   "task_seconds": 308,
+   "shuffle_write_bytes": 2044888440,
+   "memory_spilled_bytes": 6325010432,
+   "disk_spilled_bytes": 1153769276,
+   "joins": {
+    "BroadcastHashJoin": 2
+   },
+   "most_uneven_stage": {
+    "max_over_median": 1.5,
+    "stage": 290,
+    "tasks": 32,
+    "median_task_s": 5.6,
+    "max_task_s": 8.4
+   }
+  },
+  {
+   "id": 69,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 3,
+   "task_seconds": 12,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.5,
+    "stage": 292,
+    "tasks": 11,
+    "median_task_s": 1.1,
+    "max_task_s": 1.6
+   }
+  },
+  {
+   "id": 70,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 3,
+   "task_seconds": 13,
+   "shuffle_write_bytes": 90685623,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.4,
+    "stage": 295,
+    "tasks": 11,
+    "median_task_s": 0.7,
+    "max_task_s": 0.9
+   }
+  },
+  {
+   "id": 71,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 2,
+   "shuffle_write_bytes": 781,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 1.0,
+    "stage": 301,
+    "tasks": 11,
+    "median_task_s": 0.2,
+    "max_task_s": 0.2
+   }
+  },
+  {
+   "id": 72,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 1,
+   "shuffle_write_bytes": 5511,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": {
+    "max_over_median": 4.0,
+    "stage": 304,
+    "tasks": 11,
+    "median_task_s": 0.0,
+    "max_task_s": 0.1
+   }
+  },
+  {
+   "id": 73,
+   "does": "sx_situation/observation_date=2026-10-27",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 1316799,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 74,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 75,
+   "does": "count at <unknown>:0",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 246729,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 76,
+   "does": "first at silver.py:462",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 69,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 77,
+   "does": "collect at silver.py:471",
+   "status": "COMPLETED",
+   "seconds": 0,
+   "task_seconds": 0,
+   "shuffle_write_bytes": 170,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {},
+   "most_uneven_stage": null
+  },
+  {
+   "id": 78,
+   "does": "quarantine/operating_date=2026-10-27",
+   "status": "RUNNING",
+   "seconds": 35,
+   "task_seconds": 118,
+   "shuffle_write_bytes": 0,
+   "memory_spilled_bytes": 0,
+   "disk_spilled_bytes": 0,
+   "joins": {
+    "BroadcastHashJoin": 2
+   },
+   "most_uneven_stage": null
+  }
+ ]
+}
