@@ -492,7 +492,9 @@ return (
 
 Transfers are observed rather than modelled. Each arrival at a hub is paired with the first
 departure of every other line aimed 0–15 minutes later. A range join would compare every arrival
-with every departure at the hub, so it becomes an equi-join on 15-minute buckets:
+with every departure at the hub, so it becomes an equi-join on 15-minute buckets. On 2026-11-23
+that compares 19.9 million candidate pairs instead of the 663 million a join on hub alone would
+([record](evidence/transfer-pairs-2026-11-23.json)):
 
 ```python
 # pipeline/gold.py, build_transfers

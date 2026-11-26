@@ -23,6 +23,22 @@ Extracted from scheduled GitHub Actions prod artifacts (`prod-bronze-runs-143`,
 | [`silver-2026-11-20.json`](silver-2026-11-20.json) | Complete schema-2 Entur Silver (`gh-45014021086-1`): 1.88M stop calls, 96.86 % reporting share, 0 quarantined, 1h 2m |
 | [`silver-datex-2026-11-20.json`](silver-datex-2026-11-20.json) | Complete schema-1 DATEX Silver (`gh-44895514041-1`): 2,931 situations, 65,935 weather rows, 58,176 travel-time periods, 0 quarantined, 2m 05s |
 
+## Bronze reruns, 2026-10-15 to 11-19
+
+Collected on 2026-11-26 from every Entur Bronze run record on the VM.
+
+| File | Shows |
+| ---- | ----- |
+| [`bronze-reruns-2026-11-26.json`](bronze-reruns-2026-11-26.json) | 89 runs over 36 days, every day built at least twice (84 by Actions, 5 local), weeks apart and across code changes: every rerun of a day and dataset (98 pairs) wrote the same row count |
+
+## Transfer join, 2026-11-23
+
+Run on 2026-11-26 with [`transfer_pairs.py`](transfer_pairs.py) against a copy of prod Silver.
+
+| File | Shows |
+| ---- | ----- |
+| [`transfer-pairs-2026-11-23.json`](transfer-pairs-2026-11-23.json) | 1.96M arrivals and 1.98M departures: a join on hub alone compares 663M pairs, Gold's 15-minute bucket join 19.9M (33x fewer), of which 11.9M lie within 15 min; Gold keeps 4.47M observed connections |
+
 ## Rush-hour ingest, 2026-11-12 and 15
 
 Run on 2026-11-20 with [`rush_hour.py`](rush_hour.py) against prod Bronze and Silver, plus the

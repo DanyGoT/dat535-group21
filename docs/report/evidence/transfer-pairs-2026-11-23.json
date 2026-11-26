@@ -1,0 +1,11 @@
+{
+  "input": "prod Silver for operating day 2026-11-23 (run gh-45611458541-1, schema 2, complete, ready), copied off the VM",
+  "measured_at": "2026-11-26",
+  "arrivals": 1963239,
+  "departures": 1981085,
+  "hub_wide_pairs": 662892689,
+  "bucket_candidates": 19924025,
+  "within_15_min": 11860342,
+  "gold_observed_connections": 4465308,
+  "note": "gold_observed_connections is the dashboard total for the same day: connections Gold kept (first departure per arrival, line and destination) with both delays known."
+}
