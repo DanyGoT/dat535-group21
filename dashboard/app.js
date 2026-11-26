@@ -864,7 +864,7 @@ for (const r of G.conditions)
   modes.set(r[C.mode], (modes.get(r[C.mode]) || 0) + r[C.scored_departures]);
 $("#mode").replaceChildren(
   el("option", { value: "" }, "All modes"),
-  [...modes]
+  ...[...modes]
     .sort((a, b) => b[1] - a[1])
     .map(([m, n]) => el("option", { value: m }, `${m} (${nf.format(n)})`)),
 );
