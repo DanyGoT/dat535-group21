@@ -26,6 +26,13 @@ Every count is additive. Consumers sum days and compute rates from the sums. No 
 average or percentile that would have to be averaged later, except the scorecard's daily delay
 percentiles, which stay per day.
 
+One overlap is deliberate. `stop_reliability` is the hub and hour rollup of the departure rows
+in `line_stop_delays`: its delay bins fall on whole minutes, so the minute histogram holds them.
+The map reads the rollup because a weekday has 0.4 M stop rows against 1.9 M line rows, each with
+a 41-bin histogram, and the dashboard sums every day. The totals check proves the two agree.
+Every other table answers a question no other table can: they pair calls (transfers, segments),
+join another source (road conditions) or read another Silver table (countdown).
+
 ## Shared rules
 
 - **Inputs & missing-DATEX policy.** Entur Silver for operating day D (marker schema 2) is
