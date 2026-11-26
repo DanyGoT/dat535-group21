@@ -274,9 +274,10 @@ spill on `/data` and the shared lock. Reruns use archived inputs.
 | Manual `bronze_date` | UTC input day for both Bronze jobs |
 | Manual `silver_date` | Entur operating day and DATEX UTC observation day |
 
-A `silver_date` dispatch runs both Bronze steps, but does not rebuild ET's entire three-day window.
-Without `bronze_date`, those steps still ingest yesterday. Ensure the needed Bronze days exist.
-A Bronze-only dispatch skips both Silver jobs. Repair missing Bronze days manually, then rerun Silver.
+A dispatch builds only the layers it names. `silver_date` runs both Silver jobs and Gold on the
+Bronze already there, because rewriting Bronze would leave every Silver day built from it
+pointing at a superseded run. `bronze_date` runs both Bronze jobs and nothing after them. Entur
+Silver for day D needs Bronze for D-1, D and D+1, so rerun a missing Bronze day first.
 
 The [dev workflow](../../.github/workflows/dat535-dev.yml) uses one-hour Bronze and
 `--allow-partial`, producing `status=partial, ready=false`. The flag permits incomplete or

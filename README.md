@@ -30,8 +30,8 @@ grading basis is [`PROJECT.md`](PROJECT.md).
 | Collection | Stores every message unchanged in hourly files | always on, first feed since 2026-10-15 | [`collector/`](collector/) |
 | Bronze | Loads each message as one Parquet row, with evidence of where it came from | every night | [`bronze.py`](pipeline/bronze.py), [`bronze_datex.py`](pipeline/bronze_datex.py) |
 | Silver | Builds trusted tables with a stated grain, keys and quality flags | every night | [`silver.py`](pipeline/silver.py), [`silver_datex.py`](pipeline/silver_datex.py) |
-| Gold | Per day: line scorecard, stops, transfers, line-stop delays, segment delay change, road conditions | every night | [`gold.py`](pipeline/gold.py) |
-| Dashboard | Static site over ready Gold days: stop map, transfers, delay segments and road conditions | by hand (`--all-ready`) | [`dashboard/`](dashboard/) |
+| Gold | Per day: line scorecard, stops, transfers, line-stop delays, segment delay change, road conditions, countdown accuracy | every night | [`gold.py`](pipeline/gold.py) |
+| Dashboard | Static site over ready Gold days: stop map, transfers, delay segments, road conditions and countdown | by hand (`--all-ready`) | [`dashboard/`](dashboard/) |
 | Monitoring | Status page, push alerts, Prometheus and Grafana | always on | [`monitor.py`](collector/monitor.py) |
 
 Gold publishes seven reconciled, additive tables every night after Entur Silver. Earlier schema-2
@@ -76,6 +76,42 @@ in one file, with the code that matters. Every section there links to the detail
 | [`notebooks/`](notebooks/) | [`peek.ipynb`](notebooks/peek.ipynb): read-only landing explorer (kept with outputs cleared) |
 | [`entur-ai-docs/`](entur-ai-docs/) | Entur's generated BigQuery catalog, kept as reference |
 | [`labs/`](labs/) | Course lab material |
+
+## Run it
+
+The pipeline runs on one VM with Spark 3.5.0 in `/opt/spark`, Java 8 and the Python
+environment `~/spark-env` from [`labs/lab1_install-spark.sh`](labs/lab1_install-spark.sh), plus
+a GitHub self-hosted runner. The [runbook](collector/README.md#one-time-vm-setup) sets up the
+collectors. After that, GitHub Actions does the work:
+
+- A push to any branch except `main` runs the tests and a one-hour sample from Bronze to Gold
+  under `/data/dat535/dev`.
+- A push to `main` deploys the collectors.
+- Every night the production workflow builds yesterday's Bronze and DATEX Silver, and Entur
+  Silver and Gold for two days ago, under `/data/dat535/prod`.
+
+A failed day is rerun by hand. A rerun builds only the layers it names:
+
+```sh
+gh workflow run dat535-prod.yml -f bronze_date=2026-11-24   # both Bronze jobs for that UTC day
+gh workflow run dat535-prod.yml -f silver_date=2026-11-23   # both Silver jobs and Gold
+```
+
+Entur Silver for day D reads Bronze for D-1, D and D+1, so rerun Bronze first if one is
+missing. The same jobs run by hand on the VM, one at a time under the shared lock:
+
+```sh
+source ~/spark-env/bin/activate
+export SPARK_HOME=/opt/spark JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+export DAT535_ENV=prod DAT535_LANDING_DIR=/data/dat535/landing DAT535_OUTPUT_DIR=/data/dat535/prod
+lock="flock /data/dat535/.spark.lock"
+$lock python pipeline/bronze.py --date 2026-11-24
+$lock python pipeline/bronze_datex.py --date 2026-11-24
+$lock python pipeline/silver_datex.py --date 2026-11-23
+$lock python pipeline/silver.py --date 2026-11-23
+$lock python pipeline/gold.py --date 2026-11-23
+$lock python dashboard/build.py --output-dir /data/dat535/prod --all-ready
+```
 
 ## Tests
 
