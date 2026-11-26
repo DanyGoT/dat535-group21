@@ -125,8 +125,8 @@ Bronze step, and Gold depends on Entur Silver. A failure in DATEX does not suppr
 or Entur Gold tables.
 
 On dispatch, `bronze_date` selects both Bronze days. Setting it alone skips Silver and Gold.
-`silver_date` selects both Silver dates (UTC for DATEX, Norwegian operating date for Entur) and
-Gold's operating date. Preceding Bronze steps still run. Missing days require manual reruns.
+`silver_gold_date` selects both Silver dates (UTC for DATEX, Norwegian operating date for Entur)
+and Gold's operating date, on the Bronze already there. Missing days require manual reruns.
 
 The [dev workflow](../../.github/workflows/dat535-dev.yml) has no PR trigger, so code from a fork
 never reaches the runner. A PR branch in this repo gets its run from the push. Silver and Gold

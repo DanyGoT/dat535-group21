@@ -218,7 +218,7 @@ flock -n /data/dat535/.spark.lock \
   pipeline/gold.py --date 2026-11-09 --output-dir /data/dat535/prod
 ```
 
-Reruns are manual, one `--date` at a time, like every layer. A `silver_date` dispatch of the prod
+Reruns are manual, one `--date` at a time, like every layer. A `silver_gold_date` dispatch of the prod
 workflow also reruns Gold for that day, after its Silver.
 
 The Entur Silver marker for the date must exist under `silver/_runs/operating_date=D/`. The DATEX

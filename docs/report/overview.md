@@ -592,12 +592,12 @@ Dev writes `/data/dat535/dev` and prod writes `/data/dat535/prod`.
 Spark steps and pipeline tests share `flock /data/dat535/.spark.lock`.
 
 A rerun builds only the layers it names. `-f bronze_date=YYYY-MM-DD` reruns Bronze, and
-`-f silver_date=YYYY-MM-DD` reruns both Silver jobs and Gold on the Bronze already there:
+`-f silver_gold_date=YYYY-MM-DD` reruns both Silver jobs and Gold on the Bronze already there:
 
 ```yaml
 # .github/workflows/dat535-prod.yml, job env
-RUN_BRONZE: ${{ github.event_name == 'schedule' || inputs.bronze_date != '' || inputs.silver_date == '' }}
-RUN_SILVER: ${{ github.event_name == 'schedule' || inputs.silver_date != '' || inputs.bronze_date == '' }}
+RUN_BRONZE: ${{ github.event_name == 'schedule' || inputs.bronze_date != '' || inputs.silver_gold_date == '' }}
+RUN_SILVER_GOLD: ${{ github.event_name == 'schedule' || inputs.silver_gold_date != '' || inputs.bronze_date == '' }}
 ```
 
 Rewriting Bronze gives it a new run ID, and every Silver day built from it then points at a

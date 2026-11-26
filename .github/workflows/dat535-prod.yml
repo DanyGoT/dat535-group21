@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       bronze_date:
-        description: UTC day to (re)run Bronze for, YYYY-MM-DD (empty = yesterday; none if only silver_date is set)
+        description: UTC day to (re)run Bronze for, YYYY-MM-DD (empty = yesterday; none if only silver_gold_date is set)
         required: false
         default: ''
-      silver_date:
+      silver_gold_date:
         description: Norwegian operating day to (re)run Silver and Gold for, on existing Bronze (empty = two days ago; none if only bronze_date is set)
         required: false
         default: ''
@@ -25,7 +25,7 @@ env:
 jobs:
   deploy-prod:
     name: Deploy to Production
-    # Code changes only: needs manual approval through the `main` environment.
+    # Code changes only. The `main` environment has no approval rule: a merge deploys at once.
     if: github.event_name == 'push'
     runs-on: self-hosted
     environment: main
@@ -59,8 +59,8 @@ jobs:
     env:
       # A rerun builds only the layers it names. Rewriting Bronze would leave every Silver day
       # built from it pointing at superseded Bronze runs, so a Silver rerun reads what is there.
-      RUN_BRONZE: ${{ github.event_name == 'schedule' || inputs.bronze_date != '' || inputs.silver_date == '' }}
-      RUN_SILVER: ${{ github.event_name == 'schedule' || inputs.silver_date != '' || inputs.bronze_date == '' }}
+      RUN_BRONZE: ${{ github.event_name == 'schedule' || inputs.bronze_date != '' || inputs.silver_gold_date == '' }}
+      RUN_SILVER_GOLD: ${{ github.event_name == 'schedule' || inputs.silver_gold_date != '' || inputs.bronze_date == '' }}
 
     steps:
       - name: Checkout code
@@ -104,29 +104,29 @@ jobs:
           flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/bronze_datex.py ${BRONZE_DATE:+--date "$BRONZE_DATE"}
 
       - name: Run DATEX Silver
-        # A UTC observation day: yesterday, or silver_date on a manual run. Independent of Entur.
+        # A UTC observation day: yesterday, or silver_gold_date on a manual run. Independent of Entur.
         # Bronze that failed stops it; Bronze that was not asked for (skipped) does not.
-        if: ${{ !cancelled() && steps.dirs.outcome == 'success' && env.RUN_SILVER == 'true' && steps.datex_bronze.outcome != 'failure' }}
+        if: ${{ !cancelled() && steps.dirs.outcome == 'success' && env.RUN_SILVER_GOLD == 'true' && steps.datex_bronze.outcome != 'failure' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
-          SILVER_DATE: ${{ github.event.inputs.silver_date }}
+          SILVER_GOLD_DATE: ${{ github.event.inputs.silver_gold_date }}
         run: |
           source ~/spark-env/bin/activate
-          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver_datex.py ${SILVER_DATE:+--date "$SILVER_DATE"}
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver_datex.py ${SILVER_GOLD_DATE:+--date "$SILVER_GOLD_DATE"}
 
       - name: Run Entur Silver
         # ET spans adjacent UTC days. Today's Bronze completes the following day
         # for Silver's default operating day (two days ago).
         id: entur_silver
-        if: ${{ !cancelled() && steps.dirs.outcome == 'success' && env.RUN_SILVER == 'true' && steps.entur_bronze.outcome != 'failure' }}
+        if: ${{ !cancelled() && steps.dirs.outcome == 'success' && env.RUN_SILVER_GOLD == 'true' && steps.entur_bronze.outcome != 'failure' }}
         env:
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
-          SILVER_DATE: ${{ github.event.inputs.silver_date }}
+          SILVER_GOLD_DATE: ${{ github.event.inputs.silver_gold_date }}
         run: |
           source ~/spark-env/bin/activate
-          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py ${SILVER_DATE:+--date "$SILVER_DATE"}
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/silver.py ${SILVER_GOLD_DATE:+--date "$SILVER_GOLD_DATE"}
 
       - name: Run Gold
         # Same operating day as Entur Silver (default: two days ago). Missing DATEX Silver skips
@@ -135,10 +135,10 @@ jobs:
         env:
           DAT535_OUTPUT_DIR: ${{ steps.dirs.outputs.output }}
           DAT535_LANDING_DIR: ${{ steps.dirs.outputs.landing }}
-          SILVER_DATE: ${{ github.event.inputs.silver_date }}
+          SILVER_GOLD_DATE: ${{ github.event.inputs.silver_gold_date }}
         run: |
           source ~/spark-env/bin/activate
-          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/gold.py ${SILVER_DATE:+--date "$SILVER_DATE"}
+          flock -w 10800 "$(dirname "$DAT535_LANDING_DIR")/.spark.lock" python pipeline/gold.py ${SILVER_GOLD_DATE:+--date "$SILVER_GOLD_DATE"}
 
       - name: Upload Gold run records
         if: ${{ !cancelled() }}
