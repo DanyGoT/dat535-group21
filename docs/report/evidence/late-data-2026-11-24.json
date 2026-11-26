@@ -1,0 +1,73 @@
+{
+  "input": "silver/_decoded/et/source_date=2026-11-24",
+  "read_for_operating_days": [
+    "2026-11-23",
+    "2026-11-24",
+    "2026-11-25"
+  ],
+  "call_versions": 140146156,
+  "outside_window": {
+    "versions": 15840,
+    "calls": 8215,
+    "versions_with_actual": 0,
+    "versions_cancelled": 222
+  },
+  "by_operating_day": [
+    {
+      "operating_date": "2026-11-23",
+      "versions": 131329,
+      "calls": 8794,
+      "versions_with_actual": 9323,
+      "versions_cancelled": 61
+    },
+    {
+      "operating_date": "2026-11-24",
+      "versions": 138893080,
+      "calls": 1813968,
+      "versions_with_actual": 5377974,
+      "versions_cancelled": 213661
+    },
+    {
+      "operating_date": "2026-11-25",
+      "versions": 1105907,
+      "calls": 744858,
+      "versions_with_actual": 1728,
+      "versions_cancelled": 2222
+    },
+    {
+      "operating_date": "2026-11-26",
+      "versions": 10714,
+      "calls": 5649,
+      "versions_with_actual": 0,
+      "versions_cancelled": 222
+    },
+    {
+      "operating_date": "2026-11-27",
+      "versions": 2996,
+      "calls": 1498,
+      "versions_with_actual": 0,
+      "versions_cancelled": 0
+    },
+    {
+      "operating_date": "2026-11-28",
+      "versions": 2124,
+      "calls": 1062,
+      "versions_with_actual": 0,
+      "versions_cancelled": 0
+    },
+    {
+      "operating_date": "2026-11-30",
+      "versions": 3,
+      "calls": 3,
+      "versions_with_actual": 0,
+      "versions_cancelled": 0
+    },
+    {
+      "operating_date": "2026-12-01",
+      "versions": 3,
+      "calls": 3,
+      "versions_with_actual": 0,
+      "versions_cancelled": 0
+    }
+  ]
+}

@@ -48,6 +48,14 @@ prod ET day, on a laptop with Silver's Spark settings (local[4], 4 GB driver, 32
 | ---- | ----- |
 | [`latest-benchmark-2026-11-24.json`](latest-benchmark-2026-11-24.json) | Silver's `max_by` against a `row_number` window, three runs each: both keep the same 2.58M of 140M call versions, both plans reduce to 11.6M rows before the shuffle, medians 332 s and 325 s, and both spill about 9 GB to disk while sorting |
 
+## What Silver's ET window misses, 2026-11-24
+
+Run on 2026-11-26 with [`late_data.py`](late_data.py) against the same decoded day.
+
+| File | Shows |
+| ---- | ----- |
+| [`late-data-2026-11-24.json`](late-data-2026-11-24.json) | Call versions of one UTC day by operating day: 99.1 % for that day, 0.8 % for the next, 0.09 % for the day before. 15,840 (0.011 %) belong to no window that reads it, all announcements for later days, none with an actual time, 222 early cancellations |
+
 ## Rush-hour ingest, 2026-11-12 and 15
 
 Run on 2026-11-20 with [`rush_hour.py`](rush_hour.py) against prod Bronze and Silver, plus the

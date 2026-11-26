@@ -160,6 +160,16 @@ ET reads completed UTC Bronze days `D-1, D, D+1`, then resolves and filters oper
 This covers pre-midnight reports, overnight services and following-day replay.
 SX and vehicles read only UTC `D`. Updates received outside ET's window remain excluded on reruns.
 
+What the window misses was measured on UTC day 2026-11-24
+([record](../report/evidence/late-data-2026-11-24.json), [`late_data.py`](../report/evidence/late_data.py)).
+Of its 140.1 M call versions, 99.1 % belong to operating day 24 Nov, 0.8 % to the 25th and
+0.09 % to the 23rd. Only 15,840 (0.011 %) belong to a day whose window does not read this UTC
+day. None of them is late: all are announcements for 26 Nov to 1 Dec, with no actual time. A
+later version supersedes them unless the journey is never sent again in its own window. The
+only kind that could change a final state is an early cancellation: 222 such versions, all
+for 26 Nov. Catching them would mean reading `D-2` as well, about 140 M more versions in
+every Silver run, so the window stays at three days.
+
 [`normalize_journeys`](../../pipeline/silver.py) records date precedence in `date_source`:
 
 1. `framed` uses the message's `DataFrameRef`.
