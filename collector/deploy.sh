@@ -105,9 +105,8 @@ restart_if dat535-grafana.service \
     'observability/grafana/grafana.ini\|observability/grafana/provisioning/\|dat535-grafana.service\|^grafana$'
 
 # The monitor and the static archive are oneshots; their timers pick up new code on the next run.
+# Only the timer starts the archive: its unit allows 3 starts a day, and a deploy must not use one.
 systemctl --user start "${TIMERS[@]}"
-# Archive today's NeTEx and NSR now if they are missing (it never downloads a day twice).
-systemctl --user start --no-block dat535-static.service
 
 sleep 2
 systemctl --user --no-pager status "${SERVICES[@]/%/.service}" "${TIMERS[@]}" | grep -E '^●|Active:' || true
