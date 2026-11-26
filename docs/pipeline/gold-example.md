@@ -90,7 +90,8 @@ A transfer is observed, not modelled from two separate delay distributions:
    arrival. Departures are calls before its last call, boarding allowed.
 2. At each hub, each arrival is paired with the **first** departure of every other line and
    destination aimed 0–15 minutes later. The join is an equi-join on 15-minute buckets, the
-   arrival exploded into its own and the next bucket, then a window keeps the first departure.
+   arrival exploded into its own and the next bucket, then a `min_by` aggregate keeps the first
+   departure.
 3. When both calls have actual times, the **gap change** is the departure's delay minus the
    arrival's delay, floored to whole minutes and clipped to −11..+10. `gap_change_counts[i]`
    counts change `i − 11`.
