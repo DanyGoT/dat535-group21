@@ -34,7 +34,7 @@ grading basis is [`PROJECT.md`](PROJECT.md).
 | Dashboard | Static site over ready Gold days: stop map, transfers, delay segments and road conditions | by hand (`--all-ready`) | [`dashboard/`](dashboard/) |
 | Monitoring | Status page, push alerts, Prometheus and Grafana | always on | [`monitor.py`](collector/monitor.py) |
 
-Gold publishes six reconciled, additive tables every night after Entur Silver. Earlier schema-2
+Gold publishes seven reconciled, additive tables every night after Entur Silver. Earlier schema-2
 validation runs (2026-11-05, 08 and 09) showed connections holding 77 % of the time nationally
 with 2 spare minutes, and departures near congested road sections running late 10 percentage
 points more often than near free-flowing ones in the same mode and hour. Predictive ML

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Daily Gold over published Silver: line scorecard, stop map, transfer chances, line delays,
-delay between stops and road conditions.
+delay between stops, road conditions and countdown accuracy.
 
 Reads one Norwegian operating day of Entur Silver and the same UTC day of DATEX Silver.
 Every count is additive: consumers sum days, never average rates. Partial Silver needs
@@ -27,7 +27,7 @@ SOURCES = {
         Path("_runs"),
         "operating_date",
         2,
-        ("stop_call", "journey", "line", "operator", "quay", "stop_place"),
+        ("stop_call", "journey", "line", "operator", "quay", "stop_place", "call_prediction"),
     ),
     "datex": (
         Path("_runs") / "datex",
@@ -52,6 +52,7 @@ KEYS = {
         "operating_date", "mode", "hour", "precipitation", "road_surface",
         "road_situation", "traffic",
     ],
+    "countdown_accuracy": ["operating_date", "line_id", "reference", "lead_minutes"],
 }
 
 UNKNOWN_LINE, UNKNOWN_HUB = "__unknown_line__", "__unknown_hub__"
@@ -77,6 +78,8 @@ DELAY_LOW, DELAY_HIGH = -10, 30
 # A segment's delay change is clipped to +-15 min, so one stranded vehicle cannot carry a mean.
 MAX_CHANGE_S = 15 * 60
 WEATHER_MAX_M = 10_000
+# Countdown error in whole minutes, floor((shown - actual departure) / 60), clipped.
+ERROR_LOW, ERROR_HIGH = -10, 10
 
 # DATEX record types for something going wrong on the road (not planned roadworks).
 INCIDENTS = (
@@ -696,6 +699,45 @@ def build_conditions(calls, roads, day):
     )
 
 
+# --- Countdown accuracy ---
+
+
+def build_countdown(predictions, calls):
+    """How far the departure time shown before departure was from the actual one.
+
+    Silver's call_prediction holds what was known at fixed lead times. Reference 'actual': the
+    countdown N minutes before the vehicle left; 'planned': what a traveller saw N minutes before
+    the timetable time. Only the scorecard's timed departures count, so both use its actual time.
+    One row per line, reference and lead time.
+    """
+    F = functions()
+    call = ["operating_date", "journey_id", "call_order"]
+    departures = calls.filter(scored_departure()).select(
+        *call,
+        F.coalesce("line_id", F.lit(UNKNOWN_LINE)).alias("line_id"),
+        "actual_departure_at",
+    )
+    # A state with no time shown (a cancellation) is not a countdown.
+    shown = predictions.filter(
+        (F.col("event") == "departure") & F.col("predicted_at").isNotNull()
+    ).select(*call, "reference", "lead_minutes", "predicted_at")
+
+    # Positive: the vehicle left before the time shown, so a traveller trusting it could miss it.
+    error = F.col("predicted_at").cast("double") - F.col("actual_departure_at").cast("double")
+    floored = F.floor(error / 60)
+    minute = F.least(F.greatest(floored, F.lit(ERROR_LOW)), F.lit(ERROR_HIGH))
+    histogram = F.array(*[
+        F.sum(F.when(F.col("_minute") == m, 1).otherwise(0))
+        for m in range(ERROR_LOW, ERROR_HIGH + 1)
+    ])
+    return (
+        shown.join(departures, call)
+        .withColumn("_minute", minute)
+        .groupBy(*KEYS["countdown_accuracy"])
+        .agg(F.count("*").alias("predictions"), histogram.alias("error_counts"))
+    )
+
+
 # --- Checks and the report ---
 
 # The run's totals, and whether the map and the conditions split exactly the scorecard's
@@ -737,17 +779,31 @@ segment AS (
     SELECT coalesce(sum(segments), 0) AS segments,
            coalesce(sum(timed_segments), 0) AS timed_segments
     FROM {segment_delay}
+),
+countdown AS (
+    -- Silver keys a prediction by call, reference and lead: at most one per timed departure.
+    SELECT coalesce(sum(predictions), 0) AS countdown_predictions,
+           coalesce(max(predictions), 0) AS most,
+           coalesce(sum(binned), 0) AS binned
+    FROM (SELECT reference, lead_minutes, sum(predictions) AS predictions,
+                 sum(aggregate(error_counts, 0L, (n, c) -> n + c)) AS binned
+          FROM {countdown_accuracy}
+          GROUP BY reference, lead_minutes)
 )
 SELECT line.*,
        transfer.*,
        segment.*,
+       countdown.countdown_predictions,
        stop.scored = line.scored_departures AND stop.late = line.late_departures
            AS stop_reliability_reconciles,
        conditions.scored = line.scored_departures AND conditions.late = line.late_departures
            AS departure_conditions_reconciles,
        line_stop.scored = line.scored_departures AND line_stop.cancelled = stop.cancelled
-           AS line_stop_delays_reconciles
-FROM line, transfer, segment, stop, conditions, line_stop
+           AS line_stop_delays_reconciles,
+       countdown.most <= line.scored_departures
+           AND countdown.binned = countdown.countdown_predictions
+           AS countdown_accuracy_reconciles
+FROM line, transfer, segment, stop, conditions, line_stop, countdown
 """
 
 REPORT_COLUMNS = (
@@ -845,7 +901,7 @@ def check_totals(totals, entur, has_conditions=True):
         or totals["input_calls"] != silver_tables["stop_call"]["rows"]
     ):
         raise ValueError("Gold totals do not reconcile to Silver; refusing publication")
-    checked = ["stop_reliability", "line_stop_delays"]
+    checked = ["stop_reliability", "line_stop_delays", "countdown_accuracy"]
     if has_conditions:
         checked.append("departure_conditions")
     else:
@@ -902,7 +958,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
     record: dict = dict(
         run_id=rid,
         operating_date=str(day),
-        schema_version=3,
+        schema_version=4,
         status="running",
         ready=False,
         started_at=iso(utcnow()),
@@ -933,6 +989,7 @@ def run(output_dir, day, spark=None, allow_partial=False):
             "transfer_reliability": build_transfers(calls, quay_hub, hub_labels),
             "line_stop_delays": build_line_stops(calls, quay_hub, hub_labels),
             "segment_delay": build_segments(calls, quay_hub, hub_labels),
+            "countdown_accuracy": build_countdown(silver["call_prediction"], calls),
         }
         if has_datex:
             roads = read_silver(spark, output, "datex", day, datex)

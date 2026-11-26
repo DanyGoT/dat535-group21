@@ -458,7 +458,7 @@ More: [DATEX content](../datex/content.md#in-silver),
 ## 5. Gold: answering a question
 
 [`gold.py`](../../pipeline/gold.py) reads one day of ready Entur Silver and the same UTC day of
-DATEX Silver and publishes six tables. Every count is additive, so the
+DATEX Silver and publishes seven tables. Every count is additive, so the
 [dashboard](../../dashboard/README.md) sums days instead of averaging rates.
 
 | Table | One row is | Question |
@@ -469,6 +469,7 @@ DATEX Silver and publishes six tables. Every count is additive, so the
 | `line_stop_delays` | Hub × line × arrival or departure × trip end × hour | How late does this line arrive or leave here? |
 | `segment_delay` | Line × hub × next hub × hour | Where is delay gained, and where recovered? |
 | `departure_conditions` | Mode × hour × weather, surface, situation and traffic level | Do late departures go with road conditions? |
+| `countdown_accuracy` | Line × reference × lead time | How far was the departure time shown from the actual one? |
 
 The departure tables share one definition of a timed departure, and late means 3 minutes or more:
 
@@ -519,6 +520,28 @@ connection with *b* spare minutes held when the change was at least −b, so one
 every b. Road conditions come from DATEX Silver's quay links: the nearest station within 10 km,
 situations active within 500 m and the travel-time period on sections within 500 m.
 
+Countdown accuracy reuses Silver's as-of table: `call_prediction` holds what was known 1–30
+minutes before each call's planned and actual time, so Gold only compares it with the actual
+departure of the same timed departures:
+
+```python
+# pipeline/gold.py, build_countdown
+# Positive: the vehicle left before the time shown, so a traveller trusting it could miss it.
+error = F.col("predicted_at").cast("double") - F.col("actual_departure_at").cast("double")
+floored = F.floor(error / 60)
+minute = F.least(F.greatest(floored, F.lit(ERROR_LOW)), F.lit(ERROR_HIGH))
+histogram = F.array(*[
+    F.sum(F.when(F.col("_minute") == m, 1).otherwise(0))
+    for m in range(ERROR_LOW, ERROR_HIGH + 1)
+])
+return (
+    shown.join(departures, call)
+    .withColumn("_minute", minute)
+    .groupBy(*KEYS["countdown_accuracy"])
+    .agg(F.count("*").alias("predictions"), histogram.alias("error_counts"))
+)
+```
+
 The scorecard is Spark SQL: counts per line read best as a query. The departure rules stay
 DataFrame columns, so the query counts the same departures as the other three tables:
 
@@ -547,9 +570,10 @@ percentile_approx(IF(scored, departure_delay_s, NULL), array(0.5D, 0.9D), 10000)
     AS delay_percentiles
 ```
 
-Before publishing, one more query (`TOTALS_SQL`) sums the six tables: scorecard totals must equal
+Before publishing, one more query (`TOTALS_SQL`) sums the seven tables: scorecard totals must equal
 Silver's rows, the map and conditions tables must split exactly the scorecard's timed and
-late departures, and the line delays must hold the same timed departures and cancellations.
+late departures, the line delays must hold the same timed departures and cancellations, and no
+countdown lead time may hold more predictions than there are timed departures.
 
 On 2026-11-05, 08 and 09 ([run records](evidence/README.md#gold-with-road-data-2026-11-05-08-and-09)),
 each day took 46–69 s and at most 2.94 GiB RSS. Nationally, a connection held 52 % of the time

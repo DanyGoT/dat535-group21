@@ -58,17 +58,17 @@ def published(root, day):
     path = root / "gold" / "_runs" / f"operating_date={day}" / "latest.json"
     marker = json.loads(path.read_text())
     ready = (
-        marker.get("schema_version") == 3
+        marker.get("schema_version") == 4
         and marker.get("status") == "complete"
         and marker.get("ready") is True
     )
     if not ready:
-        raise ValueError(f"Gold {day} is not a complete, ready schema-3 run")
+        raise ValueError(f"Gold {day} is not a complete, ready schema-4 run")
     return marker
 
 
 def ready_days(root):
-    """All operating days under gold/_runs/ with a complete, ready schema-3 marker."""
+    """All operating days under gold/_runs/ with a complete, ready schema-4 marker."""
     days = []
     for folder in sorted((root / "gold" / "_runs").glob("operating_date=*")):
         marker_path = folder / "latest.json"
@@ -81,7 +81,7 @@ def ready_days(root):
         except (OSError, ValueError, json.JSONDecodeError):
             continue
     if not days:
-        raise ValueError(f"No complete, ready schema-3 Gold days found under {root}")
+        raise ValueError(f"No complete, ready schema-4 Gold days found under {root}")
     return days
 
 
@@ -350,7 +350,7 @@ def main(argv=None):
     parser.add_argument(
         "--all-ready",
         action="store_true",
-        help="include every complete, ready schema-3 Gold day under --output-dir",
+        help="include every complete, ready schema-4 Gold day under --output-dir",
     )
     parser.add_argument("--dist", type=Path, default=HERE / "dist")
     args = parser.parse_args(argv)

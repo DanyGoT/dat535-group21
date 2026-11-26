@@ -22,7 +22,7 @@ layer carries the most weight, then Bronze, then Gold.
 | `docs/pipeline/methodology.md` | Before designing or implementing any layer: decision rules for Bronze/Silver/Gold |
 | `docs/pipeline/silver.md` | Any Silver work: table contracts, keys, readiness marker, RT↔plan join, dedup, quality, reruns |
 | `docs/pipeline/gold.md` | Gold scope, delivered tables vs. future work (departure-risk ML, Frost, BigQuery) |
-| `docs/pipeline/gold-example.md` | Gold contract (`gold.py`) and dashboard: the six tables, definitions, missing-DATEX policy, limits |
+| `docs/pipeline/gold-example.md` | Gold contract (`gold.py`) and dashboard: the seven tables, definitions, missing-DATEX policy, limits |
 | `docs/entur/sources.md` | Fetching any Entur data: URLs, formats, refresh, rate limits, licence |
 | `docs/entur/realtime.md` | Working with SIRI ET/SX or vehicle positions: protocol, message content |
 | `docs/entur/identifiers.md` | Joining real-time to plan/stops, defining keys and grain in Silver |

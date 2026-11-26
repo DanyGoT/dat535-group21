@@ -20,7 +20,7 @@ flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --ou
   --all-ready
 ```
 
-Use `--all-ready` to package every complete, ready schema-3 Gold day, or repeat `--date YYYY-MM-DD`
+Use `--all-ready` to package every complete, ready schema-4 Gold day, or repeat `--date YYYY-MM-DD`
 for a chosen subset.
 
 It needs pandas and pyarrow from `~/spark-env`, no Spark. It holds the Spark lock anyway, so no
