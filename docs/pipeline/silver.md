@@ -272,11 +272,11 @@ spill on `/data` and the shared lock. Reruns use archived inputs.
 | Scheduled Bronze and DATEX Silver | Yesterday, UTC |
 | Scheduled Entur Silver | Two days ago, operating date |
 | Manual `bronze_date` | UTC input day for both Bronze jobs |
-| Manual `silver_date` | Entur operating day and DATEX UTC observation day |
+| Manual `silver_gold_date` | Entur operating day and DATEX UTC observation day |
 
-A dispatch builds only the layers it names. `silver_date` runs both Silver jobs and Gold on the
-Bronze already there, because rewriting Bronze would leave every Silver day built from it
-pointing at a superseded run. `bronze_date` runs both Bronze jobs and nothing after them. Entur
+A dispatch builds only the layers it names. `silver_gold_date` runs both Silver jobs and Gold
+on the Bronze already there, because rewriting Bronze would leave every Silver day built from
+it pointing at a superseded run. `bronze_date` runs both Bronze jobs and nothing after them. Entur
 Silver for day D needs Bronze for D-1, D and D+1, so rerun a missing Bronze day first.
 
 The [dev workflow](../../.github/workflows/dat535-dev.yml) uses one-hour Bronze and

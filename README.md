@@ -93,8 +93,8 @@ collectors. After that, GitHub Actions does the work:
 A failed day is rerun by hand. A rerun builds only the layers it names:
 
 ```sh
-gh workflow run dat535-prod.yml -f bronze_date=2026-11-24   # both Bronze jobs for that UTC day
-gh workflow run dat535-prod.yml -f silver_date=2026-11-23   # both Silver jobs and Gold
+gh workflow run dat535-prod.yml -f bronze_date=2026-11-24        # both Bronze jobs for that UTC day
+gh workflow run dat535-prod.yml -f silver_gold_date=2026-11-23   # both Silver jobs and Gold
 ```
 
 Entur Silver for day D reads Bronze for D-1, D and D+1, so rerun Bronze first if one is
