@@ -10,6 +10,7 @@ Entries:
 
 | Date | Incident |
 | ---- | -------- |
+| 2026-11-26 | [Deploys used up the static archive's starts](#2026-11-26--deploys-used-up-the-static-archives-daily-starts) |
 | 2026-11-20 | [Data volume at 96 %](#2026-11-20--the-data-volume-reached-96--with-two-days-left) |
 | 2026-11-16 | [Dashboard map took one click](#2026-11-16--the-dashboard-map-took-only-one-click) |
 | 2026-11-12 | [DATEX weather added `depositionDepth`](#2026-11-12--statens-vegvesen-added-depositiondepth-to-datex-weather) |
@@ -46,6 +47,26 @@ Entry template:
 ```
 
 ---
+
+## 2026-11-26 — Deploys used up the static archive's daily starts
+
+- **Area:** collector / CI/CD
+- **Symptom:** No NeTEx or NSR archive for 2026-11-26. The monitor failed from about 10:15 UTC with
+  `netex: last archived 31h 39m ago`.
+- **Evidence:** `journalctl --user -u dat535-static` on 26 Nov: `04:15:12 ... Start request repeated
+  too quickly ... Failed with result 'start-limit-hit'`. On 25 Nov the unit had started at 04:15:39
+  (timer), 07:23 and 11:10 (deploys), and the deploy at 11:45 was already refused. 24 Nov looked
+  the same, but that day's window closed before the next timer run.
+- **Cause:** `deploy.sh` started `dat535-static.service` on every deploy to `main`. The unit allows
+  `StartLimitBurst=3` per `StartLimitIntervalSec=1d`, so that a failed download retries at most twice.
+  Three starts on 25 Nov kept the window open until 04:15:39 on 26 Nov, and the timer, which may
+  fire anywhere in its default one-minute accuracy, fired 27 s earlier.
+- **Fix:** Only the timer starts the archive. `Persistent=true` still catches up after the VM was down.
+- **Trade-off:** A fresh install archives its first files at the next 04:15 UTC instead of at deploy.
+- **Lesson:** A limit that protects a source must count only the starts that are meant to download.
+  The loss is small: Silver takes the newest snapshot on or before the operating day, and the 25 Nov
+  export already lists 26 Nov. Downloading by hand would not have helped either, since `static.py`
+  skips anything within 20 h of the last download and would have skipped the next morning's file.
 
 ## 2026-11-20 — The data volume reached 96 % with two days left
 
