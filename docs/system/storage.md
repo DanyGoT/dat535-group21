@@ -109,9 +109,12 @@ Write day directories directly to avoid sorting payloads onto `/tmp`.
 [DATEX Silver](../../pipeline/silver_datex.py) uses `local[3]` and four. Both spill under
 `<output parent>/spark-scratch`, or `/data/dat535/spark-scratch` here. Overrides are
 `SPARK_MASTER`, `DAT535_SHUFFLE_PARTITIONS` and `DAT535_SPARK_LOCAL_DIR`.
-DATEX decoding temporarily sets both the Parquet reader batch and Arrow batch to one
-snapshot to fit its large payloads in memory. Bronze retains Spark's `/tmp` default,
-but direct writes no longer need the removed sort.
+Decoding sets both the Parquet reader batch and the Arrow batch to a number of payloads,
+one DATEX snapshot or eight ET pushes (`write_decoded`), and both Bronze writers check the
+Parquet page size after every row (`PAGE_CHECK_EVERY_ROW`). Since 2026-11-26 an ET push can be
+several MB, and the row-count defaults ran out of heap
+([problem log](../report/problems.md#2026-11-27--entur-started-batching-et-and-the-silver-decode-ran-out-of-heap)).
+Bronze retains Spark's `/tmp` default, but direct writes no longer need the removed sort.
 
 Silver stages narrow parsed data and checked tables under `silver/_staging/<run>/`.
 Normal exits remove staging. Killed jobs can leave files and a non-ready

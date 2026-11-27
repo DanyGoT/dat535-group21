@@ -20,6 +20,7 @@ from pathlib import Path
 
 from bronze import (
     HOURS,
+    PAGE_CHECK_EVERY_ROW,
     cli,
     create_spark,
     iso,
@@ -83,13 +84,10 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
     input_bytes = sum(f.stat().st_size for f in files)
     n_out = min(len(files), max(1, math.ceil(input_bytes / INPUT_BYTES_PER_FILE)))
     partition = Path(out_root) / f"{PREFIX}{feed}" / f"date={day}"
-    # One Parquet page per row: a situation row is a ~27 MB snapshot, and Parquet's default
-    # (check size after 100 rows) let three tasks fill the 4 GB driver (prod, 2026-10-29).
-    (
-        bronze.coalesce(n_out)
-        .write.mode("overwrite")
-        .option("parquet.page.size.row.check.min", 1)
-        .parquet(str(partition))
+    # A situation row is a ~27 MB snapshot, and Parquet's default (check size after 100 rows)
+    # let three tasks fill the 4 GB driver (prod, 2026-10-29).
+    bronze.coalesce(n_out).write.mode("overwrite").options(**PAGE_CHECK_EVERY_ROW).parquet(
+        str(partition)
     )
 
     # Coverage, from narrow columns of what was written (never the payloads).

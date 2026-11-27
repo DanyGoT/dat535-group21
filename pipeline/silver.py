@@ -603,23 +603,34 @@ def decode_day(spark, root, stage, feed, source_day, source, evidence):
         return folder
 
     work = stage / "_work" / f"{feed}-{source_day}"
-    # Small Arrow batches: one ET message can be 22M characters (10 000 rows ~ 300 MB).
-    batch_setting = "spark.sql.execution.arrow.maxRecordsPerBatch"
-    previous = spark.conf.get(batch_setting)
-    spark.conf.set(batch_setting, "500")
-    try:
-        spec = schema(feed)
-        decoder = arrow_decoder(partial(decode_partition, feed=feed), spec)
-        source.mapInArrow(decoder, spec).write.parquet(str(work))
-    finally:
-        spark.conf.set(batch_setting, previous)
-
+    # Since 2026-11-26 Entur sends ET as one push of 2-6 MB every 1-2 s, and 256 of them per
+    # read batch filled the heap. 8 hold ~40 MB per task (docs/report/problems.md).
+    write_decoded(spark, source, partial(decode_partition, feed=feed), schema(feed), work, 8)
     atomic_json(work / "_decoded.json", stamp)
     folder.parent.mkdir(parents=True, exist_ok=True)
     if folder.exists():
         shutil.rmtree(folder)
     os.replace(work, folder)
     return folder
+
+
+def write_decoded(spark, source, decode, spec, work, payloads_per_batch):
+    """Decode Bronze payloads to typed rows, holding `payloads_per_batch` per task in memory.
+
+    Both batches count rows, not bytes: the Parquet reader's and the Arrow batch sent to Python.
+    """
+    batch = {
+        "spark.sql.parquet.columnarReaderBatchSize": str(payloads_per_batch),
+        "spark.sql.execution.arrow.maxRecordsPerBatch": str(payloads_per_batch),
+    }
+    previous = {key: spark.conf.get(key) for key in batch}
+    for key, value in batch.items():
+        spark.conf.set(key, value)
+    try:
+        source.mapInArrow(arrow_decoder(decode, spec), spec).write.parquet(str(work))
+    finally:
+        for key, value in previous.items():
+            spark.conf.set(key, value)
 
 
 def silver_spark(app, output_dir, master, shuffle_partitions):

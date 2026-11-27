@@ -149,7 +149,7 @@ Run records count files, rows, errors and hour coverage.
 | Reader batch 256 | 2026-10-24 test killed a 3 GB driver at 4096. Batch 256 read the hour in 23 s |
 | Lift `maxStringLen` | ET reaches 22.8M characters and DATEX 28.6M. Jackson's 20M default marked them corrupt |
 | Write the day directly | `partitionBy` on a constant sorted the whole day and filled the root disk on 2026-10-24 |
-| DATEX `parquet.page.size.row.check.min=1` | First full-day write buffered 26.6M-character snapshots until heap exhaustion on 2026-10-29 |
+| Page size checked after every row | DATEX filled the heap with 26.6M-character snapshots on 2026-10-29, and batched ET from 2026-11-26 did too until Parquet's size estimate was also off |
 
 A check on 2026-11-06 matched Bronze rows to landing lines on every checked feed.
 The only collection dip it found was 2026-10-21, 15–17 UTC.

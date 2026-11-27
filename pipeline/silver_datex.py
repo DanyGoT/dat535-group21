@@ -28,6 +28,7 @@ from silver import (
     publish,
     silver_spark,
     stage_table,
+    write_decoded,
 )
 from silver_datex_parse import decode_partition, schema, section_points, situation_points
 from silver_parse import arrow_decoder
@@ -46,13 +47,6 @@ KEYS = {
     "traveltime": ("value", ["section_id", "period_start_at"]),
     "weather-sites": ("site", ["id"]),
     "traveltime-locations": ("section", ["id"]),
-}
-
-# A situation snapshot is ~27 MB: hold one at a time. Four per batch filled a 3 GB heap
-# on 2026-11-03 (docs/report/problems.md).
-ONE_SNAPSHOT_AT_A_TIME = {
-    "spark.sql.execution.arrow.maxRecordsPerBatch": "1",
-    "spark.sql.parquet.columnarReaderBatchSize": "1",
 }
 
 
@@ -93,17 +87,10 @@ def read_bronze(spark, output, feed, day, allow_partial, record):
 
 
 def decode(spark, source, feed, work):
-    """Decode one feed's polls to typed rows, one snapshot in memory at a time."""
-    previous = {k: spark.conf.get(k) for k in ONE_SNAPSHOT_AT_A_TIME}
-    for key, value in ONE_SNAPSHOT_AT_A_TIME.items():
-        spark.conf.set(key, value)
-    try:
-        spec = schema(feed)
-        decoder = arrow_decoder(partial(decode_partition, feed=feed), spec)
-        source.mapInArrow(decoder, spec).write.parquet(str(work))
-    finally:
-        for key, value in previous.items():
-            spark.conf.set(key, value)
+    """Decode one feed's polls to typed rows."""
+    # A situation snapshot is ~27 MB: hold one at a time. Four per batch filled a 3 GB heap
+    # on 2026-11-03 (docs/report/problems.md).
+    write_decoded(spark, source, partial(decode_partition, feed=feed), schema(feed), work, 1)
     return spark.read.parquet(str(work))
 
 
