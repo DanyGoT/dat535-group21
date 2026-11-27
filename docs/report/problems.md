@@ -65,12 +65,12 @@ Entry template:
   - Reading that Bronze with read and Arrow batches of 8 still failed, in
     `HeapBytesDecompressor.decompress`: a Parquet page is decompressed whole, and 11-26's pages
     held about 100 pushes each (row groups of ~250 rows and 1.5 GB).
-  - Main's Bronze on four batched hours (11-26, 13–16 UTC) passed once in 217 s at 4.8 GB peak
-    RSS and failed in an identical run. Parquet warned `Too much memory used`, with 0.5 GB in one
-    page buffer.
-  - `parquet.page.size.row.check.min=1` alone made it worse: rewriting 400 real rows gave 2 pages
-    instead of 4. The second row was a 521-byte heartbeat. With `parquet.page.size.check.estimate`
-    also off, the same rows gave 381 pages.
+  - Main's Bronze on four batched hours (11-26, 13–16 UTC) passed in 217 s at 4.8 GB peak RSS,
+    close to the limit: Parquet warned `Too much memory used`, with 0.5 GB in one page buffer.
+  - `parquet.page.size.row.check.min=1` alone made it worse. Bronze on the same hours ran out of
+    heap twice within 45 s, with up to 1.2 GB in one page buffer, and rewriting 400 real rows gave
+    2 pages instead of 4. The second row was a 521-byte heartbeat. With
+    `parquet.page.size.check.estimate` also off, the same rows gave 381 pages.
 - **Cause:** Two row counts sized for small messages. Parquet checks a page's size after 100 rows
   and then extrapolates from the rows so far, so one small heartbeat postpones the next check by
   hundreds of large pushes. Silver's decode read 256 rows per Parquet batch and sent 500 per Arrow
