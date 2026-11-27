@@ -63,6 +63,7 @@ The type-specific element is `EstimatedTimetableSubscriptionRequest` or
 | Duration | no maximum termination time, expires when reached | requests 7 days, renews after 24 h |
 | Initial data | current ET journeys and all open SX messages, split with `MoreData` | stores all, including resubscription duplicates |
 | Push | HTTP POST, `application/xml`, extra `subscriptionId` header, any 2xx accepted | appends before returning 200 |
+| Push size | until 2026-11-26 12:14 UTC ~70 ET pushes/s of ~30 kB. From the renewal then, one push every 1–2 s of 2–6 MB, up to 19 MB, with the same bytes per hour. Cause **UNVERIFIED**: nothing changed on our side | stores each push as one line. Silver's decode counts payloads per batch ([problem log](../report/problems.md#2026-11-27--entur-started-batching-et-and-the-silver-decode-ran-out-of-heap)) |
 | Heartbeat | `HeartbeatNotification`, interval clamped to 30–60 s | stores it as coverage evidence |
 | Delivery failures | 15 s timeout, one retry, backoff 10→60 s after 5 consecutive failures | accepts pushes and HEAD probes |
 | Cancellation | after max(3 × heartbeat, 5 min) of delivery failure | presumes dead after 3 heartbeat intervals without any push |

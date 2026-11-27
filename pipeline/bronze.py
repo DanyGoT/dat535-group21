@@ -41,6 +41,14 @@ OPEN = re.compile(r"^hour=(\d{2})\.jsonl\.part$")
 # longer (ET pushes of 22.8M, every DATEX situation snapshot ~28.6M), so lift the cap.
 MAX_STRING_LEN = 2**31 - 1
 
+# Parquet checks a page's size after 100 rows, then extrapolates from the rows so far: one
+# heartbeat among multi-MB payloads postpones the next check by hundreds of rows, and four such
+# pages filled the heap (docs/report/problems.md). Check after every row instead.
+PAGE_CHECK_EVERY_ROW = {
+    "parquet.page.size.row.check.min": "1",
+    "parquet.page.size.check.estimate": "false",
+}
+
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -192,7 +200,7 @@ def ingest_feed(spark, files, feed, day, out_root, rid, ingested_at):
     # one task and about one Parquet file per hour. Written straight into the day's folder:
     # partitionBy("date") would sort, and spill, the whole day first.
     partition = Path(out_root) / DATASETS[feed] / f"date={day}"
-    bronze.write.mode("overwrite").parquet(str(partition))
+    bronze.write.mode("overwrite").options(**PAGE_CHECK_EVERY_ROW).parquet(str(partition))
 
     counts = status_counts(spark.read.parquet(str(partition)))
     bad_rows = {k: v for k, v in counts.items() if k != "ok"}

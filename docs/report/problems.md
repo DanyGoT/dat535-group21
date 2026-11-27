@@ -10,6 +10,8 @@ Entries:
 
 | Date | Incident |
 | ---- | -------- |
+| 2026-11-27 | [Batched ET pushes ran Bronze and Silver out of heap](#2026-11-27--entur-started-batching-et-and-the-silver-decode-ran-out-of-heap) |
+| 2026-11-27 | [Silver rebuild filled the data volume](#2026-11-27--the-silver-rebuild-filled-the-data-volume) |
 | 2026-11-26 | [Deploys used up the static archive's starts](#2026-11-26--deploys-used-up-the-static-archives-daily-starts) |
 | 2026-11-20 | [Data volume at 96 %](#2026-11-20--the-data-volume-reached-96--with-two-days-left) |
 | 2026-11-16 | [Dashboard map took one click](#2026-11-16--the-dashboard-map-took-only-one-click) |
@@ -47,6 +49,66 @@ Entry template:
 ```
 
 ---
+
+## 2026-11-27 — Entur started batching ET and the Silver decode ran out of heap
+
+- **Area:** Bronze, Silver
+- **Symptom:** The nightly prod run `45993521195` failed at Entur Silver for operating day
+  2026-11-25 with `java.lang.OutOfMemoryError: Java heap space` in the vectorized Parquet reader,
+  while decoding Bronze ET 2026-11-26 (`part-00013`, a request for 372,471,245 bytes). Gold was
+  skipped. Bronze for 11-26 had succeeded.
+- **Evidence:**
+  - At 12:15 UTC on 11-26, right after the receiver's daily ET renewal, pushes fell from about
+    4,000 a minute to 31, while bytes stayed at 130–160 MB a minute. An average push grew from
+    ~30 kB to 2–6 MB, up to 19 MB. Bronze 11-26 holds 2.1 M ET rows for 148 GB of payload, against
+    4.8 M rows for 152 GB on 11-25. 11-27 is batched all day, about 4,000 pushes an hour.
+  - Reading that Bronze with read and Arrow batches of 8 still failed, in
+    `HeapBytesDecompressor.decompress`: a Parquet page is decompressed whole, and 11-26's pages
+    held about 100 pushes each (row groups of ~250 rows and 1.5 GB).
+  - Main's Bronze on four batched hours (11-26, 13–16 UTC) passed once in 217 s at 4.8 GB peak
+    RSS and failed in an identical run. Parquet warned `Too much memory used`, with 0.5 GB in one
+    page buffer.
+  - `parquet.page.size.row.check.min=1` alone made it worse: rewriting 400 real rows gave 2 pages
+    instead of 4. The second row was a 521-byte heartbeat. With `parquet.page.size.check.estimate`
+    also off, the same rows gave 381 pages.
+- **Cause:** Two row counts sized for small messages. Parquet checks a page's size after 100 rows
+  and then extrapolates from the rows so far, so one small heartbeat postpones the next check by
+  hundreds of large pushes. Silver's decode read 256 rows per Parquet batch and sent 500 per Arrow
+  batch to Python, over 1 GB per task at 5 MB a push.
+- **Fix:** Both Bronze writers check page size after every row (`PAGE_CHECK_EVERY_ROW` in
+  [pipeline/bronze.py](../../pipeline/bronze.py)). Silver decodes 8 ET payloads per Parquet and Arrow
+  batch, and DATEX 1, through one helper (`write_decoded` in
+  [pipeline/silver.py](../../pipeline/silver.py)). With both, the same four hours passed Bronze
+  in 272 s at 3.8 GB peak RSS, with no warning, and two of them decoded at batch 8 to 13.1 M and
+  11.3 M rows. Bronze 2026-11-26 is rebuilt once, then Silver and Gold for 11-25 rerun.
+- **Trade-off:** Bronze took a quarter longer on those hours (272 s against 217 s). Each Python
+  decoder now holds a multi-MB XML tree, so the decode's peak RSS rose to 6.2 GB from 3.9 GB on
+  the old pattern, within 7.9 GB of RAM and 4 GB of swap. One old-pattern hour (218,647 pushes)
+  decoded in 107 s at batch 8 against 112 s at 256/500, to the same 5,968,531 rows.
+- **Lesson:** The 2026-10-24 lesson, size batches by bytes and not rows, was applied to one
+  setting. A source can change its message size without notice, so every row count on the payload
+  path has to hold for the largest row. Nothing changed on our side, and the cause at Entur is
+  **UNVERIFIED** ([realtime](../entur/realtime.md#pubsub-how-the-subscription-works)).
+
+## 2026-11-27 — The Silver rebuild filled the data volume
+
+- **Area:** VM, Silver, collector
+- **Symptom:** The manual Silver rebuild's run for 2026-11-18 failed at 15:55:58 UTC with
+  `No space left on device` while spilling in stage 257 (call predictions). In the same second the
+  receiver failed to write one ET push (`OSError: [Errno 28]` in `_spool_body`), and the vehicle
+  stream reconnected after 10 s.
+- **Evidence:** The rebuild ran Entur Silver for 10-26…11-18 and DATEX Silver for 10-28…11-19,
+  45 of 47 steps OK. Its decode caches had reached 69 GB for 32 UTC days, and one prediction step
+  spills about 70 GB ([profile](evidence/silver-profile-2026-10-27.md)). After the failure the
+  spill was gone and `/data` had 77 GB free. The other failed step, DATEX Silver 10-28, refused
+  correctly: Bronze `datex-situation` lacks hours 00–10 of that day.
+- **Cause:** The cleanup order removes caches older than three days, but nobody did during a
+  rebuild that adds one each step.
+- **Fix:** Deleted by hand all 79 cache folders of 10-25…11-16 and 11-20…23 (52 GB), keeping the
+  days the next reruns read. `/data` had 128 GB free. Silver 11-18 is rerun by hand.
+- **Trade-off:** A rerun of another day decodes its three UTC days again, about 32 min each.
+- **Lesson:** Free space must cover the largest step's spill, not the daily growth. The
+  collectors share the volume, so a full disk costs raw data as well as a batch run.
 
 ## 2026-11-26 — Deploys used up the static archive's daily starts
 
