@@ -67,7 +67,7 @@ Paths are relative to `/data/dat535/`.
 
 1. Remove `{dev,prod}/silver/_decoded/<feed>/source_date=YYYY-MM-DD/` folders older than three
    days. This frees ~1.9 GB/day, or 19 GB for ten days on 2026-11-06. Reruns decode again in
-   ~37 min/UTC day.
+   ~32 min/UTC day ([profile](../report/evidence/silver-profile-2026-10-27.md)).
 2. Remove `dev/` outputs older than a week (and any finished experiment directories).
 3. ~~Rebuild pre-zstd prod Bronze~~ — **completed 2026-11-20** across all 36 days (2026-10-15…11-19),
    shrinking prod Bronze from 378 GB to 285 GB.

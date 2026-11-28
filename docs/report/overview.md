@@ -245,7 +245,11 @@ versions across its three-day input window, rather than per UTC input day.
 
 [`latest`](../../pipeline/silver.py) prefers a row with an actual arrival or departure,
 then producer time, receipt time and deterministic tie-breakers. It is one `max_by` aggregate
-rather than a ranking window: the winner is picked as rows are combined, before the shuffle.
+rather than a ranking window, for clarity rather than speed. We expected it to be faster,
+because it keeps one version per call before the shuffle. On a full day (140 M call versions,
+2.58 M calls) a `row_number` window does the same in Spark 3.5. Its plan also keeps one row
+per call before the shuffle, so both move 11.6 M rows, keep the same versions and run equally
+fast ([benchmark](evidence/latest-benchmark-2026-11-24.json)).
 
 ```python
 # pipeline/silver.py
@@ -492,7 +496,9 @@ return (
 
 Transfers are observed rather than modelled. Each arrival at a hub is paired with the first
 departure of every other line aimed 0–15 minutes later. A range join would compare every arrival
-with every departure at the hub, so it becomes an equi-join on 15-minute buckets:
+with every departure at the hub, so it becomes an equi-join on 15-minute buckets. On 2026-11-23
+that compares 19.9 million candidate pairs instead of the 663 million a join on hub alone would
+([record](evidence/transfer-pairs-2026-11-23.json)):
 
 ```python
 # pipeline/gold.py, build_transfers
@@ -645,9 +651,9 @@ More: [dev workflow](../../.github/workflows/dat535-dev.yml),
 | Preserve landing and Bronze payloads | Downstream bugs can be fixed by rerunning | Disk capacity |
 | Stop-call grain | Reusable journey-position facts | Separate prediction history |
 | Flag field failures | Quality remains measurable | Consumers must interpret flags |
-| Python XML parsing in Spark tasks | Standard-library parser shared across decoders | Historical estimate of 37 min/UTC day |
+| Python XML parsing in Spark tasks | Standard-library parser shared across decoders | 32 min per UTC day, half of a Silver run ([profile](evidence/silver-profile-2026-10-27.md)) |
 | One Spark job at a time | Fit 7.9 GB RAM | Long runs block other jobs |
-| Time-split validation and as-of features | Prevent future knowledge leaking into features | Less training data |
+| As-of predictions | Countdown accuracy uses only what was known at each lead time | A second table per call, reference and lead time |
 
 Each Spark API is used where it fits. Spark SQL computes declarative aggregates: Gold's
 scorecard and reconciliation totals. The DataFrame API composes rules from shared column

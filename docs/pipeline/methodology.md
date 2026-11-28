@@ -85,6 +85,12 @@ for source drift.
   pruning without blocking multi-day Gold reads. The trade-off is small files on tiny daily
   reference tables (`operator`, `line`, `weather_site`, `road_section`); at multi-year scale,
   Delta Lake / Iceberg with `replaceWhere` and file compaction would address both.
+- **Measured on 2026-11-26 (22 prod Silver days):** every consumer reads one day. Gold reads one
+  operating day of Silver, and the dashboard reads Gold. A day of `stop_call` is 32 files of
+  about 5 MB (160 MB), `call_prediction` 64 files (950 MB), `vehicle_position` 32 files (5.4 GB),
+  and each reference table 1 to 4 files of a few KB to 9 MB. Reading a day opens at most 64
+  files, so the small files cost little, while coarser partitions would make every rerun rewrite
+  several days. Silver stays per day.
 - **Known operational trade-offs:** Bronze overwrites its target `date=D/` folder in place rather
   than staging first (safe because landing is immutable and Silver checks Bronze coverage before
   publishing); `collector/static.py`'s 20-hour guard is shorter than Entur's rolling 24-hour

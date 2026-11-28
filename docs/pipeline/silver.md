@@ -160,6 +160,16 @@ ET reads completed UTC Bronze days `D-1, D, D+1`, then resolves and filters oper
 This covers pre-midnight reports, overnight services and following-day replay.
 SX and vehicles read only UTC `D`. Updates received outside ET's window remain excluded on reruns.
 
+What the window misses was measured on UTC day 2026-11-24
+([record](../report/evidence/late-data-2026-11-24.json), [`late_data.py`](../report/evidence/late_data.py)).
+Of its 140.1 M call versions, 99.1 % belong to operating day 24 Nov, 0.8 % to the 25th and
+0.09 % to the 23rd. Only 15,840 (0.011 %) belong to a day whose window does not read this UTC
+day. None of them is late: all are announcements for 26 Nov to 1 Dec, with no actual time. A
+later version supersedes them unless the journey is never sent again in its own window. The
+only kind that could change a final state is an early cancellation: 222 such versions, all
+for 26 Nov. Catching them would mean reading `D-2` as well, about 140 M more versions in
+every Silver run, so the window stays at three days.
+
 [`normalize_journeys`](../../pipeline/silver.py) records date precedence in `date_source`:
 
 1. `framed` uses the message's `DataFrameRef`.
@@ -272,11 +282,12 @@ spill on `/data` and the shared lock. Reruns use archived inputs.
 | Scheduled Bronze and DATEX Silver | Yesterday, UTC |
 | Scheduled Entur Silver | Two days ago, operating date |
 | Manual `bronze_date` | UTC input day for both Bronze jobs |
-| Manual `silver_date` | Entur operating day and DATEX UTC observation day |
+| Manual `silver_gold_date` | Entur operating day and DATEX UTC observation day |
 
-A `silver_date` dispatch runs both Bronze steps, but does not rebuild ET's entire three-day window.
-Without `bronze_date`, those steps still ingest yesterday. Ensure the needed Bronze days exist.
-A Bronze-only dispatch skips both Silver jobs. Repair missing Bronze days manually, then rerun Silver.
+A dispatch builds only the layers it names. `silver_gold_date` runs both Silver jobs and Gold
+on the Bronze already there, because rewriting Bronze would leave every Silver day built from
+it pointing at a superseded run. `bronze_date` runs both Bronze jobs and nothing after them. Entur
+Silver for day D needs Bronze for D-1, D and D+1, so rerun a missing Bronze day first.
 
 The [dev workflow](../../.github/workflows/dat535-dev.yml) uses one-hour Bronze and
 `--allow-partial`, producing `status=partial, ready=false`. The flag permits incomplete or
@@ -288,6 +299,9 @@ Local execution additionally needs Java 8/17, archived NeTEx/NSR and Bronze inpu
 ## Evidence and measurements
 
 The [evidence index](../report/evidence/README.md) links runs and experiments.
+A [profile of one full day](../report/evidence/silver-profile-2026-10-27.md) shows where a run
+goes: decoding the new UTC day takes half of it, and `call_prediction` takes a quarter and
+spills 70 GB, from four shuffles of all 140 M call versions in `asof_intervals`.
 The [20-day Silver quality report](../report/evidence/silver-quality-2026-11.md) (generated from
 prod Actions artifacts) and matched `2026-11-20` records
 ([`silver-2026-11-20.json`](../report/evidence/silver-2026-11-20.json),
