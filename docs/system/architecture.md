@@ -117,7 +117,7 @@ Runs checked on 2026-11-11 started at about 09:20–10:50 UTC. Its steps run seq
    ET reads three adjacent UTC days and the newest references archived on or before the operating day.
    SX and vehicles retain UTC grains.
 4. [Gold](../../pipeline/gold.py) runs after Entur Silver for the same operating day (two days ago),
-   reading ready Entur Silver and that day's DATEX Silver when present. It publishes six tables
+   reading ready Entur Silver and that day's DATEX Silver when present. It publishes seven tables
    (skipping `departure_conditions` and recording it in `latest.json` if DATEX Silver is missing).
 
 DATEX Bronze is attempted even if Entur Bronze fails. Each Silver step depends on its own

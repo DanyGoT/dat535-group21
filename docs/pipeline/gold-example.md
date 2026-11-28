@@ -2,7 +2,7 @@
 
 [`gold.py`](../../pipeline/gold.py) runs nightly in [prod CI](../../.github/workflows/dat535-prod.yml)
 (and with `--allow-partial` in [dev CI](../../.github/workflows/dat535-dev.yml)), turning one
-operating day of published Entur Silver and the same UTC day of DATEX Silver into six additive
+operating day of published Entur Silver and the same UTC day of DATEX Silver into seven additive
 tables. The [dashboard](../../dashboard/README.md) sums all ready Gold days into a stop map, a
 transfer explorer, a map of delay between stops and a road-conditions comparison.
 
@@ -20,10 +20,18 @@ Related: [Silver](silver.md#tables), [Gold scope & future work](gold.md),
 | `line_stop_delays` | Hub × line × arrival or departure × trip end × local hour | How late does this line arrive or leave here? | Input to #8 across nearby stops |
 | `segment_delay` | Line × hub × next hub × local hour | Where is delay gained, and where recovered? | #3 delay hotspots |
 | `departure_conditions` | Mode × local hour × four road-condition levels | Do late departures go with weather, roadworks or congestion? | First slice of #4 and #5 |
+| `countdown_accuracy` | Line × reference × lead time | How far was the departure time shown from the actual one? | #6 countdown accuracy |
 
 Every count is additive. Consumers sum days and compute rates from the sums. No table stores an
 average or percentile that would have to be averaged later, except the scorecard's daily delay
 percentiles, which stay per day.
+
+One overlap is deliberate. `stop_reliability` is the hub and hour rollup of the departure rows
+in `line_stop_delays`: its delay bins fall on whole minutes, so the minute histogram holds them.
+The map reads the rollup because a weekday has 0.4 M stop rows against 1.9 M line rows, each with
+a 41-bin histogram, and the dashboard sums every day. The totals check proves the two agree.
+Every other table answers a question no other table can: they pair calls (transfers, segments),
+join another source (road conditions) or read another Silver table (countdown).
 
 ## Shared rules
 
@@ -31,7 +39,7 @@ percentiles, which stay per day.
   required; DATEX Silver for UTC observation day D (marker schema 1) is used when published.
   Present markers must be `complete, ready=true`, or the run needs `--allow-partial` and is
   published `partial, ready=false`. If DATEX Silver does not exist for day D, Gold still publishes
-  the five Entur tables `ready=true`, skips `departure_conditions`, and records
+  the six Entur tables `ready=true`, skips `departure_conditions`, and records
   `datex_status: "missing"` and `skipped_tables: ["departure_conditions"]` in `latest.json`.
   Every table read must have exactly its marker's row count and `_silver_run_id`.
 - **Timed departure.** One definition for every table: reported, not cancelled, boarding not
@@ -46,7 +54,8 @@ percentiles, which stay per day.
 - **Reconciliation before publication.** Scorecard journeys and calls equal Silver's rows. The
   map and the conditions table split exactly the scorecard's timed and late departures. The
   departure rows of `line_stop_delays` hold exactly the scorecard's timed departures and the
-  map's cancellations.
+  map's cancellations. No reference and lead time of `countdown_accuracy` holds more predictions
+  than the scorecard has timed departures, and every prediction is in its histogram.
 
 ## `line_scorecard`
 
@@ -155,14 +164,39 @@ condition records. Every other record type counts as roadworks or traffic manage
 inland, so most ferry quays get `unknown` weather. Only 202 travel-time sections exist, so most
 departures are `no_section`. Proximity is not causation.
 
+## `countdown_accuracy`
+
+How far the departure time a display or journey planner showed was from the actual departure.
+It reads Silver's `call_prediction`: the state known 1, 5, 10, 20 and 30 minutes before each
+call's planned and actual time, with no later knowledge
+([`asof_intervals`](../../pipeline/silver.py)).
+
+| Column | Definition |
+| ------ | ---------- |
+| `reference` | `actual`: N minutes before the vehicle left, the countdown. `planned`: N minutes before the timetable time, what a traveller looking it up then saw |
+| `lead_minutes` | 1, 5, 10, 20 or 30 |
+| `predictions` | Timed departures (shared rule) with a departure time known at that cutoff |
+| `error_counts[i]` | Predictions whose error, time shown minus actual departure floored to whole minutes, is `i − 10`, clipped to −10..+10 |
+
+A positive error means the vehicle left before the time shown, so a traveller trusting it could
+miss it. Within a minute either way is `error_counts[9] + error_counts[10]`. A cancellation state
+shows no time and is left out; a departure with nothing known at a cutoff has no row there. Labels
+come from `line_scorecard` on the same line and day.
+
+**Limits.** Where an operator copies aimed into actual times, the error is measured against the
+timetable. Only the five sampled lead times exist. The `actual` reference is retrospective: nobody
+can look up "10 minutes before it leaves" in advance.
+
 ## Dashboard
 
 [`dashboard/build.py`](../../dashboard/build.py) reads only Gold Parquet and run markers, checks
 each partition's row count and run ID and reconciles departures and timed runs to the markers. It
-accepts only Gold marker schema 3: days published before `line_stop_delays` and `segment_delay` existed must be rerun. It writes
-`dashboard/dist/`, a static site that opens from disk or any static host:
+accepts only Gold marker schema 4: days published before `countdown_accuracy` existed must be
+rerun. It writes `dashboard/dist/`, a static site that opens from disk or any static host:
 
-- `data.js` holds hubs with at least 20 timed departures, the condition counts and line labels.
+- `data.js` holds hubs with at least 20 timed departures, the condition counts, line labels and
+  the countdown counts per mode, reference and lead time: left 1+ min after, within a minute of,
+  and 1+ min before the time shown.
 - `segments.js` holds hub pairs with at least 30 timed runs over all lines and days, loaded when
   the *Where delay grows* view opens. Each direction is drawn on its right-hand side of travel,
   coloured by mean change per run; the panel ranks pairs by change per run or in total. A filter
@@ -180,6 +214,10 @@ The road view compares each level with its reference within the same mode and ho
 strata by the level's departures and skipping strata where the reference has fewer than 30.
 Rush hour therefore cannot pass for congestion. Region and line are not controlled.
 
+The countdown view takes each line's mode from `line_scorecard` and shows, per lead time, the
+share of departures that left within a minute of the time shown, and the shares that left a
+minute or more earlier or later.
+
 Shift-click (or "Compare with a nearby stop") puts two hubs side by side. The reader picks the
 arriving line at one, the leaving line at the other, and a time-of-day band. Gold pairs calls
 only within one hub, so the page *estimates* that transfer from `line_stop_delays`: the arriving
@@ -193,7 +231,7 @@ flock -n /data/dat535/.spark.lock ~/spark-env/bin/python dashboard/build.py --ou
   --all-ready
 ```
 
-Pass `--all-ready` to include every complete, ready schema-3 Gold day, or repeat `--date YYYY-MM-DD`
+Pass `--all-ready` to include every complete, ready schema-4 Gold day, or repeat `--date YYYY-MM-DD`
 for specific days. Days where `departure_conditions` was skipped are included in the stop,
 transfer and segment views and omitted from the road-conditions cube.
 
@@ -227,20 +265,21 @@ marker under `silver/_runs/datex/observation_date=D/` is optional: without it Go
 
 | Path under the output root | Contents |
 | -------------------------- | -------- |
-| `gold/<table>/operating_date=D/*.parquet` | The six tables |
+| `gold/<table>/operating_date=D/*.parquet` | The seven tables |
 | `gold/line_scorecard/operating_date=D/_preview/` | `report.md` (top 25 lines) and `scorecard.csv` |
 | `gold/_runs/operating_date=D/<run_id>.json` | Lineage, totals, table sizes, condition coverage, runtime |
 | `gold/_runs/operating_date=D/latest.json` | Publication and readiness marker |
 
-The shared [publisher](../../pipeline/silver.py) replaces the selected day of all six tables and
+The shared [publisher](../../pipeline/silver.py) replaces the selected day of all seven tables and
 rolls back ordinary failures. [Offline tests](../../pipeline/tests/test_gold.py) cover grains,
-denominators, cancellations, quality exclusions, transfer pairing, line delays, segment delay change, condition levels including
-NPRA's offset periods, partial input, reruns and mismatched lineage.
+denominators, cancellations, quality exclusions, transfer pairing, line delays, segment delay
+change, condition levels including NPRA's offset periods, countdown error, partial input, reruns
+and mismatched lineage.
 
 ## Validated
 
-These are schema-2 runs from before `line_stop_delays` and `segment_delay`; the dashboard builder needs schema-3 runs
-with them, so the three days must be rerun.
+These are schema-2 runs from before `line_stop_delays`, `segment_delay` and `countdown_accuracy`;
+the dashboard builder needs schema-4 runs, so the three days must be rerun.
 
 Run on 2026-11-11 against prod Silver, writing to a separate output root. All three days had
 both sources `complete, ready=true`. They are the only days where both exist: DATEX Silver is

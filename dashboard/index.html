@@ -21,6 +21,7 @@
     <button type="button" data-view="network" aria-pressed="true">Stops and transfers</button>
     <button type="button" data-view="segments" aria-pressed="false">Where delay grows</button>
     <button type="button" data-view="roads" aria-pressed="false">Road conditions</button>
+    <button type="button" data-view="countdown" aria-pressed="false">Countdown</button>
   </nav>
 </header>
 
@@ -65,6 +66,18 @@
     <label class="mode">Mode <select id="mode"></select></label>
   </div>
   <div id="factors" class="factors"></div>
+</main>
+
+<main id="countdown" class="roads" hidden>
+  <div class="roads-head">
+    <div>
+      <h2>How far off was the departure time shown?</h2>
+      <p class="lede">Each timed departure compared with the departure time known 1, 5, 10, 20 and 30 minutes earlier.
+        Leaving a minute or more before the time shown is the error that makes a traveller miss it.</p>
+    </div>
+    <label class="mode">Mode <select id="cdmode"></select></label>
+  </div>
+  <div id="countdowns" class="factors"></div>
 </main>
 
 <footer class="foot" id="foot"></footer>

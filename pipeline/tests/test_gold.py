@@ -20,6 +20,8 @@ CALL_SCHEMA = """operating_date date, line_id string, journey_id string, call_or
     dq_issue array<string>"""
 JOURNEY_SCHEMA = """operating_date date, line_id string, journey_id string,
     has_plan boolean, has_realtime boolean, journey_cancelled boolean, service_alteration string"""
+PREDICTION_SCHEMA = """operating_date date, journey_id string, call_order int, event string,
+    reference string, lead_minutes int, predicted_at timestamp"""
 SCHEMAS = {
     "line": "operating_date date, id string, name string, public_code string, operator_id string, mode string",
     "operator": "operating_date date, id string, name string",
@@ -66,6 +68,11 @@ def stop(journey, order, line, quay, arrive=None, depart=None, arrive_delay=0, d
                 actual_departure_at=actual(depart, depart_delay), **extra)
 
 
+def prediction(jid, reference, lead, shown, order=1, event="departure"):
+    """The time Silver knew `lead` minutes before the call's planned or actual time."""
+    return (DAY, jid, order, event, reference, lead, shown)
+
+
 def journey(jid, planned=True, reported=True, line="T:Line:1", **extra):
     result = dict(operating_date=DAY, line_id=line, journey_id=jid, has_plan=planned,
                   has_realtime=reported, journey_cancelled=False, service_alteration=None)
@@ -74,11 +81,14 @@ def journey(jid, planned=True, reported=True, line="T:Line:1", **extra):
 
 
 class GoldTest(SparkCase):
-    def frames(self, calls=None, journeys=None):
+    def frames(self, calls=None, journeys=None, predictions=None):
         frame = self.spark.createDataFrame
+        if predictions is None:
+            predictions = [prediction("j1", "actual", 5, AT + timedelta(seconds=150))]
         return {
             "stop_call": frame(calls if calls is not None else [call("j1", delay=180)], CALL_SCHEMA),
             "journey": frame(journeys if journeys is not None else [journey("j1")], JOURNEY_SCHEMA),
+            "call_prediction": frame(predictions, PREDICTION_SCHEMA),
             "line": frame([(DAY, "T:Line:1", "Example route", "3", "T:Operator:1", "bus")], SCHEMAS["line"]),
             "operator": frame([(DAY, "T:Operator:1", "Example operator")], SCHEMAS["operator"]),
             "quay": frame([(DAY, *q) for q in QUAYS], SCHEMAS["quay"]),
@@ -277,6 +287,35 @@ class GoldTest(SparkCase):
         busy = next(r for r in stops if (r.hub_id, r.hour) == ("SP:1", 9))
         self.assertEqual((busy.hub_name, busy.scored_departures, busy.departures_3_5_min, busy.cancelled_departures),
                          ("Stop", 1, 1, 2))
+
+    def test_countdown_compares_the_time_shown_with_the_actual_departure(self):
+        left = AT + timedelta(seconds=120)  # j1 left 2 min late
+        calls = [call("j1", delay=120), call("j2", delay=60, call_cancelled=True)]
+        predictions = [
+            prediction("j1", "actual", 5, left - timedelta(seconds=30)),  # left 30 s after the time shown
+            prediction("j1", "actual", 1, left + timedelta(seconds=200)),  # left 3 min 20 s before it
+            prediction("j1", "planned", 5, AT),
+            prediction("j1", "planned", 10, left + timedelta(minutes=20)),  # clipped
+            prediction("j1", "actual", 10, None),  # a cancellation state shows no time
+            prediction("j1", "actual", 20, AT, event="arrival"),
+            prediction("j2", "actual", 5, AT),  # not a timed departure
+        ]
+        frames = self.frames(calls, predictions=predictions)
+        rows = {(r.reference, r.lead_minutes): r
+                for r in G.build_countdown(frames["call_prediction"], frames["stop_call"]).collect()}
+        minute = lambda m: m - G.ERROR_LOW
+        expected = {("actual", 5): -1, ("actual", 1): 3, ("planned", 5): -2, ("planned", 10): G.ERROR_HIGH}
+        self.assertEqual(set(rows), set(expected))
+        for key, m in expected.items():
+            self.assertEqual((rows[key].line_id, rows[key].predictions, rows[key].error_counts[minute(m)]),
+                             ("T:Line:1", 1, 1))
+        # A prediction that matches a departure twice cannot publish.
+        with tempfile.TemporaryDirectory(prefix="gold-test-countdown-") as temp:
+            root = Path(temp)
+            twice = [prediction("j1", "actual", 5, left)] * 2
+            self.write_silver(root, self.frames(calls, predictions=twice), self.roads())
+            with self.assertRaisesRegex(ValueError, "countdown_accuracy does not reconcile"):
+                G.run(root, DAY, spark=self.spark)
 
     def test_partial_gate_publication_and_rerun(self):
         with tempfile.TemporaryDirectory(prefix="gold-test-") as temp:

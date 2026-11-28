@@ -205,7 +205,7 @@ document.querySelectorAll(".views button").forEach((button) =>
     document
       .querySelectorAll(".views button")
       .forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
-    for (const view of ["network", "segments", "roads"])
+    for (const view of ["network", "segments", "roads", "countdown"])
       $(`#${view}`).hidden = button.dataset.view !== view;
     if (button.dataset.view === "network") map.invalidateSize();
     if (button.dataset.view === "segments") showSegments();
@@ -864,7 +864,7 @@ for (const r of G.conditions)
   modes.set(r[C.mode], (modes.get(r[C.mode]) || 0) + r[C.scored_departures]);
 $("#mode").replaceChildren(
   el("option", { value: "" }, "All modes"),
-  [...modes]
+  ...[...modes]
     .sort((a, b) => b[1] - a[1])
     .map(([m, n]) => el("option", { value: m }, `${m} (${nf.format(n)})`)),
 );
@@ -1104,5 +1104,64 @@ function renderSegmentLists() {
 }
 $("#rank").addEventListener("change", () => { if (segs.length) renderSegmentLists(); });
 
+// ---------- countdown ----------
+const CD = Object.fromEntries(G.countdown_columns.map((c, i) => [c, i]));
+const COUNTDOWN = ["later", "within", "earlier"];
+const cdModes = new Map();
+for (const r of G.countdown)
+  cdModes.set(r[CD.mode], (cdModes.get(r[CD.mode]) || 0) + sum(COUNTDOWN.map((k) => r[CD[k]])));
+$("#cdmode").replaceChildren(
+  el("option", { value: "" }, "All modes"),
+  ...[...cdModes].sort((a, b) => b[1] - a[1]).map(([m]) => el("option", { value: m }, m)),
+);
+$("#cdmode").addEventListener("change", renderCountdown);
+const REFERENCES = [
+  ["actual", "Before it left", "Minutes before the vehicle actually left: the countdown on a display."],
+  ["planned", "Before the timetable time", "Minutes before the aimed time: what a traveller looking it up then saw."],
+];
+
+function renderCountdown() {
+  const mode = $("#cdmode").value;
+  $("#countdowns").replaceChildren(
+    ...REFERENCES.map(([reference, title, note]) => {
+      const leads = {}; // integer keys iterate in ascending order
+      for (const r of G.countdown) {
+        if (r[CD.reference] !== reference || (mode && r[CD.mode] !== mode)) continue;
+        const L = (leads[r[CD.lead_minutes]] ||= { later: 0, within: 0, earlier: 0 });
+        for (const k of COUNTDOWN) L[k] += r[CD[k]];
+      }
+      const rows = Object.entries(leads).map(([lead, L]) => ({ lead, ...L, n: sum(COUNTDOWN.map((k) => L[k])) }));
+      const chart = columns(rows.map((r) => ({
+        label: `${r.lead} min`,
+        value: r.within / r.n,
+        title: `${r.lead} min before: ${pct(r.within / r.n)} left within a minute of the time shown`,
+      })));
+      const head = ["Before", "Departures", "Within a minute", "Left 1+ min earlier", "Left 1+ min later"];
+      return el(
+        "section",
+        { class: "factor" },
+        el("h3", {}, title),
+        el("p", { class: "note" }, `${note} Bars: within a minute.`),
+        chart,
+        el(
+          "table",
+          {},
+          el("thead", {}, el("tr", {}, ...head.map((h) => el("th", {}, h)))),
+          el("tbody", {}, rows.map((r) => el(
+            "tr",
+            {},
+            el("td", {}, `${r.lead} min`),
+            el("td", {}, nf.format(r.n)),
+            el("td", {}, pct(r.within / r.n)),
+            el("td", {}, pct(r.earlier / r.n)),
+            el("td", {}, pct(r.later / r.n)),
+          ))),
+        ),
+      );
+    }),
+  );
+}
+
 intro();
 renderRoads();
+renderCountdown();

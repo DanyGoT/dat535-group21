@@ -1,13 +1,13 @@
 # Gold: scope and future work
 
 The project's primary engineering focus is the reusable [Silver layer](silver.md). The
-scheduled [Gold job](gold-example.md) (`pipeline/gold.py`) delivers six additive analytical tables
+scheduled [Gold job](gold-example.md) (`pipeline/gold.py`) delivers seven additive analytical tables
 every night—punctuality scorecard (#2), stop and segment delay hotspots (#3), observed and
-nearby-stop transfer reliability (#8), and road/weather departure conditions (#4/#5)—consumed by
-the [dashboard](../../dashboard/README.md).
+nearby-stop transfer reliability (#8), road/weather departure conditions (#4/#5) and countdown
+accuracy (#6)—consumed by the [dashboard](../../dashboard/README.md) and the report.
 
 Departure-risk ML (#1), external BigQuery cross-checks, coastal Frost weather, and the remaining
-candidate products (#6, #7, #9) below are **intentionally out of scope** for this project and
+candidate products (#7, #9) below are **intentionally out of scope** for this project and
 documented as future work.
 
 Up: [system overview](../report/overview.md#5-gold-answering-a-question) ·
@@ -22,8 +22,8 @@ Related: [Silver](silver.md#tables), [methodology](methodology.md#gold-serve-a-u
 | 3 | Delay hotspots | **Delivered** (`stop_reliability`, `segment_delay`) | Transit planners | Where and when is delay gained or recovered? |
 | 8 | Transfer reliability | **Delivered** (`transfer_reliability`, `line_stop_delays`) | Journey planner / traveller | Will a connection hold (same hub or nearby stop)? |
 | 4 / 5 | Road & weather conditions | **Delivered** (`departure_conditions`) | Operators, NPRA | Do late departures accompany congestion, incidents or weather? |
+| 6 | Countdown accuracy | **Delivered** (`countdown_accuracy`) | Entur, display teams | How wrong was the departure time shown? |
 | 1 | Departure-risk ML model | **Out of scope (future work)** | Traveller | Will my specific departure be on time? |
-| 6 | Countdown accuracy | **Out of scope (future work)** | Entur, display teams | How wrong was the predicted departure? |
 | 7 | Disruption communication | **Out of scope (future work)** | Customer information | Was a cancellation announced early enough? |
 | 9 | Crowding | **Out of scope (future work)** | Traveller | Will there be a seat? |
 
@@ -150,6 +150,9 @@ distance and source-quality flags constrain interpretation.
 
 ## 6. Countdown accuracy
 
+Delivered as [`countdown_accuracy`](gold-example.md#countdown_accuracy), from Silver's
+`call_prediction`, per line rather than operator (the scorecard carries the operator).
+
 **Consumer.** Entur or information-display maintainers assess countdown quality.
 
 **Output.** Prediction error at 1, 5, 10, 20 and 30 minutes before *actual* departure,
@@ -218,8 +221,8 @@ webcams. Costs are in [DATEX sources](../datex/sources.md#cost-per-day) and
 
 ## Status summary
 
-1. Daily reference archives, Entur/DATEX Bronze and Silver, and the six-table scheduled Gold job
+1. Daily reference archives, Entur/DATEX Bronze and Silver, and the seven-table scheduled Gold job
    are implemented and automated in CI/CD ([Gold contract](gold-example.md)).
 2. Future work (intentionally outside this submission): predictive departure-risk ML (#1),
    per-line weather/incident causal models with MET Frost for ferries, BigQuery external
-   cross-checks, and products #6/#7/#9.
+   cross-checks, and products #7/#9.
