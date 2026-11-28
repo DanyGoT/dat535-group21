@@ -15,7 +15,8 @@ Up: [overview](../report/overview.md) · Related: [Silver](silver.md), [Gold](go
   calls), and on a shared 7.9 GB RAM VM a persistent streaming JVM would permanently consume
   3–4 GB RAM and hold the single Spark lock. Require a named live consumer and dedicated compute
   before adding a streaming Spark path alongside batch Silver.
-- Design failure and manual reruns before tuning speed. Keep landing immutable.
+- Design failure and manual reruns before tuning speed. A person reruns a failed day with
+  `--date`: no catch-up modes, no retention jobs. Keep landing immutable.
 - Profile before tuning. Support changes with row counts, timings, sizes or a Spark profile.
 - Fit the VM's 4 vCPU, 7.9 GB RAM and 38 GB root disk. Follow the
   [storage rules](../system/storage.md#memory).
